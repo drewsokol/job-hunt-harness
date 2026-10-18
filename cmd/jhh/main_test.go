@@ -144,6 +144,33 @@ func TestBinaryHandshake(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsDatabase(t *testing.T) {
+	t.Setenv(datadir.EnvVar, t.TempDir())
+	dir, err := datadir.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dir.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := openStore(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	outR, outW := io.Pipe()
+	var out bytes.Buffer
+	done := make(chan struct{})
+	go func() { io.Copy(&out, outR); close(done) }()
+	code := doctor(context.Background(), outW)
+	outW.Close()
+	<-done
+	if code != 0 || !strings.Contains(out.String(), "schema v1, integrity ok") {
+		t.Errorf("doctor exit %d, output:\n%s", code, out.String())
+	}
+}
+
 func TestCommands(t *testing.T) {
 	t.Setenv(datadir.EnvVar, t.TempDir())
 	tests := []struct {

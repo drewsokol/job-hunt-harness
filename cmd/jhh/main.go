@@ -23,6 +23,7 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/datadir"
 	"github.com/drewsokol/job-hunt-harness/internal/logging"
 	"github.com/drewsokol/job-hunt-harness/internal/mcpserver"
+	"github.com/drewsokol/job-hunt-harness/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -59,7 +60,7 @@ func run(ctx context.Context, args []string, stdin io.ReadCloser, stdout io.Writ
 		fmt.Fprintln(stdout, "jhh", buildinfo.Version())
 		return 0
 	case "doctor":
-		return doctor(stdout)
+		return doctor(ctx, stdout)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -100,6 +101,12 @@ func serveStdio(ctx context.Context, stdin io.ReadCloser, stdout io.WriteCloser,
 	afterStdoutRedirect()
 
 	logger.Info("starting", "mode", "stdio", "version", buildinfo.Version())
+	st, err := openStore(ctx, dir)
+	if err != nil {
+		logger.Error("opening database", "err", err)
+		return 1
+	}
+	defer st.Close()
 	err = mcpserver.New(logger).Run(ctx, &mcp.IOTransport{Reader: stdin, Writer: stdout})
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
 		logger.Error("server stopped", "err", err)
@@ -109,8 +116,13 @@ func serveStdio(ctx context.Context, stdin io.ReadCloser, stdout io.WriteCloser,
 	return 0
 }
 
+// openStore opens the database in dir, migrating it if needed.
+func openStore(ctx context.Context, dir datadir.Dir) (*store.Store, error) {
+	return store.Open(ctx, dir.DB(), store.Options{BackupDir: dir.Backups()})
+}
+
 // doctor checks that jhh can run here and reports where its data lives.
-func doctor(out io.Writer) int {
+func doctor(ctx context.Context, out io.Writer) int {
 	failed := false
 	report := func(ok bool, check, detail string) {
 		status := "ok  "
@@ -140,8 +152,19 @@ func doctor(out io.Writer) int {
 		report(true, "database", dir.DB()+" (not created yet)")
 	} else if err != nil {
 		report(false, "database", err.Error())
+	} else if st, err := openStore(ctx, dir); err != nil {
+		report(false, "database", err.Error())
 	} else {
-		report(true, "database", dir.DB())
+		defer st.Close()
+		version, err := st.SchemaVersion(ctx)
+		if err == nil {
+			err = st.Check(ctx)
+		}
+		if err != nil {
+			report(false, "database", err.Error())
+		} else {
+			report(true, "database", fmt.Sprintf("%s (schema v%d, integrity ok)", dir.DB(), version))
+		}
 	}
 	report(true, "logs", filepath.Join(dir.Logs(), "jhh.log"))
 

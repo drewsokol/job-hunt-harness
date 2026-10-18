@@ -293,17 +293,17 @@ Plain SQL with numbered migrations. No ORM.
 - **The UI converts for display only.** It shows times in the browser's local time zone and converts what you type back to UTC before sending it.
 - Inside jhh (core, store, logs) everything is UTC, with no exceptions.
 
-Every row that can be changed records who changed it (`created_by` / `updated_by`, and the actor on each event): `user`, `system`, or the agent's name. The agent's name comes automatically from the MCP handshake (`clientInfo.name`), so agents never have to say who they are.
+The schema itself is `internal/store/migrations/`; this section is the overview. Every row that can be changed records who changed it (`created_by` / `updated_by`, and the actor on each event): `user`, `system`, or `agent:<name>`. The agent's name comes automatically from the MCP handshake (`clientInfo.name`), so agents never have to say who they are; it is cleaned and length-capped because the client supplies it. Tables are SQLite `STRICT`, and JSON columns are checked with `json_valid`.
 
 ```
-companies      id, name, source, source_config_json, careers_url, enabled, origin(registry|user|agent),
+companies      id, name, source, board_key UNIQUE, source_config_json, careers_url, enabled, origin(registry|user|agent),
                etag, last_fetch_at, last_fetch_ok, last_error, open_postings,
                suspect, suspect_reason
 postings       id ("gh:exampleco:123"), company_id, opening_key, job_id, source, external_id,
                canonical_url, title, location_raw, workplace, locations_json, url, posted_at,
                source_updated_at, pay_raw, employment_type, description, description_html_raw,
                fingerprint, detail_fetched_at, first_seen_at, last_seen_at, closed_at
-jobs           id, number UNIQUE (short, human-friendly: #482), company_id, title,
+jobs           id (AUTOINCREMENT, never reused; doubles as the short number #482), company_id, title,
                workplace, locations_json, pay_raw, pay_ranges_json, url (primary posting),
                description, posted_at, first_seen_at, closed_at, reposted_at,
                origin(feed|manual|agent),
@@ -311,16 +311,18 @@ jobs           id, number UNIQUE (short, human-friendly: #482), company_id, titl
                status, applied_at, applied_unconfirmed, notes, updated_at, updated_by
 screenings     id, job_id, fit(strong|good|stretch|no), reason, gaps, flags_json,
                profile_version, screened_by, screened_at        -- history kept; latest is current
-contacts       id, name, role, company_id NULL, company_name, url, email, notes
+contacts       id, name, title, company_id NULL, company_name, relationship, source,
+               why (who they are and why they matter), profile_url, email, notes
 outreach       id, contact_id, job_id NULL, channel, sent_at, status, follow_up_at, note
 events         id, job_id NULL, outreach_id NULL, kind, at, actor, data_json  -- the timeline
-profile        version PK, markdown, change_summary, created_at, created_by(user|<agent name>)
-resume         version PK, text, source(pasted|file), created_at, created_by
-filters        version PK, filters_json, rationale, effect_json, active,
-               created_at, created_by                           -- full history; one active
-memories       id, kind, content, basis(user_said|inferred), evidence, status,
-               supersedes_id, created_by, created_at, updated_at
-memories_fts   FTS5 index over memories.content
+profile_versions  version PK, markdown, change_summary, created_at, created_by
+resume_versions   version PK, text, source(pasted|file), created_at, created_by
+filter_versions   version PK, filters, rationale, effect, active,
+                  created_at, created_by                        -- full history; at most one active
+memories       id, kind, content, basis(user_said|inferred), evidence, evidence_job_id NULL,
+               status, supersedes_id, created_*, updated_*
+               -- CHECK: a memory with evidence_job_id must be 'inferred'
+memories_fts   FTS5 index over memories.content (after the MVP)
 settings       key, value                                       -- ask_percentile=0.85, port, etc.
 fetch_runs     id, started_at, finished_at, companies, postings, new_jobs, passed, errors_json
 content_flags  id, posting_id, detector(rule:<name>|agent:<name>), kind(canary|hostile|hidden_text|unclear),
