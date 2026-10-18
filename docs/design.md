@@ -452,7 +452,7 @@ The summary strip from the reference (to review, applications, applied in the la
 | Logging | `log/slog` to stderr and a log file in the data dir | Stdout belongs to the MCP protocol (see section 12). |
 | Distribution | Release binaries; `go install …/cmd/jhh@latest`; Homebrew, Scoop and winget later | `claude mcp add jhh -- jhh` and nothing else. |
 | Data dir | `%LocalAppData%\jhh`, `~/Library/Application Support/jhh`, `$XDG_DATA_HOME/jhh`; override with `JHH_DATA_DIR` | Data stays out of the repo and out of the current working directory. |
-| Quality | `gofmt`, `go vet`, `staticcheck`; standard `testing`, with `httptest` servers serving synthetic feeds from `testdata/` | No real postings or people in tests. |
+| Quality | `gofmt`, `go vet`, `staticcheck` (run with `go tool staticcheck`); standard `testing`, with `httptest` servers serving synthetic feeds from `testdata/` | No real postings or people in tests. |
 
 **Security baseline for the localhost server:**
 - Bind to `127.0.0.1` only.
@@ -620,7 +620,7 @@ The normal test run never touches the network, and no real people or postings ap
 
 | Milestone | Delivers | What you can do afterwards |
 |---|---|---|
-| **M0 Scaffold** | `go.mod`, `cmd/jhh` with `version` and `doctor` stubs, slog setup and the stdout rule, data dir resolution with file permissions, UTC helpers, Makefile or `justfile` for fmt, vet and test. Check the MCP Go SDK's version and features. | — |
+| **M0 Scaffold** | `go.mod`, `cmd/jhh` with `version` and `doctor`, slog setup (UTC timestamps) and the stdout rule, data dir resolution with file permissions, UTC helpers, staticcheck through the `tool` directive in `go.mod` (no Makefile, so the same commands work on every OS). MCP Go SDK v1.8.0. | — |
 | **M1 Store** | Schema and migrations (locking and backup), models, actor recording, store package with tests | — |
 | **M2 Fetch** | Source interface, conformance suite, and the Greenhouse, Lever and Ashby sources; normalization; untrusted cleaning and injection rules; ETag caching; two-stage detail fetching; the dedupe ladder; closed-posting detection and the suspect-feed guard; `jhh refresh` | Fetch real jobs from the command line |
 | **M3 Filter** | Filters schema and validation, prefilter with reasons, boilerplate trimming, `jhh candidates` | The reference script, rebuilt properly |

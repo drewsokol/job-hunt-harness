@@ -1,0 +1,162 @@
+// Command jhh is Job Hunt Harness: an MCP server that turns your AI agent
+// into a job search assistant, with a local dashboard.
+//
+// Usage:
+//
+//	jhh            run as an MCP server over stdio (what your agent launches)
+//	jhh doctor     check the installation and data directory
+//	jhh version    print the version
+//	jhh help       show this help
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+
+	"github.com/drewsokol/job-hunt-harness/internal/buildinfo"
+	"github.com/drewsokol/job-hunt-harness/internal/datadir"
+	"github.com/drewsokol/job-hunt-harness/internal/logging"
+	"github.com/drewsokol/job-hunt-harness/internal/mcpserver"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const usage = `jhh: Job Hunt Harness
+
+Usage:
+  jhh            run as an MCP server over stdio (what your agent launches)
+  jhh doctor     check the installation and data directory
+  jhh version    print the version
+  jhh help       show this help
+
+Register jhh with your agent once, for example in Claude Code:
+  claude mcp add jhh -- jhh
+
+Environment:
+  JHH_DATA_DIR   where jhh keeps its data (default: a per-user directory)
+  JHH_LOG_LEVEL  debug, info, warn or error (default: info)
+`
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
+}
+
+// run is main with its inputs passed in, so tests can drive it.
+func run(ctx context.Context, args []string, stdin io.ReadCloser, stdout io.WriteCloser, stderr *os.File) int {
+	if len(args) == 0 {
+		return serveStdio(ctx, stdin, stdout, stderr)
+	}
+	switch args[0] {
+	case "version", "--version":
+		fmt.Fprintln(stdout, "jhh", buildinfo.Version())
+		return 0
+	case "doctor":
+		return doctor(stdout)
+	case "help", "-h", "--help":
+		fmt.Fprint(stdout, usage)
+		return 0
+	default:
+		fmt.Fprintf(stderr, "jhh: unknown command %q\n\n%s", args[0], usage)
+		return 2
+	}
+}
+
+// afterStdoutRedirect runs once os.Stdout points at stderr. Tests replace it
+// to print where a stray print would, proving the protocol stream stays clean.
+var afterStdoutRedirect = func() {}
+
+// serveStdio runs the MCP server on stdin and stdout until the client
+// disconnects or the process is interrupted.
+func serveStdio(ctx context.Context, stdin io.ReadCloser, stdout io.WriteCloser, stderr *os.File) int {
+	dir, err := datadir.Resolve()
+	if err == nil {
+		err = dir.Ensure()
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "jhh:", err)
+		return 1
+	}
+	logger, closeLog, err := logging.New(dir.Logs(), stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, "jhh:", err)
+		return 1
+	}
+	defer closeLog.Close()
+
+	// stdout belongs to the MCP protocol. Point os.Stdout at stderr, so a
+	// stray print anywhere in jhh or its dependencies ends up in the logs
+	// instead of corrupting the protocol stream.
+	prevStdout := os.Stdout
+	os.Stdout = stderr
+	defer func() { os.Stdout = prevStdout }()
+	afterStdoutRedirect()
+
+	logger.Info("starting", "mode", "stdio", "version", buildinfo.Version())
+	err = mcpserver.New(logger).Run(ctx, &mcp.IOTransport{Reader: stdin, Writer: stdout})
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
+		logger.Error("server stopped", "err", err)
+		return 1
+	}
+	logger.Info("stopped")
+	return 0
+}
+
+// doctor checks that jhh can run here and reports where its data lives.
+func doctor(out io.Writer) int {
+	failed := false
+	report := func(ok bool, check, detail string) {
+		status := "ok  "
+		if !ok {
+			status = "FAIL"
+			failed = true
+		}
+		fmt.Fprintf(out, "%s  %-10s %s\n", status, check, detail)
+	}
+
+	report(true, "version", buildinfo.Version())
+	dir, err := datadir.Resolve()
+	if err != nil {
+		report(false, "data dir", err.Error())
+		return 1
+	}
+	if err := dir.Ensure(); err != nil {
+		report(false, "data dir", err.Error())
+		return 1
+	}
+	if err := checkWritable(dir.Root); err != nil {
+		report(false, "data dir", fmt.Sprintf("%s is not writable: %v", dir.Root, err))
+	} else {
+		report(true, "data dir", dir.Root)
+	}
+	if _, err := os.Stat(dir.DB()); errors.Is(err, os.ErrNotExist) {
+		report(true, "database", dir.DB()+" (not created yet)")
+	} else if err != nil {
+		report(false, "database", err.Error())
+	} else {
+		report(true, "database", dir.DB())
+	}
+	report(true, "logs", filepath.Join(dir.Logs(), "jhh.log"))
+
+	if failed {
+		return 1
+	}
+	return 0
+}
+
+func checkWritable(dir string) error {
+	f, err := os.CreateTemp(dir, ".doctor-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	f.Close()
+	return os.Remove(name)
+}

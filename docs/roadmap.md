@@ -6,7 +6,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 
 ## MVP (M0–M5)
 
-- [ ] M0 Scaffold
+- [x] M0 Scaffold
 - [ ] M1 Store
 - [ ] M2 Fetch
 - [ ] M3 Filter

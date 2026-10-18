@@ -13,3 +13,11 @@ __pycache__/
 
 # Node
 node_modules/
+
+# Go build output
+/jhh
+/jhh.exe
+/dist/
+*.test
+coverage.out
+tmp-data/
