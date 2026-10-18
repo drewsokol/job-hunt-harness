@@ -1,0 +1,15 @@
+# Local user data — never commit
+data/
+*.db
+*.sqlite
+.env
+profile*.md
+candidates.json
+seen.json
+
+# Python
+__pycache__/
+.venv/
+
+# Node
+node_modules/
