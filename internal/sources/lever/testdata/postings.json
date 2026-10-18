@@ -1,0 +1,36 @@
+[
+  {
+    "id": "0b1c2d3e-0000-4000-8000-000000000001",
+    "text": "Senior Platform Engineer",
+    "hostedUrl": "https://jobs.lever.co/exampleco/0b1c2d3e-0000-4000-8000-000000000001",
+    "applyUrl": "https://jobs.lever.co/exampleco/0b1c2d3e-0000-4000-8000-000000000001/apply",
+    "createdAt": 1786727037382,
+    "country": "US",
+    "workplaceType": "remote",
+    "categories": {
+      "commitment": "Full-time",
+      "location": "Remote - US",
+      "allLocations": ["Remote - US", "Denver, CO"],
+      "team": "Engineering"
+    },
+    "description": "<div>Exampleco makes made-up software for testing.</div>",
+    "lists": [
+      {"text": "What you will do", "content": "<li>Run the platform</li><li>Mentor engineers</li>"},
+      {"text": "Pay & benefits", "content": "<li>Health insurance</li>"}
+    ],
+    "additional": "<div>Exampleco is an equal opportunity employer.</div>",
+    "salaryRange": {"min": 160000, "max": 200000, "currency": "USD", "interval": "per-year-salary"},
+    "salaryDescriptionPlain": "$160,000 - $200,000 a year"
+  },
+  {
+    "id": "0b1c2d3e-0000-4000-8000-000000000002",
+    "text": "Support Specialist",
+    "hostedUrl": "https://jobs.lever.co/exampleco/0b1c2d3e-0000-4000-8000-000000000002",
+    "createdAt": 1786727037382,
+    "country": "GB",
+    "workplaceType": "unspecified",
+    "categories": {"commitment": "Part-time", "location": "London"},
+    "description": "<div>Help our customers.</div>",
+    "lists": []
+  }
+]

@@ -37,6 +37,14 @@ Status: the design is agreed and the MVP build is starting. **Read `docs/design.
 - **All three feeds support ETag / 304**, so unchanged boards cost nothing to re-check.
 - **Pay ranges come in many formats** (`$158,000 — $248,000`, `$231K – $340K`, `$156.6K`, several ranges for different locations, non-USD). Parse defensively and never guess.
 - **Workday and custom career sites** have no simple public feed; the agent can add those jobs through `add_jobs`.
+- **Injection rules must match text addressed to an AI, not text about AI.** Listings from AI companies say "as an AI Architect" and "system prompt" all the time. Check rule changes against a live refresh of the starter list, and add any false positive as a test in `internal/untrusted`.
+- **Hidden text stays out of the plain description.** It is kept in the raw HTML and the flag excerpt for review, so the agent screens what a human reader sees.
+- **Never write invisible characters into source files.** Build them from code points (`string(rune(0x200b))`) so the repo itself is free of them.
+
+## Working in this repo
+
+- Line endings are LF (`.gitattributes`). Editors or scripts on Windows that write CRLF will show every line as changed.
+- Tests never touch the network. Sources are tested against made-up fixtures through `internal/sources/conformance`. For a live check, run `jhh refresh` with `JHH_DATA_DIR` pointing at a scratch directory, never at real data.
 
 ## Privacy rules for this repo
 

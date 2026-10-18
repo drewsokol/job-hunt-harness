@@ -34,6 +34,7 @@ CREATE TABLE jobs (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id          INTEGER NOT NULL REFERENCES companies (id),
     title               TEXT    NOT NULL,
+    title_key           TEXT    NOT NULL DEFAULT '',  -- dedupe.TitleKey(title)
     workplace           TEXT    NOT NULL DEFAULT 'unknown' CHECK (workplace IN ('remote', 'hybrid', 'onsite', 'unknown')),
     locations           TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(locations)),
     pay_raw             TEXT,
@@ -63,7 +64,7 @@ CREATE TABLE jobs (
 ) STRICT;
 
 CREATE INDEX jobs_status ON jobs (status);
-CREATE INDEX jobs_company ON jobs (company_id);
+CREATE INDEX jobs_company ON jobs (company_id, title_key);
 
 -- A posting is one listing on one board. Postings are grouped into jobs by the
 -- dedupe ladder (docs/decisions/0003); job_id is that link, never a merge.
@@ -77,6 +78,7 @@ CREATE TABLE postings (
     canonical_url        TEXT,
     fingerprint          TEXT,
     title                TEXT    NOT NULL,
+    title_key            TEXT    NOT NULL DEFAULT '',
     location_raw         TEXT,
     workplace            TEXT    NOT NULL DEFAULT 'unknown' CHECK (workplace IN ('remote', 'hybrid', 'onsite', 'unknown')),
     locations            TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(locations)),
@@ -84,6 +86,7 @@ CREATE TABLE postings (
     posted_at            TEXT,
     source_updated_at    TEXT,
     pay_raw              TEXT,
+    pay_ranges           TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(pay_ranges)),
     employment_type      TEXT,
     description          TEXT,
     description_html_raw TEXT,
@@ -97,7 +100,7 @@ CREATE INDEX postings_job ON postings (job_id);
 CREATE INDEX postings_company ON postings (company_id);
 CREATE INDEX postings_opening ON postings (company_id, opening_key) WHERE opening_key IS NOT NULL;
 CREATE INDEX postings_url ON postings (canonical_url) WHERE canonical_url IS NOT NULL;
-CREATE INDEX postings_fingerprint ON postings (company_id, fingerprint) WHERE fingerprint IS NOT NULL;
+CREATE INDEX postings_fingerprint ON postings (company_id, title_key, fingerprint) WHERE fingerprint IS NOT NULL;
 
 CREATE TABLE screenings (
     id              INTEGER PRIMARY KEY,
@@ -223,6 +226,8 @@ CREATE TABLE content_flags (
 ) STRICT;
 
 CREATE INDEX content_flags_open ON content_flags (posting_id) WHERE status = 'open';
+-- Refreshing an unchanged description must not flag it again.
+CREATE UNIQUE INDEX content_flags_once ON content_flags (posting_id, detector, kind, excerpt);
 
 CREATE TABLE settings (
     key        TEXT PRIMARY KEY,
@@ -238,6 +243,7 @@ CREATE TABLE fetch_runs (
     companies   INTEGER NOT NULL DEFAULT 0,
     postings    INTEGER NOT NULL DEFAULT 0,
     new_jobs    INTEGER NOT NULL DEFAULT 0,
+    closed_jobs INTEGER NOT NULL DEFAULT 0,
     passed      INTEGER NOT NULL DEFAULT 0,
     errors      TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(errors))
 ) STRICT;

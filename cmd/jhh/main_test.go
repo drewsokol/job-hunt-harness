@@ -183,6 +183,13 @@ func TestCommands(t *testing.T) {
 		{args: []string{"help"}, code: 0, inStdout: "claude mcp add jhh -- jhh"},
 		{args: []string{"doctor"}, code: 0, inStdout: "not created yet"},
 		{args: []string{"frobnicate"}, code: 2, inStderr: `unknown command "frobnicate"`},
+		// Probing a URL needs no network; probing a slug does, so only its
+		// validation is tested here.
+		{args: []string{"probe", "https://jobs.lever.co/exampleco/0b1c2d3e-0000-4000-8000-000000000001"}, code: 0, inStdout: "lever posting 0b1c2d3e-0000-4000-8000-000000000001 on board exampleco"},
+		{args: []string{"probe", "https://example.com/careers/1"}, code: 1, inStdout: "No supported board"},
+		{args: []string{"probe", "../admin"}, code: 2, inStderr: "board slug"},
+		{args: []string{"probe"}, code: 2, inStderr: "usage: jhh probe"},
+		{args: []string{"refresh", "--company", "nobody"}, code: 1, inStderr: `no company named "nobody"`},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {

@@ -4,6 +4,8 @@
 // Usage:
 //
 //	jhh            run as an MCP server over stdio (what your agent launches)
+//	jhh refresh    fetch job boards now
+//	jhh probe      find which job board a company uses
 //	jhh doctor     check the installation and data directory
 //	jhh version    print the version
 //	jhh help       show this help
@@ -31,6 +33,8 @@ const usage = `jhh: Job Hunt Harness
 
 Usage:
   jhh            run as an MCP server over stdio (what your agent launches)
+  jhh refresh    fetch job boards now [--company NAME ...]
+  jhh probe      find which job board a company uses: jhh probe <slug or posting URL>
   jhh doctor     check the installation and data directory
   jhh version    print the version
   jhh help       show this help
@@ -61,6 +65,10 @@ func run(ctx context.Context, args []string, stdin io.ReadCloser, stdout io.Writ
 		return 0
 	case "doctor":
 		return doctor(ctx, stdout)
+	case "refresh":
+		return refresh(ctx, args[1:], stdout, stderr)
+	case "probe":
+		return probe(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0

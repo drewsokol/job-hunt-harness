@@ -8,7 +8,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 
 - [x] M0 Scaffold
 - [x] M1 Store
-- [ ] M2 Fetch
+- [x] M2 Fetch
 - [ ] M3 Filter
 - [ ] M4 MCP (start using it day to day)
 - [ ] M5 Window (MVP complete)

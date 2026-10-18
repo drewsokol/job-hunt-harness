@@ -1,0 +1,12 @@
+{
+  "id": 1001,
+  "internal_job_id": 9001,
+  "title": "Senior Backend Engineer",
+  "absolute_url": "https://job-boards.greenhouse.io/exampleco/jobs/1001",
+  "updated_at": "2026-10-15T15:24:46-04:00",
+  "first_published": "2026-10-02T11:31:50-04:00",
+  "location": {"name": "San Francisco, CA"},
+  "content": "&lt;p&gt;Exampleco makes made-up software for testing.&lt;/p&gt;&lt;h3&gt;What you will do&lt;/h3&gt;&lt;ul&gt;&lt;li&gt;Build services in Go&lt;/li&gt;&lt;li&gt;Own reliability&lt;/li&gt;&lt;/ul&gt;",
+  "offices": [{"name": "San Francisco, CA", "location": "San Francisco, CA"}],
+  "pay_input_ranges": [{"min_cents": 18000000, "max_cents": 22000000, "currency_type": "USD", "title": "Annual base salary range:"}]
+}

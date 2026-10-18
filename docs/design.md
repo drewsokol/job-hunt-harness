@@ -57,31 +57,34 @@ The reference scripts already proved the loop works: about 12k roles fetched, ab
 
 ```go
 type Source interface {
-    Name() string                                                    // "greenhouse"
+    Name() string    // "greenhouse"
+    Prefix() string  // "gh", used in posting ids: "gh:exampleco:123"
     // List returns every open posting on the board. When etag matches the
     // board's current version, it returns NotModified and no postings.
-    List(ctx context.Context, c Company, etag string) (ListResult, error)
-    Probe(ctx context.Context, slug string) (jobs int, err error)    // 0 if no board
-    MatchURL(u *url.URL) (PostingRef, bool)                          // for add_jobs and dedupe
+    List(ctx context.Context, b Board, etag string) (ListResult, error)
+    Probe(ctx context.Context, slug string) (postings int, err error) // ErrBoardNotFound if there is no board
+    MatchURL(u *url.URL) (PostingRef, bool)                           // for add_jobs and dedupe
 }
 
 // Detailer is implemented by sources whose List omits descriptions
-// (Greenhouse). Refresh fetches details only for postings that pass stage 1.
+// (Greenhouse). Refresh asks for details only for postings worth it.
 type Detailer interface {
-    Detail(ctx context.Context, c Company, externalID string) (Posting, error)
+    Detail(ctx context.Context, b Board, externalID string) (Posting, error)
 }
 
 type ListResult struct {
-    Postings    []Posting // normalized; Partial is true if descriptions are missing
+    Postings    []Posting // Partial is true if descriptions are missing
     NotModified bool
     ETag        string
 }
 ```
 
-Each source returns `Posting` values that are already normalized. Each source is also responsible for its own quirks:
-- **Ashby**: `isRemote` is true for hybrid roles. Treat Hybrid and OnSite `workplaceType` as not remote.
-- **Greenhouse**: `absolute_url` often points at the company's own careers site. Keep it; it is the official apply link.
-- **Lever**: pay comes from `salaryRange`. Commitment (full-time, contract) comes from `categories`.
+A source only maps its board's fields onto `Posting` (including structured pay, when the board has it) and handles that board's quirks:
+- **Ashby**: `isRemote` is true for hybrid roles. `workplaceType` wins when present. Unlisted postings (`isListed: false`) are skipped. Pay comes from the compensation tiers, labelled by tier, with the summary as a fallback.
+- **Greenhouse**: `absolute_url` often points at the company's own careers site. Keep it; it is the official apply link. `content` arrives entity-escaped. Pay comes from `pay_input_ranges`, where the title says whether a range is hourly or annual.
+- **Lever**: pay comes from `salaryRange`. Commitment (full-time, contract) comes from `categories`. The description is split across `description`, `lists` and `additional`, and is joined in the order Lever's own page shows it.
+
+Everything shared happens afterwards, in one place (`core.Normalize`): cleaning untrusted text, injection detection, location and pay parsing, and the dedupe keys. A new source never re-implements any of it.
 
 Sources are registered in a map, the same as `SOURCES` in the reference code. Each company stores its source settings as JSON (`source_config`), not a single `slug` column. Greenhouse, Lever and Ashby need only a board slug, but Workday will need a tenant, site and host, and other boards will need other fields.
 
@@ -108,10 +111,10 @@ None of the three can apply our filters on its side, so the savings come from ca
 
 ### Normalization (shared by all sources)
 
-- **Location** → `workplace` (`remote` | `hybrid` | `onsite` | `unknown`) and a list of `{city, region, country}` guesses. A shipped vocabulary of countries, regions and major cities replaces the hard-coded `NON_US` regex. Location text is also pulled from titles ("Staff AI Engineer | Canada | Remote").
-- **Pay** → a list of `{min, max, currency, period, label}` ranges, plus the raw text. The parser handles `$158,000 — $248,000`, `$231K – $340K`, `$156.6K`, several ranges for different locations, and non-USD amounts. If parsing fails, it keeps the raw text and leaves the numbers empty. It never guesses.
-- **Text**: the reference `strip_html`. The full text is stored, and tools truncate on output.
-- **Boilerplate trimming for agents**: before a description goes to the agent, sections recognized by their headings and common phrases (equal-opportunity statements, benefits lists, "about us", privacy notices) are dropped. About 90 candidates × 5,000 characters is roughly 110k tokens per screening run, so this matters to anyone paying per token. My guess is 30–50% savings, but it should be measured. The UI always shows the full text.
+- **Location** → `workplace` (`remote` | `hybrid` | `onsite` | `unknown`) and a list of `{city, region, country}` places. A small vocabulary in Go (`normalize/places.go`: countries, regions, US states, Canadian provinces, common job cities) replaces the hard-coded `NON_US` regex. It handles "City, ST", "City, Washington", "Dublin, IE", lists of cities, `|`, `;` and `•` separators, and location text in titles ("Staff AI Engineer | Canada | Remote"). Two-letter codes stand alone only for US and UK, because "IN", "OR" and "CA" are ambiguous. The board's own workplace and country fields win when present. Workplace is `unknown` when nothing says: a city alone doesn't tell you whether remote work is possible. On the 2026-10-18 starter list, 98% of 12,234 postings got at least one recognized place; the rest keep their raw text.
+- **Pay** → a list of `{min, max, currency, period, label}` ranges, plus the raw text. A board's structured pay is used first, then the pay field, then the description. The parser handles `$158,000 — $248,000`, `$231K – $340K`, `$120 - 150K`, `USD 120,000 - 150,000`, `€80.000 - €95.000`, `$60/hr - $80/hr`, and labelled ranges for different locations. Single figures (`$156.6K`) are only read from short pay fields, because descriptions mention funding and stipends. Amounts that can't be pay are ignored. If parsing fails, it keeps the raw text and leaves the numbers empty. It never guesses.
+- **Text**: HTML is reduced to the text a reader sees. Scripts, styles, comments and elements hidden with CSS or the `hidden` attribute are dropped (detection reports hidden content separately, and the raw HTML is kept for review). The full text is stored, and tools truncate on output.
+- **Boilerplate trimming for agents** (M4, where descriptions are sent to agents): before a description goes to the agent, sections recognized by their headings and common phrases (equal-opportunity statements, benefits lists, "about us", privacy notices) are dropped. About 90 candidates × 5,000 characters is roughly 110k tokens per screening run, so this matters to anyone paying per token. My guess is 30–50% savings, but it should be measured. The UI always shows the full text.
 
 ### Untrusted content and prompt injection
 
@@ -125,7 +128,8 @@ Everything that comes from a job listing (title, location, description, pay text
   ```
   The server instructions and every playbook tell the agent that text inside `untrusted` is data to evaluate, never instructions to follow.
 - **Cleaned, not rewritten.** Zero-width and other invisible characters and HTML comments are removed, and the HTML is reduced to plain text. The wording is never changed, so what you review is what the company wrote.
-- **Detection is rule-based (no AI in the server).** It runs on the raw HTML, before stripping, so hidden text is still visible to the rules. It looks for text addressed to an AI ("if you are an AI", "ignore previous instructions", "include the word …"), hidden text (`display:none`, zero font size, text the same colour as the background), and suspicious markup. The agent can also report what it notices while screening, with `report_injection`.
+- **Detection is rule-based (no AI in the server).** It runs on the raw HTML, before stripping, so hidden text is still visible to the rules. It looks for text addressed to an AI ("if you are an AI", "ignore previous instructions", "include the word …"), hidden text (`display:none`, zero font size, text the same colour as the background), comments addressed to an AI, and ASCII smuggled in invisible Unicode tag characters. The agent can also report what it notices while screening, with `report_injection`.
+- **Rules must match text addressed to an AI, not text about AI.** Many companies in the starter list build AI products, so their listings say "as an AI Architect", "system prompt" and "how an AI agent should be evaluated". A first version of the rules flagged 74 of 12,234 live postings, all wrongly; the current rules flag none of them. Those phrasings are kept as regression tests. A flag that fires on ordinary listings would teach people to ignore flags.
 - **Flagged for review, not treated as bad automatically.** Not every instruction aimed at AI is hostile. A company asking AI-written applications to include a codeword is defending itself. Each finding records an excerpt and a kind:
   - `canary`: an AI-detection instruction. This is useful to know about. The job is shown normally with a note: "This posting checks for AI-written applications."
   - `hostile`: tries to change ratings, call tools, or get data out.
@@ -168,6 +172,8 @@ Grouping is a link between rows, not a merge, so **merge** and **split** are ava
   - For a `Detailer` source (Greenhouse), descriptions are fetched only for postings that pass stage 1 and are new or have a changed `updated_at`.
   - Stage 2 (description keywords, pay found in the text) runs on those postings only.
   - Lever and Ashby send descriptions anyway, so both stages run on that one response.
+  - Until M3 adds stage 1, no Greenhouse details are fetched: Greenhouse jobs have list fields only, and are grouped by `internal_job_id`.
+- A job's listing fields are derived from its postings: places and pay are the union over its open postings, the workplace is the most flexible one, and the description is the newest. User fields (status, notes, applied date) are never touched by a refresh.
 - Upserts postings and sets `first_seen_at` and `last_seen_at`. When a posting is missing from a feed that fetched successfully, it is marked **closed**. A 304 counts as a successful fetch, so nothing gets marked closed by mistake.
 - **Guard against suspect feeds.** If a board returns zero postings, or more than half fewer than last time, nothing is closed. The company is marked `suspect` with the reason, and the agent and the UI show it. This happens when a company changes job boards or a feed glitches, and without the guard every job you track there would show as closed.
 - Each company's results are committed in their own transaction, so a refresh that gets interrupted (for example, the agent session ends) leaves consistent data behind. The UI shows "posting closed" on roles you are reviewing or have applied to, which is useful and new.
@@ -300,10 +306,10 @@ companies      id, name, source, board_key UNIQUE, source_config_json, careers_u
                etag, last_fetch_at, last_fetch_ok, last_error, open_postings,
                suspect, suspect_reason
 postings       id ("gh:exampleco:123"), company_id, opening_key, job_id, source, external_id,
-               canonical_url, title, location_raw, workplace, locations_json, url, posted_at,
-               source_updated_at, pay_raw, employment_type, description, description_html_raw,
+               canonical_url, title, title_key, location_raw, workplace, locations_json, url, posted_at,
+               source_updated_at, pay_raw, pay_ranges_json, employment_type, description, description_html_raw,
                fingerprint, detail_fetched_at, first_seen_at, last_seen_at, closed_at
-jobs           id (AUTOINCREMENT, never reused; doubles as the short number #482), company_id, title,
+jobs           id (AUTOINCREMENT, never reused; doubles as the short number #482), company_id, title, title_key,
                workplace, locations_json, pay_raw, pay_ranges_json, url (primary posting),
                description, posted_at, first_seen_at, closed_at, reposted_at,
                origin(feed|manual|agent),
@@ -481,7 +487,7 @@ internal/
   sources/               # source.go (interfaces, registry), conformance/ (shared suite), greenhouse/, lever/, ashby/
   untrusted/             # cleaning, injection rules, the untrusted envelope used in tool output
   dedupe/                # identity ladder, fingerprints, URL canonicalization
-  normalize/             # location, pay, text; vocab/*.json (embedded)
+  normalize/             # location, pay, text; places.go (vocabulary)
   store/                 # SQLite open and pragmas, migrations/*.sql (embedded), queries by area
   mcpserver/             # tools, prompts, resources, server instructions
   web/                   # HTTP server, JSON API, SSE, Origin/Host checks; static/ (embedded)
@@ -624,7 +630,7 @@ The normal test run never touches the network, and no real people or postings ap
 |---|---|---|
 | **M0 Scaffold** | `go.mod`, `cmd/jhh` with `version` and `doctor`, slog setup (UTC timestamps) and the stdout rule, data dir resolution with file permissions, UTC helpers, staticcheck through the `tool` directive in `go.mod` (no Makefile, so the same commands work on every OS). MCP Go SDK v1.8.0. | — |
 | **M1 Store** | Schema and migrations (locking and backup), models, actor recording, store package with tests | — |
-| **M2 Fetch** | Source interface, conformance suite, and the Greenhouse, Lever and Ashby sources; normalization; untrusted cleaning and injection rules; ETag caching; two-stage detail fetching; the dedupe ladder; closed-posting detection and the suspect-feed guard; `jhh refresh` | Fetch real jobs from the command line |
+| **M2 Fetch** | Source interface, conformance suite, and the Greenhouse, Lever and Ashby sources; normalization; untrusted cleaning and injection rules; ETag caching; two-stage detail fetching (the hook; M3 connects it to stage 1); the dedupe ladder; closed-posting detection and the suspect-feed guard; seeding the starter companies; `jhh refresh` and `jhh probe` | Fetch real jobs from the command line |
 | **M3 Filter** | Filters schema and validation, prefilter with reasons, boilerplate trimming, `jhh candidates` | The reference script, rebuilt properly |
 | **M4 MCP** | The MVP tools from section 8, including `add_company` probing, `add_jobs` and `whats_new`; the untrusted envelope; the `initialize` and `screen_new_jobs` playbooks; server instructions | **Use it daily from Claude Code.** You start using it yourself here. |
 | **M5 Window** | Tracker UI ported onto the JSON API, with the session token, CSP and external JS; manual add; keyboard triage and undo; content-flag review; read-only Profile page; live updates through `data_version` and SSE; `open_dashboard` and port handoff | Triage in the browser. **The MVP is complete.** |

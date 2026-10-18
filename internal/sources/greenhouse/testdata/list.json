@@ -1,0 +1,32 @@
+{
+  "jobs": [
+    {
+      "id": 1001,
+      "internal_job_id": 9001,
+      "title": "Senior Backend Engineer",
+      "absolute_url": "https://job-boards.greenhouse.io/exampleco/jobs/1001",
+      "updated_at": "2026-10-15T15:24:46-04:00",
+      "first_published": "2026-10-02T11:31:50-04:00",
+      "location": {"name": "San Francisco, CA"}
+    },
+    {
+      "id": 1002,
+      "internal_job_id": 9001,
+      "title": "Senior Backend Engineer",
+      "absolute_url": "https://job-boards.greenhouse.io/exampleco/jobs/1002",
+      "updated_at": "2026-10-15T15:24:46-04:00",
+      "first_published": "2026-10-02T11:31:50-04:00",
+      "location": {"name": "New York, NY"}
+    },
+    {
+      "id": 1003,
+      "internal_job_id": 9002,
+      "title": "Staff AI Engineer | Canada | Remote",
+      "absolute_url": "https://careers.exampleco.example/open-roles/1003?gh_jid=1003",
+      "updated_at": "2026-10-16T09:00:00Z",
+      "first_published": "2026-10-16T09:00:00Z",
+      "location": {"name": "Remote"}
+    }
+  ],
+  "meta": {"total": 3}
+}
