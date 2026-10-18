@@ -20,7 +20,7 @@ That flow worked well: fetch about 12k roles, prefilter to about 90, have the ag
 - **No "log in with Claude."** Anthropic doesn't let third-party apps offer Claude.ai login or use people's subscriptions. Products use API keys. Verify against the current Agent SDK and consumer terms before relying on anything here.
 - **Runs locally.** One process, SQLite, a web UI on localhost, MCP over stdio and/or streamable HTTP. No hosted service, so the project never holds anyone's resume, salary or job search data.
 - **Company feeds only.** No LinkedIn scraping.
-- **Open source eventually.** Keep the repo private (no public remote) until the owner says otherwise.
+- **Open source, built in public.** The owner plans to publish the repo now, so write code, commits and docs as public from day one.
 
 ## Proposed architecture
 
