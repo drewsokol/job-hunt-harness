@@ -54,6 +54,11 @@ func TestParseLocation(t *testing.T) {
 		{name: "placeholder", raw: "N/A", wantWorkplace: Unknown},
 		{name: "select locations", raw: "Remote - US: Select locations", wantWorkplace: Remote, wantPlaces: []Place{country("US")}},
 		{name: "remote position", raw: "Remote Position", wantWorkplace: Remote},
+		{
+			name: "office names", raw: "San Francisco HQ | Seattle Office | New York City Office", wantWorkplace: Unknown,
+			wantPlaces: []Place{us("San Francisco", "CA"), us("Seattle", "WA"), us("New York", "NY")},
+		},
+		{name: "in office stays onsite", raw: "In-office - Austin", wantWorkplace: Onsite, wantPlaces: []Place{us("Austin", "TX")}},
 
 		// Titles
 		{

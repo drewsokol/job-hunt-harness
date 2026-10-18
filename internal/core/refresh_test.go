@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 )
@@ -22,7 +23,11 @@ type fakeSource struct {
 	boards  map[string][]sources.Posting
 	version map[string]int
 	fail    map[string]error
-	details int
+	// detailFail fails every detail request; complete makes listings
+	// include descriptions, like Lever and Ashby.
+	detailFail error
+	complete   bool
+	details    int
 }
 
 func newFake() *fakeSource {
@@ -55,7 +60,9 @@ func (f *fakeSource) List(_ context.Context, b sources.Board, etag string) (sour
 	}
 	out := make([]sources.Posting, len(ps))
 	for i, p := range ps {
-		p.DescriptionHTML, p.Partial = "", true
+		if !f.complete {
+			p.DescriptionHTML, p.Partial = "", true
+		}
 		out[i] = p
 	}
 	return sources.ListResult{Postings: out, ETag: tag}, nil
@@ -65,6 +72,9 @@ func (f *fakeSource) Detail(_ context.Context, b sources.Board, id string) (sour
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.details++
+	if f.detailFail != nil {
+		return sources.Posting{}, f.detailFail
+	}
 	for _, p := range f.boards[b.Slug] {
 		if p.ExternalID == id {
 			return p, nil
@@ -83,11 +93,10 @@ func (f *fakeSource) MatchURL(*url.URL) (sources.PostingRef, bool) {
 }
 
 type refreshFixture struct {
-	t    *testing.T
-	s    *store.Store
-	src  *fakeSource
-	r    *Refresher
-	asks int
+	t   *testing.T
+	s   *store.Store
+	src *fakeSource
+	r   *Refresher
 }
 
 func newRefreshFixture(t *testing.T, slugs ...string) *refreshFixture {
@@ -98,7 +107,6 @@ func newRefreshFixture(t *testing.T, slugs ...string) *refreshFixture {
 	t.Cleanup(func() { s.Close() })
 	f := &refreshFixture{t: t, s: s, src: newFake()}
 	f.r = &Refresher{Store: s, Sources: map[string]sources.Source{"fake": f.src}, By: store.ActorSystem}
-	f.r.WantDetail = func(store.Company, sources.Posting) bool { f.asks++; return true }
 	for _, slug := range slugs {
 		cfg, _ := json.Marshal(sources.Board{Slug: slug})
 		if _, err := s.AddCompany(context.Background(), store.ActorUser, store.NewCompany{
@@ -119,6 +127,28 @@ func (f *refreshFixture) refresh() RefreshResult {
 	return res
 }
 
+func (f *refreshFixture) setFilters(doc string) FilterPreview {
+	f.t.Helper()
+	fl, err := prefilter.Parse([]byte(doc))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	_, p, _, err := SetFilters(context.Background(), f.s, store.ActorUser, fl, "test")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return p
+}
+
+func (f *refreshFixture) status(id int64) store.JobStatus {
+	f.t.Helper()
+	j, err := f.s.Job(context.Background(), id)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return j.Status
+}
+
 var updated = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 
 func fakePosting(id, title string) sources.Posting {
@@ -129,42 +159,109 @@ func fakePosting(id, title string) sources.Posting {
 	}
 }
 
-func TestRefreshFetchesStoresAndSkipsUnchangedBoards(t *testing.T) {
-	f := newRefreshFixture(t, "exampleco")
-	f.src.set("exampleco", fakePosting("1", "Backend Engineer"), fakePosting("2", "Data Engineer"))
+// engineersWritingSoftware passes engineer titles whose description says
+// "software", so it needs descriptions.
+const engineersWritingSoftware = `{"schema_version": 1, "titles": {"require_any": ["engineer"]}, "keywords": {"body_any": ["software"]}}`
 
+func TestRefreshFetchesDetailsForJobsThatPassStageOne(t *testing.T) {
+	f := newRefreshFixture(t, "exampleco")
+	f.src.set("exampleco", fakePosting("1", "Backend Engineer"), fakePosting("2", "Data Engineer"), fakePosting("9", "Sales Manager"))
+
+	// Without filters nothing is judged and no descriptions are fetched.
 	res := f.refresh()
-	if res.Companies != 1 || res.Postings != 2 || len(res.NewJobs) != 2 || res.Details != 2 || len(res.Errors) != 0 {
+	if res.Companies != 1 || res.Postings != 3 || len(res.NewJobs) != 3 || res.Details != 0 || res.Filtered || len(res.Errors) != 0 {
 		t.Fatalf("first refresh: %+v", res)
 	}
-	res = f.refresh()
-	if res.NotModified != 1 || res.Postings != 0 || len(res.NewJobs) != 0 || f.src.details != 2 {
-		t.Errorf("unchanged board: %+v, %d detail requests", res, f.src.details)
+	jobs := res.NewJobs
+	if st := f.status(jobs[0]); st != store.StatusNew {
+		t.Errorf("unjudged job status %s", st)
 	}
 
-	// A changed board: the unchanged posting isn't fetched again; the new
-	// one is; the missing one closes its job.
-	f.src.set("exampleco", fakePosting("1", "Backend Engineer"), fakePosting("3", "Platform Engineer"))
-	f.asks = 0
-	res = f.refresh()
-	if res.Details != 1 || f.asks != 1 || len(res.NewJobs) != 1 || len(res.ClosedJobs) != 1 {
-		t.Errorf("changed board: %+v, WantDetail asked %d times", res, f.asks)
+	// Setting filters judges the stored jobs without fetching: the
+	// engineers wait for their descriptions; the manager is dropped.
+	if p := f.setFilters(engineersWritingSoftware); p.PendingAfter != 2 || p.PassAfter != 0 || p.Jobs != 3 {
+		t.Errorf("preview %+v", p)
+	}
+	if f.status(jobs[2]) != store.StatusFilteredOut {
+		t.Errorf("manager status %s", f.status(jobs[2]))
 	}
 
-	// The board says posting 1 changed: its details are fetched again.
+	// The board hasn't changed, but the waiting jobs get their descriptions.
+	res = f.refresh()
+	if res.NotModified != 1 || res.Details != 2 || len(res.Passed) != 2 || !res.Filtered {
+		t.Fatalf("refresh after setting filters: %+v", res)
+	}
+	if f.status(jobs[0]) != store.StatusUnscreened {
+		t.Errorf("job status %s, want unscreened", f.status(jobs[0]))
+	}
+	if res = f.refresh(); res.Details != 0 || f.src.details != 2 {
+		t.Errorf("descriptions fetched again: %+v", res)
+	}
+
+	// A changed board: only the new engineer's description is fetched; the
+	// missing posting closes its job.
+	f.src.set("exampleco", fakePosting("1", "Backend Engineer"), fakePosting("3", "Platform Engineer"), fakePosting("9", "Sales Manager"))
+	res = f.refresh()
+	if res.Details != 1 || len(res.NewJobs) != 1 || len(res.ClosedJobs) != 1 || len(res.Passed) != 1 {
+		t.Errorf("changed board: %+v", res)
+	}
+
+	// The board says posting 1 changed after its description was read.
 	p := fakePosting("1", "Backend Engineer")
-	p.UpdatedAt = updated.Add(time.Hour)
-	f.src.set("exampleco", p, fakePosting("3", "Platform Engineer"))
+	p.UpdatedAt = time.Now().UTC().Add(time.Hour)
+	f.src.set("exampleco", p, fakePosting("3", "Platform Engineer"), fakePosting("9", "Sales Manager"))
 	if res = f.refresh(); res.Details != 1 {
 		t.Errorf("updated posting: %d detail requests, want 1", res.Details)
 	}
 }
 
-func TestRefreshWithoutWantDetailFetchesNoDetails(t *testing.T) {
+func TestRefreshDropsJobsAfterTheirDescription(t *testing.T) {
 	f := newRefreshFixture(t, "exampleco")
-	f.r.WantDetail = nil
+	f.setFilters(`{"schema_version": 1, "keywords": {"body_any": ["kubernetes"]}}`)
 	f.src.set("exampleco", fakePosting("1", "Backend Engineer"))
-	if res := f.refresh(); res.Details != 0 || f.src.details != 0 || len(res.NewJobs) != 1 {
+	res := f.refresh()
+	if res.Details != 1 || len(res.Passed) != 0 || len(res.FilteredOut) != 1 {
+		t.Errorf("%+v", res)
+	}
+	cs, _ := f.s.Candidates(context.Background(), store.StatusFilteredOut, 10)
+	if len(cs) != 1 || !strings.Contains(string(cs[0].Reasons), "the description has 0 of the 1 needed") {
+		t.Errorf("filtered out: %+v", cs)
+	}
+}
+
+func TestRefreshLimitsDetailsPerCompany(t *testing.T) {
+	f := newRefreshFixture(t, "exampleco")
+	f.setFilters(engineersWritingSoftware)
+	f.r.MaxDetails = 1
+	f.src.set("exampleco", fakePosting("1", "Backend Engineer"), fakePosting("2", "Data Engineer"))
+	if res := f.refresh(); res.Details != 1 || res.Deferred != 1 {
+		t.Errorf("first refresh: %+v", res)
+	}
+	if res := f.refresh(); res.Details != 1 || res.Deferred != 0 || len(res.Passed) != 1 {
+		t.Errorf("second refresh: %+v", res)
+	}
+}
+
+func TestRefreshCountsFailedDetails(t *testing.T) {
+	f := newRefreshFixture(t, "exampleco")
+	f.setFilters(engineersWritingSoftware)
+	f.src.set("exampleco", fakePosting("1", "Backend Engineer"))
+	f.src.detailFail = errors.New("HTTP 500")
+	if res := f.refresh(); res.Details != 1 || res.DetailErrors != 1 || len(res.Errors) != 0 {
+		t.Errorf("%+v", res)
+	}
+	f.src.detailFail = nil
+	if res := f.refresh(); res.Details != 1 || len(res.Passed) != 1 {
+		t.Errorf("retry: %+v", res)
+	}
+}
+
+func TestRefreshJudgesCompleteListingsWithoutDetails(t *testing.T) {
+	f := newRefreshFixture(t, "exampleco")
+	f.src.complete = true // like Lever and Ashby
+	f.setFilters(engineersWritingSoftware)
+	f.src.set("exampleco", fakePosting("1", "Backend Engineer"))
+	if res := f.refresh(); res.Details != 0 || len(res.Passed) != 1 {
 		t.Errorf("%+v", res)
 	}
 }

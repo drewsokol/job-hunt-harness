@@ -6,17 +6,19 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/drewsokol/job-hunt-harness/internal/dedupe"
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
+	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
 	"github.com/drewsokol/job-hunt-harness/internal/registry"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
@@ -24,25 +26,32 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/utc"
 )
 
-// Default concurrency limits. Boards are separate sites, so several can be
-// fetched at once; details come from one board, so fewer at a time.
+// Default limits. Boards are separate sites, so several can be fetched at
+// once; details come from one board, so fewer at a time, and at most
+// DefaultMaxDetails per company per refresh (the rest wait for the next).
 const (
 	DefaultConcurrency       = 8
 	DefaultDetailConcurrency = 4
+	DefaultMaxDetails        = 250
 )
 
-// Refresher fetches company boards and stores what changed.
+// Refresher fetches company boards, stores what changed and runs the
+// prefilter.
+//
+// For boards that list jobs without descriptions (Greenhouse), the
+// prefilter's stage 1 decides which descriptions are fetched: after the
+// listing is stored, the company's jobs are judged, and descriptions are
+// fetched only for postings of jobs that passed or are waiting for one,
+// when the posting is new or the board says it changed. With no filters
+// set, no descriptions are fetched.
 type Refresher struct {
-	Store   *store.Store
-	Sources map[string]sources.Source
-	Logger  *slog.Logger
-	By      store.Actor
-	// WantDetail decides whether a listing that omitted its description
-	// (Greenhouse) is worth a detail request. It is only asked about new
-	// postings and postings the board says changed. Nil fetches no details.
-	WantDetail        func(c store.Company, p sources.Posting) bool
+	Store             *store.Store
+	Sources           map[string]sources.Source
+	Logger            *slog.Logger
+	By                store.Actor
 	Concurrency       int
 	DetailConcurrency int
+	MaxDetails        int
 }
 
 // RefreshOptions narrows a refresh.
@@ -60,19 +69,25 @@ type RefreshResult struct {
 	Postings     int // listed by the boards that changed
 	NewPostings  int
 	Details      int // detail requests made
+	DetailErrors int // detail requests that failed; retried next time
+	Deferred     int // details left for the next refresh by MaxDetails
 	NewJobs      []int64
 	ClosedJobs   []int64
 	RepostedJobs []int64
 	Flags        int
 	Suspect      []string // company names
 	Errors       []store.FetchError
-	Duration     time.Duration
+	// Filtered is false when no filters are set, so nothing was judged.
+	Filtered    bool
+	Passed      []int64 // jobs that moved to unscreened
+	FilteredOut []int64 // jobs that moved to filtered_out
+	Duration    time.Duration
 }
 
 // Refresh fetches the companies' boards concurrently and applies each
-// company's result in its own transaction, so an interrupted refresh leaves
-// consistent data. A board that fails is recorded and skipped; only a
-// database error stops the refresh.
+// company's result in its own transactions, so an interrupted refresh
+// leaves consistent data. A board that fails is recorded and skipped; only
+// a database error stops the refresh.
 func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 	start := utc.Now()
 	var res RefreshResult
@@ -80,24 +95,32 @@ func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshRe
 	if err != nil {
 		return res, err
 	}
+	filters, version, err := ActiveFilters(ctx, r.Store)
+	if err != nil {
+		return res, err
+	}
+	res.Filtered = filters != nil
 	if res.RunID, err = r.Store.StartFetchRun(ctx); err != nil {
 		return res, err
 	}
 
 	var mu sync.Mutex
+	moves := map[int64]store.JobStatus{} // each job's last prefilter move
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(cmpOr(r.Concurrency, DefaultConcurrency))
 	for _, c := range companies {
 		g.Go(func() error {
-			fetch, details := r.fetch(gctx, c)
-			out, err := r.Store.ApplyFetch(gctx, r.By, fetch)
+			cr, err := r.refreshCompany(gctx, c, filters, version)
 			if err != nil {
 				return fmt.Errorf("storing %s: %w", c.Name, err)
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			fetch, out := cr.fetch, cr.out
 			res.Companies++
-			res.Details += details
+			res.Details += cr.details
+			res.DetailErrors += cr.detailErrors
+			res.Deferred += cr.deferred
 			switch {
 			case fetch.Err != nil:
 				res.Errors = append(res.Errors, store.FetchError{CompanyID: c.ID, Company: c.Name, Error: fetch.Err.Error()})
@@ -113,12 +136,34 @@ func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshRe
 			if out.Suspect {
 				res.Suspect = append(res.Suspect, c.Name)
 			}
+			for _, pre := range cr.prefilter {
+				for _, id := range pre.Passed {
+					moves[id] = store.StatusUnscreened
+				}
+				for _, id := range pre.FilteredOut {
+					moves[id] = store.StatusFilteredOut
+				}
+				for _, id := range pre.Waiting {
+					moves[id] = store.StatusNew
+				}
+			}
 			r.logger().Debug("refreshed company", "company_id", c.ID, "postings", len(fetch.Postings),
-				"new_jobs", len(out.NewJobs), "closed_jobs", len(out.ClosedJobs), "not_modified", fetch.NotModified, "error", fetch.Err)
+				"new_jobs", len(out.NewJobs), "closed_jobs", len(out.ClosedJobs), "details", cr.details,
+				"not_modified", fetch.NotModified, "error", fetch.Err)
 			return nil
 		})
 	}
 	runErr := g.Wait()
+	for id, st := range moves {
+		switch st {
+		case store.StatusUnscreened:
+			res.Passed = append(res.Passed, id)
+		case store.StatusFilteredOut:
+			res.FilteredOut = append(res.FilteredOut, id)
+		}
+	}
+	slices.Sort(res.Passed)
+	slices.Sort(res.FilteredOut)
 	res.Duration = utc.Now().Sub(start)
 
 	// Record the run even when it stopped early, with a fresh context in
@@ -127,14 +172,71 @@ func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshRe
 	defer cancel()
 	if err := r.Store.FinishFetchRun(finishCtx, store.FetchRun{
 		ID: res.RunID, Companies: res.Companies, Postings: res.Postings,
-		NewJobs: len(res.NewJobs), ClosedJobs: len(res.ClosedJobs), Errors: res.Errors,
+		NewJobs: len(res.NewJobs), ClosedJobs: len(res.ClosedJobs), Passed: len(res.Passed), Errors: res.Errors,
 	}); err != nil && runErr == nil {
 		runErr = err
 	}
 	r.logger().Info("refresh finished", "run", res.RunID, "companies", res.Companies, "not_modified", res.NotModified,
 		"postings", res.Postings, "new_jobs", len(res.NewJobs), "closed_jobs", len(res.ClosedJobs),
-		"errors", len(res.Errors), "duration", res.Duration.Round(time.Millisecond))
+		"details", res.Details, "passed", len(res.Passed), "errors", len(res.Errors),
+		"duration", res.Duration.Round(time.Millisecond))
 	return res, runErr
+}
+
+// companyResult is what refreshing one company did.
+type companyResult struct {
+	fetch                           store.CompanyFetch
+	out                             store.FetchOutcome
+	prefilter                       []store.PrefilterOutcome // in order
+	details, detailErrors, deferred int
+}
+
+// refreshCompany fetches one company's board and stores it, runs the
+// prefilter on its jobs, then fetches the descriptions stage 1 asked for
+// and runs the prefilter again on what they changed. Details are also
+// fetched after a 304, for jobs still waiting on one.
+func (r *Refresher) refreshCompany(ctx context.Context, c store.Company, filters *prefilter.Compiled, version int64) (companyResult, error) {
+	var cr companyResult
+	src, board, fetch := r.fetch(ctx, c)
+	cr.fetch = fetch
+	var err error
+	if cr.out, err = r.Store.ApplyFetch(ctx, r.By, fetch); err != nil {
+		return cr, err
+	}
+	if fetch.Err != nil || filters == nil {
+		return cr, nil
+	}
+	judge := func() error {
+		out, err := runPrefilter(ctx, r.Store, r.By, filters, version, c.ID)
+		cr.prefilter = append(cr.prefilter, out)
+		return err
+	}
+	if err := judge(); err != nil {
+		return cr, err
+	}
+	d, ok := src.(sources.Detailer)
+	if !ok {
+		return cr, nil
+	}
+	refs, err := r.Store.PostingsNeedingDetail(ctx, c.ID, c.Source)
+	if err != nil || len(refs) == 0 {
+		return cr, err
+	}
+	if limit := cmpOr(r.MaxDetails, DefaultMaxDetails); len(refs) > limit {
+		cr.deferred, refs = len(refs)-limit, refs[:limit]
+	}
+	cr.details = len(refs)
+	ps, failed, err := r.details(ctx, c, src, d, board, refs)
+	cr.detailErrors = failed
+	if err != nil || len(ps) == 0 {
+		return cr, err
+	}
+	out, err := r.Store.ApplyDetails(ctx, r.By, c.ID, ps)
+	if err != nil {
+		return cr, err
+	}
+	cr.out.Flags += out.Flags
+	return cr, judge()
 }
 
 func (r *Refresher) companies(ctx context.Context, opts RefreshOptions) ([]store.Company, error) {
@@ -161,81 +263,66 @@ func (r *Refresher) companies(ctx context.Context, opts RefreshOptions) ([]store
 
 // fetch reads one company's board and normalizes its postings. Errors are
 // returned inside the CompanyFetch, for the store to record.
-func (r *Refresher) fetch(ctx context.Context, c store.Company) (store.CompanyFetch, int) {
+func (r *Refresher) fetch(ctx context.Context, c store.Company) (sources.Source, sources.Board, store.CompanyFetch) {
 	f := store.CompanyFetch{CompanyID: c.ID, Source: c.Source}
 	src, ok := r.Sources[c.Source]
 	if !ok {
 		f.Err = fmt.Errorf("no source named %q", c.Source)
-		return f, 0
+		return nil, sources.Board{}, f
 	}
 	board, err := sources.ParseBoard(c.SourceConfig)
 	if err != nil {
 		f.Err = err
-		return f, 0
+		return src, board, f
 	}
 	list, err := src.List(ctx, board, c.ETag)
 	if err != nil {
 		f.Err = err
-		return f, 0
+		return src, board, f
 	}
 	if list.NotModified {
 		f.NotModified = true
-		return f, 0
+		return src, board, f
 	}
 	f.ETag = list.ETag
-
-	postings := list.Postings
-	details := 0
-	if d, ok := src.(sources.Detailer); ok && r.WantDetail != nil {
-		if postings, details, err = r.fillDetails(ctx, c, src, d, board, postings); err != nil {
-			f.Err = err
-			return f, details
-		}
-	}
-	for _, p := range postings {
+	for _, p := range list.Postings {
 		f.Postings = append(f.Postings, Normalize(src, board, p))
 	}
-	return f, details
+	return src, board, f
 }
 
-// fillDetails replaces partial postings with full ones where WantDetail
-// says so and the posting is new or changed since its last detail fetch.
-// A failed detail request leaves that posting partial.
-func (r *Refresher) fillDetails(ctx context.Context, c store.Company, src sources.Source, d sources.Detailer,
-	board sources.Board, ps []sources.Posting) ([]sources.Posting, int, error) {
-	states, err := r.Store.PostingStates(ctx, c.ID, c.Source)
-	if err != nil {
-		return nil, 0, err
-	}
-	var idx []int
-	for i, p := range ps {
-		if !p.Partial {
-			continue
-		}
-		st, known := states[sources.PostingID(src, board, p.ExternalID)]
-		stale := !known || st.DetailFetchedAt.IsZero() || p.UpdatedAt.After(st.SourceUpdatedAt)
-		if stale && r.WantDetail(c, p) {
-			idx = append(idx, i)
-		}
-	}
-	out := append([]sources.Posting(nil), ps...)
+// details fetches full postings concurrently. A failed request is logged
+// and counted, and the posting is tried again next refresh.
+func (r *Refresher) details(ctx context.Context, c store.Company, src sources.Source, d sources.Detailer,
+	board sources.Board, refs []store.DetailRef) ([]store.PostingInput, int, error) {
+	out := make([]*store.PostingInput, len(refs))
+	var failed atomic.Int64
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(cmpOr(r.DetailConcurrency, DefaultDetailConcurrency))
-	for _, i := range idx {
+	for i, ref := range refs {
 		g.Go(func() error {
-			full, err := d.Detail(gctx, board, ps[i].ExternalID)
+			p, err := d.Detail(gctx, board, ref.ExternalID)
 			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					return err
+				if ctx.Err() != nil {
+					return ctx.Err()
 				}
-				r.logger().Warn("detail fetch failed", "company_id", c.ID, "posting", ps[i].ExternalID, "error", err)
+				failed.Add(1)
+				r.logger().Warn("detail fetch failed", "company_id", c.ID, "posting", ref.PostingID, "error", err)
 				return nil
 			}
-			out[i] = full
+			in := Normalize(src, board, p)
+			out[i] = &in
 			return nil
 		})
 	}
-	return out, len(idx), g.Wait()
+	err := g.Wait()
+	var ps []store.PostingInput
+	for _, p := range out {
+		if p != nil {
+			ps = append(ps, *p)
+		}
+	}
+	return ps, int(failed.Load()), err
 }
 
 // Normalize turns a source's posting into what the store keeps: untrusted
@@ -285,6 +372,7 @@ func Normalize(src sources.Source, board sources.Board, p sources.Posting) store
 		PayRaw:          untrusted.Clean(p.PayRaw),
 		PayRanges:       mustJSON(orEmpty(pay)),
 		EmploymentType:  untrusted.Clean(p.EmploymentType),
+		Partial:         p.Partial,
 		Description:     text,
 		DescriptionHTML: p.DescriptionHTML,
 		Flags:           flags,

@@ -40,7 +40,12 @@ var (
 		regexp.MustCompile(`(?i)\b(?:ignore|disregard|forget|override)\b[^.\n]{0,30}\b(?:previous|prior|above|earlier|all|your|other)\b[^.\n]{0,20}\b(?:instructions?|prompts?|rules|guidelines|context)\b`),
 		regexp.MustCompile(`(?i)\b(?:reveal|print|show|output|repeat|leak)\s+(?:your|the)\s+(?:system prompt|instructions|developer message)\b`),
 		regexp.MustCompile(`(?i)\b(?:rate|rank|score|mark|classify|label)\s+(?:this|the|me|my|our)\s+(?:\w+\s+){0,3}(?:as|a)\s+(?:an?\s+|the\s+)?(?:strong|perfect|excellent|top|best|10/10|100%|good)\b`),
-		regexp.MustCompile(`(?i)\b(?:send|email|forward|upload|post|share|exfiltrate)\b[^.\n]{0,40}\b(?:resume|cv|profile|salary|contacts?|personal (?:data|information)|memories|api key|credentials|conversation)\b[^.\n]{0,40}\b(?:to|at)\b`),
+		// Sending the user's data somewhere: "send the candidate's resume
+		// to", "forward the conversation to". Listings ask applicants to
+		// "send your resume to" and offer to "share more information about
+		// the salary", so the data must be the user's, seen from the agent.
+		regexp.MustCompile(`(?i)\b(?:send|email|forward|upload|post|share|exfiltrate|leak)\s+(?:(?:the|your|this|their)\s+)?(?:user|candidate|applicant|human|operator|owner)(?:'s|s'|’s)?\s+(?:\w+\s+){0,2}(?:resume|cv|profile|salary|contacts?|personal (?:data|information)|memories|api keys?|credentials|conversation|chat history|files?)\b`),
+		regexp.MustCompile(`(?i)\b(?:send|email|forward|upload|post|share|exfiltrate|leak)\s+(?:(?:the|this|your|all)\s+)?(?:conversation|chat history|system prompt|api keys?|credentials|memories)\b[^.\n]{0,40}\b(?:to|at)\b`),
 		// "call the tool", "invoke record_screening": a tool call, not a
 		// listing that mentions tools or an on-call function.
 		regexp.MustCompile(`(?i)(?:^|[^-\w])(?:call|invoke)\s+(?:the|a|this|your)\s+(?:\w+\s+)?(?:tool|function)s?\b|\b(?:call|invoke|run|execute)\s+\x60?[a-z]+_[a-z_]+\b`),

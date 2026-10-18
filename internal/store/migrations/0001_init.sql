@@ -47,7 +47,9 @@ CREATE TABLE jobs (
     reposted_at         TEXT,
     hidden_at           TEXT,
     origin              TEXT    NOT NULL CHECK (origin IN ('feed', 'manual', 'agent')),
-    prefilter_status    TEXT    CHECK (prefilter_status IN ('pass', 'drop')),
+    employment_type     TEXT,
+    -- pending: stage 1 passed and the decision needs a description not yet fetched.
+    prefilter_status    TEXT    CHECK (prefilter_status IN ('pass', 'drop', 'pending')),
     prefilter_reasons   TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(prefilter_reasons)),
     prefilter_score     REAL,
     filters_version     INTEGER,

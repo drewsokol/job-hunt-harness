@@ -43,7 +43,7 @@ var (
 	remoteWords = regexp.MustCompile(`(?i)\b(?:fully[- ]remote|remote[- ]first|remote|work from home|wfh|anywhere|distributed)\b`)
 	hybridWords = regexp.MustCompile(`(?i)\bhybrid\b`)
 	onsiteWords = regexp.MustCompile(`(?i)\b(?:on[- ]?site|in[- ]office|in[- ]person|office[- ]based)\b`)
-	fillerWords = regexp.MustCompile(`(?i)\b(?:based|only|in|within|from|the|location|locations|all|select|position|positions|role|opportunity)\b`)
+	fillerWords = regexp.MustCompile(`(?i)\b(?:based|only|in|within|from|the|location|locations|all|select|position|positions|role|opportunity|hq|headquarters|office|offices|campus|hub)\b`)
 	edgeJunk    = " \t-–—,.:()[]*+/"
 )
 

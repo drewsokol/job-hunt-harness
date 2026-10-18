@@ -24,7 +24,13 @@ To keep your real data separate while developing, point jhh at a scratch directo
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh doctor
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh refresh            # fetch the starter companies' boards
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh probe exampleco    # which board does a company use?
+JHH_DATA_DIR=./tmp-data go run ./cmd/jhh filters preview examples/filters.json   # what would these filters keep?
+JHH_DATA_DIR=./tmp-data go run ./cmd/jhh filters set examples/filters.json --rationale "trying the example"
+JHH_DATA_DIR=./tmp-data go run ./cmd/jhh refresh            # fetches descriptions for jobs that passed stage 1
+JHH_DATA_DIR=./tmp-data go run ./cmd/jhh candidates         # the jobs that passed, best first
 ```
+
+Normally your agent writes the filters through MCP (from M4); the `filters` command is for checking them by hand. `examples/` holds made-up examples.
 
 Tests never touch the network: each source is tested against made-up fixtures by the shared conformance suite in `internal/sources/conformance`.
 

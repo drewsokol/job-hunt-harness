@@ -86,6 +86,13 @@ func printRefresh(w io.Writer, res core.RefreshResult) {
 	line("closed jobs", len(res.ClosedJobs))
 	line("reposted jobs", len(res.RepostedJobs))
 	line("content flags", res.Flags)
+	if res.Filtered {
+		line("descriptions", fmt.Sprintf("%d fetched, %d failed, %d left for the next refresh", res.Details, res.DetailErrors, res.Deferred))
+		line("new candidates", len(res.Passed))
+		line("filtered out", len(res.FilteredOut))
+	} else {
+		fmt.Fprintln(w, "  No filters are set, so jobs weren't judged and Greenhouse descriptions weren't fetched.")
+	}
 	if len(res.Suspect) > 0 {
 		slices.Sort(res.Suspect)
 		line("suspect feeds", strings.Join(res.Suspect, ", "))

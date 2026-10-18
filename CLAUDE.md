@@ -37,8 +37,9 @@ Status: the design is agreed and the MVP build is starting. **Read `docs/design.
 - **All three feeds support ETag / 304**, so unchanged boards cost nothing to re-check.
 - **Pay ranges come in many formats** (`$158,000 — $248,000`, `$231K – $340K`, `$156.6K`, several ranges for different locations, non-USD). Parse defensively and never guess.
 - **Workday and custom career sites** have no simple public feed; the agent can add those jobs through `add_jobs`.
-- **Injection rules must match text addressed to an AI, not text about AI.** Listings from AI companies say "as an AI Architect" and "system prompt" all the time. Check rule changes against a live refresh of the starter list, and add any false positive as a test in `internal/untrusted`.
+- **Injection rules must match text addressed to an AI, not text about AI.** Listings from AI companies say "as an AI Architect" and "system prompt" all the time. Check rule changes against a live refresh of the starter list, and add any false positive as a test in `internal/untrusted`. Greenhouse descriptions are only fetched once filters are set, so a live check needs `jhh filters set examples/filters.json` and a second refresh.
 - **Hidden text stays out of the plain description.** It is kept in the raw HTML and the flag excerpt for review, so the agent screens what a human reader sees.
+- **Prefilter reasons never quote the listing.** They name filter terms and jhh's own vocabulary (countries, states, regions), so they can sit outside the untrusted envelope. City names can be raw listing text, so reasons leave them out.
 - **Never write invisible characters into source files.** Build them from code points (`string(rune(0x200b))`) so the repo itself is free of them.
 
 ## Working in this repo

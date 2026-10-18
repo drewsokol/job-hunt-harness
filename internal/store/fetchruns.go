@@ -16,6 +16,7 @@ type FetchRun struct {
 	Postings   int
 	NewJobs    int
 	ClosedJobs int
+	Passed     int // jobs the prefilter moved to unscreened
 	Errors     []FetchError
 }
 
@@ -52,9 +53,9 @@ func (s *Store) FinishFetchRun(ctx context.Context, r FetchRun) error {
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
-			UPDATE fetch_runs SET finished_at = ?, companies = ?, postings = ?, new_jobs = ?, closed_jobs = ?, errors = ?
+			UPDATE fetch_runs SET finished_at = ?, companies = ?, postings = ?, new_jobs = ?, closed_jobs = ?, passed = ?, errors = ?
 			WHERE id = ?`,
-			s.stamp(), r.Companies, r.Postings, r.NewJobs, r.ClosedJobs, errText, r.ID)
+			s.stamp(), r.Companies, r.Postings, r.NewJobs, r.ClosedJobs, r.Passed, errText, r.ID)
 		if err != nil {
 			return err
 		}

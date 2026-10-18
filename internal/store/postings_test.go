@@ -96,6 +96,8 @@ func described(fp string) func(*PostingInput) {
 	}
 }
 
+func partial(p *PostingInput) { p.Partial = true }
+
 func TestApplyFetchGroupsCityPostingsByOpening(t *testing.T) {
 	f := newFetchFixture(t)
 	out := f.apply(
@@ -227,7 +229,7 @@ func TestApplyFetchSuspectFeedClosesNothing(t *testing.T) {
 func TestApplyFetchKeepsDescriptionWhenListOmitsIt(t *testing.T) {
 	f := newFetchFixture(t)
 	f.apply(posting("1", described("aaaa")))
-	f.apply(posting("1"))
+	f.apply(posting("1", partial))
 	var desc, fp string
 	f.s.db.QueryRow("SELECT description, fingerprint FROM postings WHERE id = 'gh:exampleco:1'").Scan(&desc, &fp)
 	if desc != longDescription || fp != "aaaa" {

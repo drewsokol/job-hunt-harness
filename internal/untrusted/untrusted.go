@@ -11,9 +11,11 @@ import (
 	"unicode/utf8"
 )
 
-// Clean removes invisible characters from s: zero-width characters, bidi
-// controls, soft hyphens, byte order marks, and Unicode tag characters
-// (which can hide ASCII text; see Smuggled). Everything else is unchanged.
+// Clean removes invisible characters from s: control characters other than
+// tab and newline (an escape sequence can rewrite a terminal), zero-width
+// characters, bidi controls, soft hyphens, byte order marks, and Unicode tag
+// characters (which can hide ASCII text; see Smuggled). Everything else is
+// unchanged.
 func Clean(s string) string {
 	if !strings.ContainsFunc(s, invisible) {
 		return s
@@ -30,7 +32,9 @@ func Clean(s string) string {
 // numbers so the source itself contains no invisible characters.
 func invisible(r rune) bool {
 	switch {
-	case r == 0x00ad, // soft hyphen
+	case r < 0x20 && r != '\t' && r != '\n', // C0 controls, including escape and carriage return
+		r >= 0x7f && r <= 0x9f,     // delete and C1 controls
+		r == 0x00ad,                // soft hyphen
 		r >= 0x200b && r <= 0x200f, // zero-width space, joiners, direction marks
 		r >= 0x202a && r <= 0x202e, // bidi embedding and override
 		r >= 0x2060 && r <= 0x2064, // word joiner, invisible operators

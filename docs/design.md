@@ -114,7 +114,7 @@ None of the three can apply our filters on its side, so the savings come from ca
 - **Location** → `workplace` (`remote` | `hybrid` | `onsite` | `unknown`) and a list of `{city, region, country}` places. A small vocabulary in Go (`normalize/places.go`: countries, regions, US states, Canadian provinces, common job cities) replaces the hard-coded `NON_US` regex. It handles "City, ST", "City, Washington", "Dublin, IE", lists of cities, `|`, `;` and `•` separators, and location text in titles ("Staff AI Engineer | Canada | Remote"). Two-letter codes stand alone only for US and UK, because "IN", "OR" and "CA" are ambiguous. The board's own workplace and country fields win when present. Workplace is `unknown` when nothing says: a city alone doesn't tell you whether remote work is possible. On the 2026-10-18 starter list, 98% of 12,234 postings got at least one recognized place; the rest keep their raw text.
 - **Pay** → a list of `{min, max, currency, period, label}` ranges, plus the raw text. A board's structured pay is used first, then the pay field, then the description. The parser handles `$158,000 — $248,000`, `$231K – $340K`, `$120 - 150K`, `USD 120,000 - 150,000`, `€80.000 - €95.000`, `$60/hr - $80/hr`, and labelled ranges for different locations. Single figures (`$156.6K`) are only read from short pay fields, because descriptions mention funding and stipends. Amounts that can't be pay are ignored. If parsing fails, it keeps the raw text and leaves the numbers empty. It never guesses.
 - **Text**: HTML is reduced to the text a reader sees. Scripts, styles, comments and elements hidden with CSS or the `hidden` attribute are dropped (detection reports hidden content separately, and the raw HTML is kept for review). The full text is stored, and tools truncate on output.
-- **Boilerplate trimming for agents** (M4, where descriptions are sent to agents): before a description goes to the agent, sections recognized by their headings and common phrases (equal-opportunity statements, benefits lists, "about us", privacy notices) are dropped. About 90 candidates × 5,000 characters is roughly 110k tokens per screening run, so this matters to anyone paying per token. My guess is 30–50% savings, but it should be measured. The UI always shows the full text.
+- **Boilerplate trimming** (`normalize.TrimBoilerplate`): sections under headings such as "Benefits", "About us", "About <company>" and "Equal opportunity", and lines that are boilerplate on their own (equal-opportunity and privacy statements), are dropped. Lines stating pay are always kept. The prefilter counts body keywords in the trimmed text, and in M4 the trimmed text is what goes to the agent. About 90 candidates × 5,000 characters is roughly 110k tokens per screening run, so this matters to anyone paying per token. Measured on the 2026-10-18 starter list, it saves 22% of description text (19% for that day's candidates), against a guess of 30–50%. Lines repeated across 30% or more of one company's postings (the company's own template) make up another 23% of what's left, so dropping those in M4 would get to roughly 40%. The UI always shows the full text.
 
 ### Untrusted content and prompt injection
 
@@ -129,7 +129,7 @@ Everything that comes from a job listing (title, location, description, pay text
   The server instructions and every playbook tell the agent that text inside `untrusted` is data to evaluate, never instructions to follow.
 - **Cleaned, not rewritten.** Zero-width and other invisible characters and HTML comments are removed, and the HTML is reduced to plain text. The wording is never changed, so what you review is what the company wrote.
 - **Detection is rule-based (no AI in the server).** It runs on the raw HTML, before stripping, so hidden text is still visible to the rules. It looks for text addressed to an AI ("if you are an AI", "ignore previous instructions", "include the word …"), hidden text (`display:none`, zero font size, text the same colour as the background), comments addressed to an AI, and ASCII smuggled in invisible Unicode tag characters. The agent can also report what it notices while screening, with `report_injection`.
-- **Rules must match text addressed to an AI, not text about AI.** Many companies in the starter list build AI products, so their listings say "as an AI Architect", "system prompt" and "how an AI agent should be evaluated". A first version of the rules flagged 74 of 12,234 live postings, all wrongly; the current rules flag none of them. Those phrasings are kept as regression tests. A flag that fires on ordinary listings would teach people to ignore flags.
+- **Rules must match text addressed to an AI, not text about AI.** Many companies in the starter list build AI products, so their listings say "as an AI Architect", "system prompt" and "how an AI agent should be evaluated". A first version of the rules flagged 74 of 12,234 live postings, all wrongly. The first bulk fetch of Greenhouse descriptions (M3) found 82 more ("your recruiter can share more information about the salary range…"). The current rules flag one posting on the starter list, a real AI-detection canary. Every false positive is kept as a regression test. A flag that fires on ordinary listings would teach people to ignore flags.
 - **Flagged for review, not treated as bad automatically.** Not every instruction aimed at AI is hostile. A company asking AI-written applications to include a codeword is defending itself. Each finding records an excerpt and a kind:
   - `canary`: an AI-detection instruction. This is useful to know about. The job is shown normally with a note: "This posting checks for AI-written applications."
   - `hostile`: tries to change ratings, call tools, or get data out.
@@ -168,28 +168,37 @@ Grouping is a link between rows, not a merge, so **merge** and **split** are ava
 - Fetches companies concurrently (8 at a time, using `errgroup` with a limit), with a 30-second timeout per request and a User-Agent of `job-hunt-harness/<version> (+repo URL)`.
 - **Skips unchanged boards.** It sends the ETag saved from the last fetch as `If-None-Match`. On a 304 it does nothing for that board except record that it was checked, so a second refresh on the same day costs almost nothing.
 - **Fetches in two stages.**
-  - Stage 1 runs on the list fields: title, location and employment type.
-  - For a `Detailer` source (Greenhouse), descriptions are fetched only for postings that pass stage 1 and are new or have a changed `updated_at`.
-  - Stage 2 (description keywords, pay found in the text) runs on those postings only.
+  - Stage 1 runs on the list fields: title, location and employment type. It judges jobs, not raw postings, after the listing is stored, so a job's city postings are judged together.
+  - For a `Detailer` source (Greenhouse), descriptions are then fetched for the open postings of jobs that passed stage 1 or are waiting on a description, when the description was never fetched or the board's `updated_at` is newer than the fetch. This also happens after a 304, so jobs left waiting by a filter change get their descriptions without the board changing. At most 250 per company per refresh; the rest wait for the next one.
+  - Stage 2 (description keywords, pay found in the text, remote work mentioned only in the text) then runs on those jobs.
   - Lever and Ashby send descriptions anyway, so both stages run on that one response.
-  - Until M3 adds stage 1, no Greenhouse details are fetched: Greenhouse jobs have list fields only, and are grouped by `internal_job_id`.
+  - With no filters set, nothing is judged and no Greenhouse descriptions are fetched. On the 2026-10-18 starter list with `examples/filters.json`, stage 1 left 1,078 jobs waiting, and fetching their 1,696 postings took 17 seconds: 14% of the 12,220 postings.
 - A job's listing fields are derived from its postings: places and pay are the union over its open postings, the workplace is the most flexible one, and the description is the newest. User fields (status, notes, applied date) are never touched by a refresh.
 - Upserts postings and sets `first_seen_at` and `last_seen_at`. When a posting is missing from a feed that fetched successfully, it is marked **closed**. A 304 counts as a successful fetch, so nothing gets marked closed by mistake.
 - **Guard against suspect feeds.** If a board returns zero postings, or more than half fewer than last time, nothing is closed. The company is marked `suspect` with the reason, and the agent and the UI show it. This happens when a company changes job boards or a feed glitches, and without the guard every job you track there would show as closed.
 - Each company's results are committed in their own transaction, so a refresh that gets interrupted (for example, the agent session ends) leaves consistent data behind. The UI shows "posting closed" on roles you are reviewing or have applied to, which is useful and new.
-- Runs the prefilter on new or changed jobs only, unless the filters have changed. When they have, it re-runs over the stored jobs and fetches no new data.
+- Runs the prefilter on the jobs of every company it fetched (judging is cheap; only changed decisions are written). Setting new filters re-judges every stored job at once and fetches nothing.
 - Records a `fetch_run` row: counts, how long it took, and errors by company.
 - Runs only when asked (from the UI button or the `refresh_jobs` tool). There is no scheduler in v1.
 
 ### Prefilter
 
-It is driven by the active filters (section 3) and is the reference `prefilter()` with its hard-coded rules turned into data. It is split into **stage 1**, which uses only list fields (title, location, employment type, title keywords), and **stage 2**, which needs the description (body keywords, pay parsed from the text). A job that fails stage 1 never has its description fetched. Each job ends up with:
-- `prefilter_status`: `pass` | `drop`
-- `prefilter_reasons`: for example `["title excluded: 'manager'", "location: onsite in London"]`
-- `prefilter_score`: for sorting only, using the same idea as the reference (level, AI terms in the title, keyword hits in the body)
+It is driven by the active filters (section 3) and is the reference `prefilter()` with its hard-coded rules turned into data (`internal/prefilter`). It is split into **stage 1**, which uses only list fields (title, location, employment type, title keywords, listed pay), and **stage 2**, which needs the description (body keywords, pay parsed from the text). A job that fails stage 1 never has its description fetched. Each job ends up with:
+- `prefilter_status`: `pass` | `drop` | `pending` (stage 1 passed, and a rule needs a description that hasn't been fetched yet)
+- `prefilter_reasons`: every rule that affected the job, not just the first, as `{rule, effect, text}` with effect `drop`, `pending`, `flag` or `note`. For example `{"rule": "titles.exclude_any", "effect": "drop", "text": "title has \"manager\""}`. The text quotes only the filters and jhh's vocabulary (countries, states, regions), never the listing, so it can be shown outside the untrusted envelope.
+- `prefilter_score`: for sorting only, using the same idea as the reference: 3 for a level in the upper half of the filters' levels and 1 for a lower one, 3 for a keyword in the title, and half a point per body keyword, up to 3.
 - `filters_version`: which version of the filters made this decision
 
-**Filtered out** is a view the user can open, not a deletion. This is how users tune their filters and catch a rule that is too aggressive.
+Unscreened jobs move with the decision: pass makes them `unscreened`, drop makes them `filtered_out`, and pending returns them to `new`. Jobs already screened or applied to keep their status, and their decision is still recorded. **Filtered out** is a view the user can open, not a deletion. This is how users tune their filters and catch a rule that is too aggressive.
+
+**How the rules read a job:**
+- Terms match whole words, ignoring case and punctuation ("part-time" matches "Part Time", "head of" doesn't match "ahead of"). Title and keyword terms also match plurals ("agent" matches "agents").
+- **Levels** come from a shipped vocabulary: intern, junior, mid, senior, lead, staff, principal, distinguished, read from words like "Sr.", "II" and "III". Role words such as "architect" are not levels. `level_unknown` (`pass` by default) decides titles that state no level.
+- **Location.** `remote_in` takes countries, states or regions; `onsite_or_hybrid_in` takes those or a city with its state or country ("Columbus, OH"). A remote job passes when one of its places overlaps `remote_in` ("Remote - US" for someone who said "Ohio", "Remote - North America" for someone who said "US"). An onsite or hybrid job passes when one of its places is inside `onsite_or_hybrid_in`. A job that doesn't say whether it's remote passes if it's in an onsite place, is dropped if it's outside both lists, and otherwise counts as unclear, unless its description says it's remote. Unclear cases follow `location.unknown` (`pass` by default), because a wrong drop is worse than one extra job to screen.
+- **Employment** types (full-time, part-time, contract, temporary, internship) are read from the board's field and the title.
+- **Keywords.** A title keyword passes the job; otherwise it needs `min_body_hits_without_title_match` (default 1) different body keywords. Body keywords are counted in the description with boilerplate trimmed, so a benefits list that mentions an AI tool doesn't count.
+- **Pay floor** is yearly. Hourly pay is multiplied by 2,080 and monthly by 12. A job is dropped only when every range in the floor's currency tops out below it.
+- `jhh filters preview` and `set` (and in M4, `preview_filters` and `set_filters`) show how many open jobs pass now and would pass, how many would wait for descriptions, and examples of newly dropped and newly kept jobs.
 
 ## 3. Profile, memories and filters
 
@@ -266,9 +275,11 @@ A memory is one short statement with metadata:
 
 ```jsonc
 {
+  "schema_version": 1,
   "titles":   { "require_any": ["engineer", "developer", "architect"],
                 "exclude_any": ["manager", "director", "intern", "sales"] },
   "levels":   ["senior", "staff", "principal"],            // matched against a shipped level vocabulary
+  "level_unknown": "pass",                                 // titles that state no level
   "location": { "remote_in": ["US"],                       // countries/regions where remote is OK
                 "onsite_or_hybrid_in": ["Columbus, OH"],      // places where in-office is OK
                 "unknown": "pass" },
@@ -312,8 +323,8 @@ postings       id ("gh:exampleco:123"), company_id, opening_key, job_id, source,
 jobs           id (AUTOINCREMENT, never reused; doubles as the short number #482), company_id, title, title_key,
                workplace, locations_json, pay_raw, pay_ranges_json, url (primary posting),
                description, posted_at, first_seen_at, closed_at, reposted_at,
-               origin(feed|manual|agent),
-               prefilter_status, prefilter_reasons_json, prefilter_score, filters_version,
+               origin(feed|manual|agent), employment_type,
+               prefilter_status(pass|drop|pending), prefilter_reasons_json, prefilter_score, filters_version,
                status, applied_at, applied_unconfirmed, notes, updated_at, updated_by
 screenings     id, job_id, fit(strong|good|stretch|no), reason, gaps, flags_json,
                profile_version, screened_by, screened_at        -- history kept; latest is current
@@ -480,7 +491,7 @@ The summary strip from the reference (to review, applications, applied in the la
 ### Proposed layout
 
 ```
-cmd/jhh/                 # main.go: subcommand dispatch (default: stdio MCP + UI) | serve | refresh | probe | doctor | setup | export
+cmd/jhh/                 # main.go: subcommand dispatch (default: stdio MCP + UI) | serve | refresh | probe | candidates | filters | doctor | setup | export
 internal/
   core/                  # jobs, screening, profile, memories, filters, tracker, companies: the logic
   prefilter/             # stage 1 and 2 evaluation, filters schema and validation
@@ -630,8 +641,8 @@ The normal test run never touches the network, and no real people or postings ap
 |---|---|---|
 | **M0 Scaffold** | `go.mod`, `cmd/jhh` with `version` and `doctor`, slog setup (UTC timestamps) and the stdout rule, data dir resolution with file permissions, UTC helpers, staticcheck through the `tool` directive in `go.mod` (no Makefile, so the same commands work on every OS). MCP Go SDK v1.8.0. | — |
 | **M1 Store** | Schema and migrations (locking and backup), models, actor recording, store package with tests | — |
-| **M2 Fetch** | Source interface, conformance suite, and the Greenhouse, Lever and Ashby sources; normalization; untrusted cleaning and injection rules; ETag caching; two-stage detail fetching (the hook; M3 connects it to stage 1); the dedupe ladder; closed-posting detection and the suspect-feed guard; seeding the starter companies; `jhh refresh` and `jhh probe` | Fetch real jobs from the command line |
-| **M3 Filter** | Filters schema and validation, prefilter with reasons, boilerplate trimming, `jhh candidates` | The reference script, rebuilt properly |
+| **M2 Fetch** | Source interface, conformance suite, and the Greenhouse, Lever and Ashby sources; normalization; untrusted cleaning and injection rules; ETag caching; two-stage detail fetching (connected to stage 1 in M3); the dedupe ladder; closed-posting detection and the suspect-feed guard; seeding the starter companies; `jhh refresh` and `jhh probe` | Fetch real jobs from the command line |
+| **M3 Filter** | Filters schema and validation, the two-stage prefilter with reasons, descriptions fetched for stage-1 passes, boilerplate trimming, `jhh candidates`, and `jhh filters` (show, preview, set) for checking filters before the MCP tools exist | The reference script, rebuilt properly |
 | **M4 MCP** | The MVP tools from section 8, including `add_company` probing, `add_jobs` and `whats_new`; the untrusted envelope; the `initialize` and `screen_new_jobs` playbooks; server instructions | **Use it daily from Claude Code.** You start using it yourself here. |
 | **M5 Window** | Tracker UI ported onto the JSON API, with the session token, CSP and external JS; manual add; keyboard triage and undo; content-flag review; read-only Profile page; live updates through `data_version` and SSE; `open_dashboard` and port handoff | Triage in the browser. **The MVP is complete.** |
 | *After the MVP* | | |

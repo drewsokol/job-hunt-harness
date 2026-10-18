@@ -31,8 +31,11 @@ type PostingInput struct {
 	PayRaw          string
 	PayRanges       json.RawMessage // []normalize.PayRange
 	EmploymentType  string
-	// Description and DescriptionHTML are empty when the listing didn't
-	// include them (Greenhouse lists); the stored ones are then kept.
+	// Partial means the listing left out the description (Greenhouse
+	// lists): the stored description and pay are kept, and the posting
+	// still needs a detail fetch. A complete posting replaces them, even
+	// with nothing.
+	Partial         bool
 	Description     string
 	DescriptionHTML string
 	Flags           []ContentFlag
@@ -187,11 +190,8 @@ func (a *applier) apply(f CompanyFetch) error {
 			return err
 		}
 	}
-	slices.Sort(a.touched)
-	for _, id := range slices.Compact(a.touched) {
-		if err := a.syncJob(id); err != nil {
-			return fmt.Errorf("job %d: %w", id, err)
-		}
+	if err := a.syncTouched(); err != nil {
+		return err
 	}
 
 	var open int
@@ -206,6 +206,65 @@ func (a *applier) apply(f CompanyFetch) error {
 		WHERE id = ?`,
 		nullString(f.ETag), a.now, open, a.out.Suspect, nullString(a.out.SuspectWhy), f.CompanyID)
 	return err
+}
+
+func (a *applier) syncTouched() error {
+	slices.Sort(a.touched)
+	for _, id := range slices.Compact(a.touched) {
+		if err := a.syncJob(id); err != nil {
+			return fmt.Errorf("job %d: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// ApplyDetails stores postings read one at a time from a board's detail
+// endpoint, after ApplyFetch stored their listings. Only those postings
+// and their jobs change; nothing is closed and the company's fetch status
+// is left alone.
+func (s *Store) ApplyDetails(ctx context.Context, by Actor, companyID int64, ps []PostingInput) (FetchOutcome, error) {
+	var out FetchOutcome
+	err := s.write(ctx, func(tx *sql.Tx) error {
+		a := applier{ctx: ctx, tx: tx, now: s.stamp(), at: s.now(), by: by, out: &out}
+		for _, p := range ps {
+			if err := a.upsert(companyID, p); err != nil {
+				return fmt.Errorf("posting %s: %w", p.ID, err)
+			}
+		}
+		return a.syncTouched()
+	})
+	return out, err
+}
+
+// DetailRef names a posting whose description should be fetched.
+type DetailRef struct {
+	PostingID  string
+	ExternalID string
+}
+
+// PostingsNeedingDetail returns the company's open postings from source
+// whose jobs passed stage 1 (status pass or pending) and whose description
+// was never fetched or is older than the board's last update.
+func (s *Store) PostingsNeedingDetail(ctx context.Context, companyID int64, source string) ([]DetailRef, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id, p.external_id FROM postings p JOIN jobs j ON j.id = p.job_id
+		WHERE p.company_id = ? AND p.source = ? AND p.closed_at IS NULL
+		  AND j.prefilter_status IN ('pass', 'pending')
+		  AND (p.detail_fetched_at IS NULL OR p.source_updated_at > p.detail_fetched_at)
+		ORDER BY p.id`, companyID, source)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DetailRef
+	for rows.Next() {
+		var r DetailRef
+		if err := rows.Scan(&r.PostingID, &r.ExternalID); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // upsert stores a posting and makes sure it belongs to a job.
@@ -223,7 +282,7 @@ func (a *applier) upsert(companyID int64, p PostingInput) error {
 	if workplace == "" {
 		workplace = "unknown"
 	}
-	hasDetail := p.Description != "" || p.DescriptionHTML != ""
+	hasDetail := !p.Partial
 
 	var jobID sql.NullInt64
 	err = a.tx.QueryRowContext(a.ctx, "SELECT job_id FROM postings WHERE id = ?", p.ID).Scan(&jobID)
@@ -440,21 +499,21 @@ var workplaceRank = map[string]int{"remote": 0, "hybrid": 1, "onsite": 2, "unkno
 // last posting closes and reopens, marked reposted, when one comes back.
 func (a *applier) syncJob(jobID int64) error {
 	rows, err := a.tx.QueryContext(a.ctx, `
-		SELECT workplace, locations, pay_raw, pay_ranges, url, description, posted_at, closed_at IS NULL
+		SELECT workplace, locations, pay_raw, pay_ranges, url, description, posted_at, employment_type, closed_at IS NULL
 		FROM postings WHERE job_id = ?
 		ORDER BY first_seen_at, id`, jobID)
 	if err != nil {
 		return err
 	}
 	type row struct {
-		workplace, locations, payRanges string
-		payRaw, url, desc, postedAt     sql.NullString
-		open                            bool
+		workplace, locations, payRanges  string
+		payRaw, url, desc, postedAt, emp sql.NullString
+		open                             bool
 	}
 	var all []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.workplace, &r.locations, &r.payRaw, &r.payRanges, &r.url, &r.desc, &r.postedAt, &r.open); err != nil {
+		if err := rows.Scan(&r.workplace, &r.locations, &r.payRaw, &r.payRanges, &r.url, &r.desc, &r.postedAt, &r.emp, &r.open); err != nil {
 			rows.Close()
 			return err
 		}
@@ -483,7 +542,7 @@ func (a *applier) syncJob(jobID int64) error {
 		locations, pays jsonSet
 		payRaws         []string
 		url, desc       sql.NullString
-		postedAt        sql.NullString
+		postedAt, emp   sql.NullString
 	)
 	for _, r := range use {
 		if workplaceRank[r.workplace] < workplaceRank[workplace] {
@@ -501,6 +560,9 @@ func (a *applier) syncJob(jobID int64) error {
 		if !url.Valid {
 			url = r.url
 		}
+		if !emp.Valid && r.emp.String != "" {
+			emp = r.emp
+		}
 		if r.desc.Valid {
 			desc = r.desc // newest wins: rows are oldest first
 		}
@@ -515,12 +577,12 @@ func (a *applier) syncJob(jobID int64) error {
 	}
 	isClosed := len(open) == 0
 	if _, err := a.tx.ExecContext(a.ctx, `
-		UPDATE jobs SET workplace = ?, locations = ?, pay_raw = ?, pay_ranges = ?, url = ?, description = ?, posted_at = ?,
+		UPDATE jobs SET workplace = ?, locations = ?, pay_raw = ?, pay_ranges = ?, url = ?, description = ?, posted_at = ?, employment_type = ?,
 		       closed_at   = CASE WHEN ? THEN coalesce(closed_at, ?) ELSE NULL END,
 		       reposted_at = CASE WHEN ? THEN ? ELSE reposted_at END,
 		       updated_at = ?, updated_by = ?
 		WHERE id = ?`,
-		workplace, locations.json(), nullString(strings.Join(payRaws, "; ")), pays.json(), url, desc, postedAt,
+		workplace, locations.json(), nullString(strings.Join(payRaws, "; ")), pays.json(), url, desc, postedAt, emp,
 		isClosed, a.now,
 		wasClosed && !isClosed, a.now,
 		a.now, a.by, jobID); err != nil {

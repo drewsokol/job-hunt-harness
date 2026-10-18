@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "titles": {
+    "require_any": ["engineer", "developer", "architect"],
+    "exclude_any": ["manager", "director", "head of", "vp", "intern", "sales", "recruiter", "designer", "mobile", "ios", "android"]
+  },
+  "levels": ["senior", "staff", "principal"],
+  "location": {
+    "remote_in": ["US"],
+    "onsite_or_hybrid_in": ["Columbus, OH"]
+  },
+  "employment_exclude": ["contract", "part-time", "temporary", "internship"],
+  "keywords": {
+    "title_any": ["ai", "agent", "llm", "ml platform", "developer experience"],
+    "body_any": ["llm", "large language model", "agentic", "mcp", "rag", "evals", "prompt", "generative ai"],
+    "min_body_hits_without_title_match": 3
+  },
+  "pay_floor": { "amount": 150000, "currency": "USD" },
+  "flag": { "title_any": ["forward deployed", "solutions", "customer", "field"] }
+}

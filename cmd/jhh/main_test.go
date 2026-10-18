@@ -190,6 +190,16 @@ func TestCommands(t *testing.T) {
 		{args: []string{"probe", "../admin"}, code: 2, inStderr: "board slug"},
 		{args: []string{"probe"}, code: 2, inStderr: "usage: jhh probe"},
 		{args: []string{"refresh", "--company", "nobody"}, code: 1, inStderr: `no company named "nobody"`},
+		{args: []string{"candidates"}, code: 0, inStdout: "No filters are set"},
+		{args: []string{"candidates", "--status", "maybe"}, code: 2, inStderr: "usage: jhh candidates"},
+		{args: []string{"filters"}, code: 0, inStdout: "No filters are set"},
+		{args: []string{"filters", "set", "-"}, code: 2, inStderr: "--rationale"},
+		{args: []string{"filters", "frobnicate"}, code: 2, inStderr: "usage:"},
+		{args: []string{"filters", "preview", "testdata/bad-filters.json"}, code: 1, inStderr: `levels[0]: "sr" is not a known level`},
+		{args: []string{"filters", "preview", "../../examples/filters.json"}, code: 0, inStdout: "Judged 0 open jobs."},
+		{args: []string{"filters", "set", "../../examples/filters.json", "--rationale", "test"}, code: 0, inStdout: "Saved filters version 1."},
+		{args: []string{"filters"}, code: 0, inStdout: "Filters version 1, set by user"},
+		{args: []string{"candidates"}, code: 0, inStdout: "0 open jobs are unscreened."},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
