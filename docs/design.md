@@ -93,7 +93,7 @@ Sources are registered in a map, the same as `SOURCES` in the reference code. Ea
 
 There are four ways to add sources, from simplest to most open:
 
-1. **Built-in sources (MVP).** A new package that implements `Source`, plus one line in the registry, added by PR. Every source must pass a shared **conformance suite**: fixtures in, normalized postings out, ETag handling, probing, URL matching, a limit on response size, and the untrusted labelling. That keeps community contributions safe to merge.
+1. **Built-in sources (MVP).** A new package that implements `Source`, plus one line in `sources/builtin`, added by PR. Every source must pass a shared **conformance suite**: fixtures in, normalized postings out, ETag handling, probing, URL matching, a limit on response size, and the untrusted labelling. That keeps community contributions safe to merge.
 2. **The agent as a source (MVP).** `add_jobs` accepts jobs from the agent. Anything your agent can read (a link from a friend, a recruiter email, a Workday page it opened in its browser, a post you pasted) becomes a job in jhh, with no scraping code in jhh. Jobs added this way are labelled `origin=agent`, treated as untrusted like any listing, and deduped like everything else. See the `add_jobs` tool in section 5.
 3. **Sources defined by config (later).** Many simple job boards (Workable, Recruitee, SmartRecruiters, Rippling) are a URL template plus a field mapping. A declarative JSON adapter covers them without new Go code.
 4. **External plugins (only if people ask).** A separate binary that exchanges JSON with jhh over stdin and stdout, the way Terraform providers work. This is for sources that can't be merged into the main repo.
@@ -148,10 +148,10 @@ None of the three can apply our filters on its side, so the savings come from ca
 
 ### Normalization (shared by all sources)
 
-- **Location** → `workplace` (`remote` | `hybrid` | `onsite` | `unknown`) and a list of `{city, region, country}` places. A small vocabulary in Go (`normalize/places.go`: countries, regions, US states, Canadian provinces, common job cities) replaces the hard-coded `NON_US` regex. It handles "City, ST", "City, Washington", "Dublin, IE", lists of cities, `|`, `;` and `•` separators, and location text in titles ("Staff AI Engineer | Canada | Remote"). Two-letter codes stand alone only for US and UK, because "IN", "OR" and "CA" are ambiguous. The board's own workplace and country fields win when present. Workplace is `unknown` when nothing says: a city alone doesn't tell you whether remote work is possible. On the 2026-10-18 starter list, 98% of 12,234 postings got at least one recognized place; the rest keep their raw text.
+- **Location** → `workplace` (`remote` | `hybrid` | `onsite` | `unknown`) and a list of `{city, region, country}` places. A small vocabulary in Go (`normalize/places.go`: countries, regions, US states, Canadian provinces, common job cities) replaces the hard-coded `NON_US` regex. It handles "City, ST", "City, Washington", "Dublin, IE", lists of cities, `|`, `;` and `•` separators, and location text in titles ("Staff AI Engineer | Canada | Remote"). Two-letter codes stand alone only for US and UK, because "IN", "OR" and "CA" are ambiguous. The board's own workplace and country fields win when present. Workplace is `unknown` when nothing says: a city alone doesn't tell you whether remote work is possible. On a test list of 91 companies (2026-10-18), 98% of 12,234 postings got at least one recognized place; the rest keep their raw text.
 - **Pay** → a list of `{min, max, currency, period, label}` ranges, plus the raw text. A board's structured pay is used first, then the pay field, then the description. The parser handles `$158,000 — $248,000`, `$231K – $340K`, `$120 - 150K`, `USD 120,000 - 150,000`, `€80.000 - €95.000`, `$60/hr - $80/hr`, and labelled ranges for different locations. Single figures (`$156.6K`) are only read from short pay fields, because descriptions mention funding and stipends. Amounts that can't be pay are ignored. If parsing fails, it keeps the raw text and leaves the numbers empty. It never guesses.
 - **Text**: HTML is reduced to the text a reader sees. Scripts, styles, comments and elements hidden with CSS or the `hidden` attribute are dropped (detection reports hidden content separately, and the raw HTML is kept for review). The full text is stored, and tools truncate on output.
-- **Boilerplate trimming** (`normalize.TrimBoilerplate`): sections under headings such as "Benefits", "About us", "About <company>" and "Equal opportunity", and lines that are boilerplate on their own (equal-opportunity and privacy statements), are dropped. Lines stating pay are always kept. The prefilter counts body keywords in the trimmed text, and in M4 the trimmed text is what goes to the agent. About 90 candidates × 5,000 characters is roughly 110k tokens per screening run, so this matters to anyone paying per token. Measured on the 2026-10-18 starter list, it saves 22% of description text (19% for that day's candidates), against a guess of 30–50%. Lines repeated across 30% or more of one company's postings (the company's own template) make up another 23% of what's left, so dropping those in M4 would get to roughly 40%. The UI always shows the full text.
+- **Boilerplate trimming** (`normalize.TrimBoilerplate`): sections under headings such as "Benefits", "About us", "About <company>" and "Equal opportunity", and lines that are boilerplate on their own (equal-opportunity and privacy statements), are dropped. Lines stating pay are always kept. The prefilter counts body keywords in the trimmed text, and in M4 the trimmed text is what goes to the agent. About 90 candidates × 5,000 characters is roughly 110k tokens per screening run, so this matters to anyone paying per token. Measured on that test list, it saves 22% of description text (19% for that day's candidates), against a guess of 30–50%. Lines repeated across 30% or more of one company's postings (the company's own template) make up another 23% of what's left, so dropping those in M4 would get to roughly 40%. The UI always shows the full text.
 
 ### Untrusted content and prompt injection
 
@@ -166,7 +166,7 @@ Everything that comes from a job listing (title, location, description, pay text
   The server instructions and every playbook tell the agent that text inside `untrusted` is data to evaluate, never instructions to follow.
 - **Cleaned, not rewritten.** Zero-width and other invisible characters and HTML comments are removed, and the HTML is reduced to plain text. The wording is never changed, so what you review is what the company wrote.
 - **Detection is rule-based (no AI in the server).** It runs on the raw HTML, before stripping, so hidden text is still visible to the rules. It looks for text addressed to an AI ("if you are an AI", "ignore previous instructions", "include the word …"), hidden text (`display:none`, zero font size, text the same colour as the background), comments addressed to an AI, and ASCII smuggled in invisible Unicode tag characters. The agent can also report what it notices while screening, with `report_injection`.
-- **Rules must match text addressed to an AI, not text about AI.** Many companies in the starter list build AI products, so their listings say "as an AI Architect", "system prompt" and "how an AI agent should be evaluated". A first version of the rules flagged 74 of 12,234 live postings, all wrongly. The first bulk fetch of Greenhouse descriptions (M3) found 82 more ("your recruiter can share more information about the salary range…"). The current rules flag one posting on the starter list, a real AI-detection canary. Every false positive is kept as a regression test. A flag that fires on ordinary listings would teach people to ignore flags.
+- **Rules must match text addressed to an AI, not text about AI.** Many companies in the 91-company test list build AI products, so their listings say "as an AI Architect", "system prompt" and "how an AI agent should be evaluated". A first version of the rules flagged 74 of 12,234 live postings, all wrongly. The first bulk fetch of Greenhouse descriptions (M3) found 82 more ("your recruiter can share more information about the salary range…"). The current rules flag one posting on that list, a real AI-detection canary. Every false positive is kept as a regression test. A flag that fires on ordinary listings would teach people to ignore flags.
 - **Flagged for review, not treated as bad automatically.** Not every instruction aimed at AI is hostile. A company asking AI-written applications to include a codeword is defending itself. Each finding records an excerpt and a kind:
   - `canary`: an AI-detection instruction. This is useful to know about. The job is shown normally with a note: "This posting checks for AI-written applications."
   - `hostile`: tries to change ratings, call tools, or get data out.
@@ -209,7 +209,7 @@ Grouping is a link between rows, not a merge, so **merge** and **split** are ava
   - For a `Detailer` source (Greenhouse), descriptions are then fetched for the open postings of jobs that passed stage 1 or are waiting on a description, when the description was never fetched or the board's `updated_at` is newer than the fetch. This also happens after a 304, so jobs left waiting by a filter change get their descriptions without the board changing. At most 250 per company per refresh; the rest wait for the next one.
   - Stage 2 (description keywords, pay found in the text, remote work mentioned only in the text) then runs on those jobs.
   - Lever and Ashby send descriptions with the list. They are held in memory while stage 1 runs, and only those of jobs that passed or are waiting are stored. If a filter change leaves jobs waiting at a board that hasn't changed, the next refresh ignores the ETag and lists the board again.
-  - With no filters set, nothing is judged and no Greenhouse descriptions are fetched. On the 2026-10-18 starter list with `examples/filters.json`, stage 1 left 1,078 jobs waiting, and fetching their 1,696 postings took 17 seconds: 14% of the 12,220 postings.
+  - With no filters set, nothing is judged and no Greenhouse descriptions are fetched. On the 91-company test list (2026-10-18) with `examples/filters.json`, stage 1 left 1,078 jobs waiting, and fetching their 1,696 postings took 17 seconds: 14% of the 12,220 postings.
 - A job's listing fields are derived from its postings: places and pay are the union over its open postings, the workplace is the most flexible one, and the description is the newest. User fields (status, notes, applied date) are never touched by a refresh.
 - Upserts postings and sets `first_seen_at` and `last_seen_at`. When a posting is missing from a feed that fetched successfully, it is marked **closed**. A 304 counts as a successful fetch, so nothing gets marked closed by mistake.
 - **Guard against suspect feeds.** If a board returns zero postings, or more than half fewer than last time, nothing is closed. The company is marked `suspect` with the reason, and the agent and the UI show it. This happens when a company changes job boards or a feed glitches, and without the guard every job you track there would show as closed.
@@ -222,7 +222,7 @@ Grouping is a link between rows, not a merge, so **merge** and **split** are ava
 
 ### Storage and retention
 
-Searching and adding companies over months means postings keep arriving, and most of them never matter. The measured cost before these rules: the 2026-10-18 starter list took 135 MB for 12,220 postings, about 11 KB each, almost all of it descriptions stored three times (the raw HTML, the plain text, and a copy on the job). jhh keeps what is useful and lets the rest go:
+Searching and adding companies over months means postings keep arriving, and most of them never matter. The measured cost before these rules: the 91-company test list took 135 MB for 12,220 postings on 2026-10-18, about 11 KB each, almost all of it descriptions stored three times (the raw HTML, the plain text, and a copy on the job). jhh keeps what is useful and lets the rest go:
 
 - **Descriptions only where they are needed.** A posting's description is stored when its job passes stage 1 or is waiting on stage 2, and when you or the agent have acted on the job. A job dropped by stage 1 keeps its listing fields and fingerprint (enough for dedupe and for judging it again if the filters change, which fetches the description again), at about 2 KB counting its job, events and indexes.
 - **Stored once.** A feed job reads its description from its newest posting rather than keeping a copy. The raw HTML is kept only for postings with a content flag, where it is needed for review.
@@ -230,7 +230,7 @@ Searching and adding companies over months means postings keep arriving, and mos
 - **Closed jobs that were judged but not pursued** (`screened_out`, `skipped`) lose their descriptions 90 days after closing. The job, its screening and its timeline are kept, because they are small and they are what feedback signals learn from.
 - **Jobs you pursued are kept in full**, forever: `review`, `applied`, `interviewing`, `offer`, `rejected` and `withdrawn`. That is your own record of the search.
 
-The periods are constants for the MVP and can become settings if people need them. Refresh reports what the rules removed. Measured on 2026-10-19 with the example filters and one Muse query, the same starter list plus 548 search results took 43 MB instead of 135: 15.5 MB of descriptions for the 2,298 postings that passed stage 1, and about 2 KB for each other posting. A year of searching and added companies (about 100,000 postings) stays in the low hundreds of MB, and the database stops growing once deletions keep pace with new postings.
+The periods are constants for the MVP and can become settings if people need them. Refresh reports what the rules removed. Measured on 2026-10-19 with the example filters and one Muse query, the same test list plus 548 search results took 43 MB instead of 135: 15.5 MB of descriptions for the 2,298 postings that passed stage 1, and about 2 KB for each other posting. A year of searching and added companies (about 100,000 postings) stays in the low hundreds of MB, and the database stops growing once deletions keep pace with new postings.
 
 ### Prefilter
 
@@ -267,7 +267,7 @@ The order of authority is **profile > confirmed memories > inferred memories**. 
 
 ### Setup flow
 
-1. **In jhh (optional):** you can write a profile, paste a resume and check the starter companies. **You can also skip all of it.** The first-run screen says so: "Or connect your agent and let it interview you."
+1. **In jhh (optional):** you can write a profile, paste a resume and add companies. **You can also skip all of it.** The first-run screen says so: "Or connect your agent and let it interview you."
 2. **In your agent:** you say "initialize job hunt harness". That runs the `initialize` prompt, or, for clients that don't support MCP prompts, the agent picks it up from the server's `instructions` and calls `get_playbook("initialize")`. The agent:
    - calls `get_setup_state` to read the profile, resume, companies, any existing memories and filters, and what is still missing;
    - if there's no resume text, asks whether there's a resume it can read. Agents with file access, like Claude Code, can read it from disk and save the text with `set_resume_text`.
@@ -370,7 +370,7 @@ The schema itself is `internal/store/migrations/`; this section is the overview.
 
 ```
 companies      id, name, name_key, source, board_key UNIQUE, source_config_json, careers_url, enabled,
-               origin(registry|user|agent|search), etag, last_fetch_at, last_fetch_ok, last_error, open_postings,
+               origin(user|agent|search), etag, last_fetch_at, last_fetch_ok, last_error, open_postings,
                suspect, suspect_reason
 postings       id ("gh:exampleco:123"), company_id, opening_key, job_id, source, external_id,
                canonical_url, title, title_key, location_raw, workplace, locations_json, url, posted_at,
@@ -513,7 +513,7 @@ The summary strip from the reference (to review, applications, applied in the la
 
 **After the MVP:** mute a company, team or title pattern, which the agent turns into filter rules.
 
-**First run:** an empty database shows a setup screen instead of empty tabs. The main path is: connect your agent (with snippets) and tell it "initialize job hunt harness". It will interview you and set everything up. A secondary path lets you write your profile, paste a resume and check the starter companies yourself first. The screen updates live as the agent saves the profile, memories and filters, so you can watch it build.
+**First run:** an empty database shows a setup screen instead of empty tabs. The main path is: connect your agent (with snippets) and tell it "initialize job hunt harness". It will interview you and set everything up. A secondary path lets you write your profile, paste a resume and add companies yourself first. The screen updates live as the agent saves the profile, memories and filters, so you can watch it build.
 
 ## 7. Tech stack (recommendation)
 
@@ -553,7 +553,7 @@ cmd/jhh/                 # main.go: subcommand dispatch (default: stdio MCP + UI
 internal/
   core/                  # jobs, screening, profile, memories, filters, tracker, companies: the logic
   prefilter/             # stage 1 and 2 evaluation, filters schema and validation
-  sources/               # source.go (interfaces, registry), conformance/ (shared suite), greenhouse/, lever/, ashby/, themuse/ (search)
+  sources/               # source.go (interfaces), builtin/ (the shipped sources), conformance/ (shared suite), greenhouse/, lever/, ashby/, themuse/ (search)
   untrusted/             # cleaning, injection rules, the untrusted envelope used in tool output
   dedupe/                # identity ladder, fingerprints, URL canonicalization
   normalize/             # location, pay, text; places.go (vocabulary)
@@ -561,7 +561,6 @@ internal/
   mcpserver/             # tools, prompts, resources, server instructions
   web/                   # HTTP server, JSON API, SSE, Origin/Host checks; static/ (embedded)
   playbooks/             # initialize.md, screen_new_jobs.md, … (embedded)
-  registry/              # companies.json (embedded starter list)
 examples/                # fictional profiles
 docs/                    # design.md, adding-a-source.md, adding-companies.md
 reference/tracker.html   # the original dashboard; delete once the UI is ported (M5)
@@ -579,7 +578,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 - **Storage rules:** descriptions kept only where needed, closed jobs nobody touched deleted
 - **Dedupe:** the identity ladder (posting ID, opening ID, canonical URL, fingerprint, reposts); `merge_jobs` and `split_job`; short job numbers
 - **The agent as a source:** `add_jobs` (supported-board URLs fetched by jhh, otherwise the agent's fields; no arbitrary page fetching)
-- **Companies:** the starter company list (`internal/registry/companies.json`); `add_company` with probing, through MCP
+- **Companies:** no starter list. Each user's list starts empty and grows from what search finds and what they choose to add. `jhh companies add` finds a company's Greenhouse, Lever or Ashby board (M3.5), and `add_company` does the same through MCP
 - **Profile and memories, all through MCP:** profile and resume text; `update_profile` and `edit_profile_section` (each save is a new stored version); `remember`, `recall`, `update_memory` and `forget` (recall uses a plain text match); `get_context` and `get_setup_state`
 - **Filters:** `preview_filters` and `set_filters`, with one active version; the two-stage prefilter with recorded reasons
 - **Screening and tracking tools:** `refresh_jobs`, `list_candidates`, `get_job`, `record_screening`, `update_application`, `log_outreach`, `update_outreach`, `get_tracker`, `whats_new`, `open_dashboard`, `report_injection`; untrusted labelling and rule-based injection detection; UTC everywhere; the localhost security baseline from section 7
@@ -596,7 +595,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 - `jhh setup <client>` (registers jhh with Claude Code, Cursor and others, or prints the snippet); mute controls
 - Sources defined by config (Workable, Recruitee, SmartRecruiters, …)
 - Export (JSON) and backup
-- The GitHub setup and CI from section 11; release binaries for Windows, macOS and Linux; a broader starter company list (M8)
+- The GitHub setup and CI from section 11; release binaries for Windows, macOS and Linux (M8)
 
 ### Maybe later
 - "Screen now" in the UI with the user's own API key. **Dropped from the plan:** it would put an AI inside the window. Reconsider only if users without an MCP-capable agent ask for it, and first check the current Anthropic API terms and SDK.
@@ -615,11 +614,10 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 
 ## 9. Open questions for the owner
 
-**Settled:** the name is Job Hunt Harness, the binary is `jhh`, and the module path is `github.com/drewsokol/job-hunt-harness`. The MVP in section 8 gets built first, and features come after it works. The license is MIT (`LICENSE`). jhh isn't registered with The Muse for now. Employers that search finds are probed for a board only on request (the agent suggests, you decide); doing it automatically is on the roadmap. The reference fetch and probe scripts were ported and removed from the history along with the owner's personal details; `reference/tracker.html` stays until the UI is ported.
+**Settled:** the name is Job Hunt Harness, the binary is `jhh`, and the module path is `github.com/drewsokol/job-hunt-harness`. The MVP in section 8 gets built first, and features come after it works. The license is MIT (`LICENSE`). jhh isn't registered with The Muse for now. There's no starter company list: every user's companies come from their own search, so jhh doesn't ship anyone's idea of which employers matter. Employers that search finds are probed for a board only on request (the agent suggests, you decide); doing it automatically is on the roadmap. The reference fetch and probe scripts were ported and removed from the history along with the owner's personal details; `reference/tracker.html` stays until the UI is ported.
 
-1. **Starter registry scope.** The starter list is 91 companies, mostly AI and dev-tools. Ship it as is, or broaden it before launch? Search (M3.5) makes the list less important: it can shrink to a small, broad sample.
-2. **Inferred memories.** Should the agent save inferred memories without asking (labelled, shown in the UI, given less weight: the current proposal), or only after you agree in the chat?
-3. **Fit scale.** Keep the reference's three levels plus an explicit `no`, or use a numeric score?
+1. **Inferred memories.** Should the agent save inferred memories without asking (labelled, shown in the UI, given less weight: the current proposal), or only after you agree in the chat?
+2. **Fit scale.** Keep the reference's three levels plus an explicit `no`, or use a numeric score?
 
 ## 10. README outline
 
@@ -629,7 +627,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 4. **Quick start**: install the binary (release download or `go install`), then `claude mcp add jhh -- jhh` (with a link to setup for other clients), then tell your agent "initialize job hunt harness", then "screen new jobs", then "open my dashboard"
 5. **Connecting your agent**: Claude Code, Cursor, Claude Desktop, generic streamable HTTP/stdio
 6. **Your profile**: let your agent interview you, or write it yourself; the standard sections; a fictional example; how the agent edits it and how to undo a change
-7. **Companies**: the starter registry, adding your own, probing, contributing to the registry
+7. **Companies**: there's no starter list; search finds employers, and you add the ones whose boards you want read (`jhh companies add`, or your agent's `add_company`)
 8. **Privacy**: what stays on your machine (everything), where the data lives, how to back it up and delete it
 9. **Limitations**: boards only for companies jhh knows (search through The Muse finds others, applied to through The Muse's page); no Workday yet; feeds can lag or change
 10. **Contributing**: link to CONTRIBUTING.md; good first issues (new companies, pay-parser cases, sources)
@@ -642,10 +640,9 @@ This is planned but deliberately put off: CI, branch protection, the license and
 - **Branch**: the local branch is `master`. Rename it to `main` before the first push (`git branch -m master main`). Protect `main`: require PRs, passing CI and a linear history.
 - **Visibility**: public from the first push, after deciding on question 3 above.
 - **Files**: `LICENSE`, `README.md`, `CONTRIBUTING.md` (dev setup, the privacy rules from CLAUDE.md, how to add a source or company), `CODE_OF_CONDUCT.md` (Contributor Covenant), `SECURITY.md` (with GitHub private vulnerability reporting turned on).
-- **Issue templates**: bug report, feature request, and an **"Add a company"** form with company name, careers URL, ATS and slug, so people can contribute to the registry without writing code.
+- **Issue templates**: bug report and feature request.
 - **PR template** with a privacy checklist: "no real resumes, profiles, salaries, contacts or databases; fixtures are made up".
 - **CI (GitHub Actions)**: `gofmt`, `go vet`, `staticcheck` and `go test -race` on Ubuntu, macOS and Windows. Also a guard that fails if `*.db`, `profile*.md` or `data/` show up in a diff.
-- **Scheduled workflow (weekly)**: probe every company in the registry and open or update an issue listing the dead or moved feeds. This keeps the registry accurate without anyone checking it by hand.
 - **Security settings**: secret scanning with push protection, Dependabot (Go modules and actions), CodeQL, `govulncheck` in CI.
 - **Community**: turn on Discussions (for questions and "show your setup"); add repo topics (`mcp`, `job-search`, `local-first`, `claude`); label a few issues `good first issue` at launch.
 - **Releases**: tag `v0.x` releases. goreleaser builds the binaries and checksums from Actions, with artifact attestations, so users can verify that a download came from this repo. Unsigned binaries trigger Windows SmartScreen and macOS Gatekeeper warnings, so start with `go install` and a Homebrew tap, and add code signing and notarization when there are enough users to justify the cost.
@@ -701,13 +698,13 @@ The normal test run never touches the network, and no real people or postings ap
 | **M1 Store** | Schema and migrations (locking and backup), models, actor recording, store package with tests | — |
 | **M2 Fetch** | Source interface, conformance suite, and the Greenhouse, Lever and Ashby sources; normalization; untrusted cleaning and injection rules; ETag caching; two-stage detail fetching (connected to stage 1 in M3); the dedupe ladder; closed-posting detection and the suspect-feed guard; seeding the starter companies; `jhh refresh` and `jhh probe` | Fetch real jobs from the command line |
 | **M3 Filter** | Filters schema and validation, the two-stage prefilter with reasons, descriptions fetched for stage-1 passes, boilerplate trimming, `jhh candidates`, and `jhh filters` (show, preview, set) for checking filters before the MCP tools exist | The reference script, rebuilt properly |
-| **M3.5 Search and storage** | The `Searcher` interface and The Muse source; `search` queries in the filters, checked against The Muse's lists; the request budget and closing rules; companies found by search, and board postings attaching to their jobs; the storage and retention rules | Find jobs at companies you didn't know to list, without the database growing forever |
+| **M3.5 Search and storage** | The `Searcher` interface and The Muse source; `search` queries in the filters, checked against The Muse's lists; the request budget and closing rules; companies found by search, and board postings attaching to their jobs; the storage and retention rules; no starter list, and `jhh companies` to add a company's board | Find jobs at companies you didn't know to list, without the database growing forever |
 | **M4 MCP** | The MVP tools from section 8, including `add_company` probing, `add_jobs` and `whats_new`; the untrusted envelope; the `initialize` and `screen_new_jobs` playbooks; server instructions | **Use it daily from Claude Code.** You start using it yourself here. |
 | **M5 Window** | Tracker UI ported onto the JSON API, with the session token, CSP and external JS; manual add; keyboard triage and undo; content-flag review; read-only Profile page; live updates through `data_version` and SSE; `open_dashboard` and port handoff | Triage in the browser. **The MVP is complete.** |
 | *After the MVP* | | |
 | **M6 Setup and curation** | Editing screens for profile, memories, filters and companies; profile restore; first-run and Connect screens | A stranger can set it up |
 | **M7 Self-improvement** | Filter version history and guardrail, feedback signals, `tune`, `update_profile` and `follow_up_review` playbooks | The system learns from how you use it |
-| **M8 Release** | `jhh serve`, `jhh setup`, `add_jobs` reading JobPosting data from any URL, export, broader starter list, docs, the GitHub setup from section 11, v0.1 binaries | Public launch |
+| **M8 Release** | `jhh serve`, `jhh setup`, `add_jobs` reading JobPosting data from any URL, export, docs, the GitHub setup from section 11, v0.1 binaries | Public launch |
 
 The order after M5 is a starting point. What actually comes next should depend on what using the MVP shows.
 

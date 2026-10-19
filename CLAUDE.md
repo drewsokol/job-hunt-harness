@@ -23,7 +23,7 @@ Status: the design is agreed and the MVP build is starting. **Read `docs/design.
 
 `reference/tracker.html` is the dashboard from the original personal version: the design to port in M5. Its inline script must become an external file to satisfy the strict Content Security Policy. Delete it once the UI is ported.
 
-The original fetch and probe scripts were removed from the repo and its history once their logic was ported (`internal/sources`, `internal/prefilter`, `jhh probe`). The starter company list lives in `internal/registry/companies.json`.
+The original fetch and probe scripts were removed from the repo and its history once their logic was ported (`internal/sources`, `internal/prefilter`, `jhh probe`). There is no starter company list: each user's companies come from their own search and choices.
 
 ## Lessons from the reference code
 
@@ -37,7 +37,7 @@ The original fetch and probe scripts were removed from the repo and its history 
 - **Workday and custom career sites** have no simple public feed; the agent can add those jobs through `add_jobs`.
 - **The Muse's location filter also returns every remote job**, its results aren't in date order (new jobs land on any page), and it keeps listings up for years. So jhh reads every page of a query and skips results over 90 days old. An unknown category returns nothing instead of an error, so names are checked against `themuse.Categories`.
 - **The Muse's CloudFront blocks curl's default user agent** (403, which is also its rate-limit answer). Send jhh's user agent when checking it by hand.
-- **Injection rules must match text addressed to an AI, not text about AI.** Listings from AI companies say "as an AI Architect" and "system prompt" all the time. Check rule changes against a live refresh of the starter list, and add any false positive as a test in `internal/untrusted`. Greenhouse descriptions are only fetched once filters are set, so a live check needs `jhh filters set examples/filters.json` and a second refresh.
+- **Injection rules must match text addressed to an AI, not text about AI.** Listings from AI companies say "as an AI Architect" and "system prompt" all the time. Check rule changes against a live refresh of a few dozen public boards (added with `jhh companies add` to a scratch data dir; keep the list outside the repo), and add any false positive as a test in `internal/untrusted`. Greenhouse descriptions are only fetched once filters are set, so a live check needs `jhh filters set examples/filters.json` and a second refresh.
 - **Hidden text stays out of the plain description.** It is kept in the raw HTML and the flag excerpt for review, so the agent screens what a human reader sees.
 - **Prefilter reasons never quote the listing.** They name filter terms and jhh's own vocabulary (countries, states, regions), so they can sit outside the untrusted envelope. City names can be raw listing text, so reasons leave them out.
 - **Never write invisible characters into source files.** Build them from code points (`string(rune(0x200b))`) so the repo itself is free of them.

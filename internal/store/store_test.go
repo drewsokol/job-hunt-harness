@@ -215,7 +215,7 @@ func TestJobStatusChangesAreRecorded(t *testing.T) {
 	agent := Agent("claude-code")
 
 	company, err := s.AddCompany(ctx, ActorUser, NewCompany{Name: "Example Co", Source: "greenhouse", BoardKey: "greenhouse:exampleco",
-		SourceConfig: json.RawMessage(`{"slug":"exampleco"}`), Origin: "registry"})
+		SourceConfig: json.RawMessage(`{"slug":"exampleco"}`), Origin: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}

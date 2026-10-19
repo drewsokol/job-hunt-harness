@@ -65,27 +65,3 @@ func (s *Store) FinishFetchRun(ctx context.Context, r FetchRun) error {
 		return nil
 	})
 }
-
-// AddCompanies inserts companies in one transaction, skipping any whose
-// board_key is already present, and returns how many were added.
-func (s *Store) AddCompanies(ctx context.Context, by Actor, cs []NewCompany) (int, error) {
-	added := 0
-	err := s.write(ctx, func(tx *sql.Tx) error {
-		now := s.stamp()
-		for _, c := range cs {
-			var exists bool
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM companies WHERE board_key = ?)", c.BoardKey).Scan(&exists); err != nil {
-				return err
-			}
-			if exists {
-				continue
-			}
-			if _, err := addCompany(ctx, tx, now, by, c); err != nil {
-				return err
-			}
-			added++
-		}
-		return nil
-	})
-	return added, err
-}

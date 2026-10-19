@@ -5,6 +5,7 @@
 //
 //	jhh            run as an MCP server over stdio (what your agent launches)
 //	jhh refresh    fetch job boards and run searches now
+//	jhh companies  list companies, or add one with its job board
 //	jhh probe      find which job board a company uses
 //	jhh candidates list the jobs that passed the filters
 //	jhh filters    show, preview or set the filters
@@ -36,6 +37,7 @@ const usage = `jhh: Job Hunt Harness
 Usage:
   jhh            run as an MCP server over stdio (what your agent launches)
   jhh refresh    fetch job boards and run searches now [--company NAME ...]
+  jhh companies  list companies; jhh companies add <name> [slug or posting URL]
   jhh probe      find which job board a company uses: jhh probe <slug or posting URL>
   jhh candidates list the jobs that passed the filters [--status STATUS] [--limit N]
   jhh filters    show the filters; jhh filters preview|set <file> (usually your agent does this)
@@ -71,6 +73,8 @@ func run(ctx context.Context, args []string, stdin io.ReadCloser, stdout io.Writ
 		return doctor(ctx, stdout)
 	case "refresh":
 		return refresh(ctx, args[1:], stdout, stderr)
+	case "companies":
+		return companies(ctx, args[1:], stdout, stderr)
 	case "probe":
 		return probe(ctx, args[1:], stdout, stderr)
 	case "candidates":

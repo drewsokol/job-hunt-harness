@@ -326,24 +326,3 @@ func TestNormalize(t *testing.T) {
 		t.Errorf("flags %+v, want one hidden canary", in.Flags)
 	}
 }
-
-func TestSeedRegistryOnce(t *testing.T) {
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "jhh.db"), store.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	ctx := context.Background()
-	srcs := map[string]sources.Source{"greenhouse": nil, "lever": nil, "ashby": nil}
-	n, err := SeedRegistry(ctx, s, srcs)
-	if err != nil || n < 50 {
-		t.Fatalf("SeedRegistry = %d, %v", n, err)
-	}
-	if n, err := SeedRegistry(ctx, s, srcs); err != nil || n != 0 {
-		t.Errorf("second SeedRegistry = %d, %v; want 0", n, err)
-	}
-	cs, _ := s.Companies(ctx)
-	if b, err := sources.ParseBoard(cs[0].SourceConfig); err != nil || b.Slug == "" || cs[0].Origin != "registry" {
-		t.Errorf("seeded company %+v: %v", cs[0], err)
-	}
-}

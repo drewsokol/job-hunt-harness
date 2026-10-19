@@ -289,17 +289,6 @@ func TestApplyFetchRejectsLocalTimes(t *testing.T) {
 	}
 }
 
-func TestAddCompaniesSkipsExisting(t *testing.T) {
-	f := newFetchFixture(t)
-	n, err := f.s.AddCompanies(context.Background(), ActorSystem, []NewCompany{
-		{Name: "Exampleco", Source: "greenhouse", BoardKey: "greenhouse:exampleco", Origin: "registry"},
-		{Name: "Otherco", Source: "lever", BoardKey: "lever:otherco", Origin: "registry"},
-	})
-	if err != nil || n != 1 {
-		t.Errorf("AddCompanies = %d, %v; want 1 added", n, err)
-	}
-}
-
 func TestFetchRuns(t *testing.T) {
 	s := newTest(t)
 	ctx := context.Background()

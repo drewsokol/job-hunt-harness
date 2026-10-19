@@ -19,7 +19,6 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/dedupe"
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
-	"github.com/drewsokol/job-hunt-harness/internal/registry"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 	"github.com/drewsokol/job-hunt-harness/internal/untrusted"
@@ -499,30 +498,6 @@ func normalizePosting(id, source string, p sources.Posting) store.PostingInput {
 		in.DescriptionHTML = ""
 	}
 	return in
-}
-
-// SeedRegistry adds the starter companies the first time it runs and
-// returns how many it added. Later calls do nothing, so a company the user
-// removes stays removed.
-func SeedRegistry(ctx context.Context, s *store.Store, srcs map[string]sources.Source) (int, error) {
-	const key = "registry_seeded_at"
-	if _, done, err := s.Setting(ctx, key); err != nil || done {
-		return 0, err
-	}
-	entries, err := registry.Starter(func(name string) bool { _, ok := srcs[name]; return ok })
-	if err != nil {
-		return 0, err
-	}
-	cs := make([]store.NewCompany, 0, len(entries))
-	for _, e := range entries {
-		cfg, _ := json.Marshal(sources.Board{Slug: e.Slug})
-		cs = append(cs, store.NewCompany{Name: e.Name, Source: e.Source, BoardKey: e.BoardKey(), SourceConfig: cfg, Origin: "registry"})
-	}
-	n, err := s.AddCompanies(ctx, store.ActorSystem, cs)
-	if err != nil {
-		return 0, err
-	}
-	return n, s.SetSetting(ctx, store.ActorSystem, key, utc.Format(utc.Now()))
 }
 
 func (r *Refresher) logger() *slog.Logger {

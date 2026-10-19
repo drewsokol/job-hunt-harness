@@ -15,7 +15,7 @@ CREATE TABLE companies (
     source_config   TEXT    NOT NULL DEFAULT '{}' CHECK (json_valid(source_config)),
     careers_url     TEXT,
     enabled         INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-    origin          TEXT    NOT NULL CHECK (origin IN ('registry', 'user', 'agent', 'search')),
+    origin          TEXT    NOT NULL CHECK (origin IN ('user', 'agent', 'search')),
     etag            TEXT,
     last_fetch_at   TEXT,
     last_fetch_ok   INTEGER CHECK (last_fetch_ok IN (0, 1)),

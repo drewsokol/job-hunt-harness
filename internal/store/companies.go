@@ -20,7 +20,7 @@ type Company struct {
 	SourceConfig  json.RawMessage
 	CareersURL    string
 	Enabled       bool
-	Origin        string // registry | user | agent | search
+	Origin        string // user | agent | search
 	ETag          string
 	LastFetchAt   time.Time
 	LastError     string

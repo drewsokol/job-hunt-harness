@@ -31,7 +31,6 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - `jhh setup <client>`
 - `add_jobs` reading schema.org `JobPosting` data from any URL (with protection against requests to the local network)
 - Export (JSON) and backup command
-- Broader starter company list
 - README, CONTRIBUTING, docs on adding a source or a company
 - GitHub setup: branch protection, CI, security settings, issue and PR templates (design.md section 11)
 - v0.1 release binaries

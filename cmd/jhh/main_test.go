@@ -189,6 +189,12 @@ func TestCommands(t *testing.T) {
 		{args: []string{"probe", "https://example.com/careers/1"}, code: 1, inStdout: "No supported board"},
 		{args: []string{"probe", "../admin"}, code: 2, inStderr: "board slug"},
 		{args: []string{"probe"}, code: 2, inStderr: "usage: jhh probe"},
+		{args: []string{"companies"}, code: 0, inStdout: "No companies yet"},
+		{args: []string{"companies", "frobnicate"}, code: 2, inStderr: "jhh companies add <name> [where]"},
+		// Adding asks the boards, so only what fails before any request is
+		// tested here.
+		{args: []string{"companies", "add", "Made-Up Labs", "../admin"}, code: 1, inStderr: "board slug"},
+		{args: []string{"companies", "add", "Made-Up Labs", "https://example.com/careers/1"}, code: 1, inStderr: "no supported board"},
 		{args: []string{"refresh", "--company", "nobody"}, code: 1, inStderr: `no company named "nobody"`},
 		{args: []string{"candidates"}, code: 0, inStdout: "No filters are set"},
 		{args: []string{"candidates", "--status", "maybe"}, code: 2, inStderr: "usage: jhh candidates"},
