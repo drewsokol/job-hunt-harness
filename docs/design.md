@@ -506,7 +506,7 @@ internal/
   registry/              # companies.json (embedded starter list)
 examples/                # fictional profiles
 docs/                    # design.md, adding-a-source.md, adding-companies.md
-reference/               # frozen original scripts; delete once the port reaches parity
+reference/tracker.html   # the original dashboard; delete once the UI is ported (M5)
 ```
 
 Everything lives under `internal/`, so v1 promises no public Go API. Test fixtures sit in each package's `testdata/`, as Go convention expects.
@@ -519,7 +519,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 - **Fetching:** Greenhouse, Lever and Ashby sources passing the conformance suite; per-source company config; ETag caching; two-stage detail fetching; normalization of location, pay and text, with the known quirks covered by tests; boilerplate trimming; closed-posting detection with the suspect-feed guard
 - **Dedupe:** the identity ladder (posting ID, opening ID, canonical URL, fingerprint, reposts); `merge_jobs` and `split_job`; short job numbers
 - **The agent as a source:** `add_jobs` (supported-board URLs fetched by jhh, otherwise the agent's fields; no arbitrary page fetching)
-- **Companies:** the reference company list loaded as the starter set; `add_company` with probing, through MCP
+- **Companies:** the starter company list (`internal/registry/companies.json`); `add_company` with probing, through MCP
 - **Profile and memories, all through MCP:** profile and resume text; `update_profile` and `edit_profile_section` (each save is a new stored version); `remember`, `recall`, `update_memory` and `forget` (recall uses a plain text match); `get_context` and `get_setup_state`
 - **Filters:** `preview_filters` and `set_filters`, with one active version; the two-stage prefilter with recorded reasons
 - **Screening and tracking tools:** `refresh_jobs`, `list_candidates`, `get_job`, `record_screening`, `update_application`, `log_outreach`, `update_outreach`, `get_tracker`, `whats_new`, `open_dashboard`, `report_injection`; untrusted labelling and rule-based injection detection; UTC everywhere; the localhost security baseline from section 7
@@ -555,13 +555,12 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 
 ## 9. Open questions for the owner
 
-**Settled:** the name is Job Hunt Harness, the binary is `jhh`, and the module path is `github.com/drewsokol/job-hunt-harness`. The MVP in section 8 gets built first, and features come after it works.
+**Settled:** the name is Job Hunt Harness, the binary is `jhh`, and the module path is `github.com/drewsokol/job-hunt-harness`. The MVP in section 8 gets built first, and features come after it works. The reference fetch and probe scripts were ported and removed from the history along with the owner's personal details; `reference/tracker.html` stays until the UI is ported.
 
 1. **Starter registry scope.** The starter list is 91 companies, mostly AI and dev-tools. Ship it as is, or broaden it before launch?
-2. **Reference scripts.** Delete `reference/` once the port reaches parity, or keep it until the UI is ported?
-3. **Inferred memories.** Should the agent save inferred memories without asking (labelled, shown in the UI, given less weight: the current proposal), or only after you agree in the chat?
-4. **Fit scale.** Keep the reference's three levels plus an explicit `no`, or use a numeric score?
-5. **License.** MIT (recommended: simple and common for tools) or Apache-2.0? This can wait for the repo setup, but should be decided before the first public push.
+2. **Inferred memories.** Should the agent save inferred memories without asking (labelled, shown in the UI, given less weight: the current proposal), or only after you agree in the chat?
+3. **Fit scale.** Keep the reference's three levels plus an explicit `no`, or use a numeric score?
+4. **License.** MIT (recommended: simple and common for tools) or Apache-2.0? This can wait for the repo setup, but should be decided before the first public push.
 
 ## 10. README outline
 

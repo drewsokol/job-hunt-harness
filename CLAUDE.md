@@ -21,11 +21,9 @@ Status: the design is agreed and the MVP build is starting. **Read `docs/design.
 
 ## Reference code
 
-`reference/` holds the original personal scripts that proved the loop works. Port their logic into Go. Delete them once the port reaches parity.
-- `fetch_jobs.py`: Greenhouse, Lever and Ashby fetching, the keyword prefilter, dedupe.
-- `probe_ats.py`: finds which board (and slug) a company uses.
-- `companies.json`: 91 companies with verified feeds (the starter list).
-- `tracker.html`: the dashboard design to port. Its inline script must become an external file to satisfy the strict Content Security Policy.
+`reference/tracker.html` is the dashboard from the original personal version: the design to port in M5. Its inline script must become an external file to satisfy the strict Content Security Policy. Delete it once the UI is ported.
+
+The original fetch and probe scripts were removed from the repo and its history once their logic was ported (`internal/sources`, `internal/prefilter`, `jhh probe`). The starter company list lives in `internal/registry/companies.json`.
 
 ## Lessons from the reference code
 
@@ -51,4 +49,4 @@ Status: the design is agreed and the MVP build is starting. **Read `docs/design.
 
 - Never commit real user data: profiles, resumes, salary numbers, notes, contacts or tracker databases. They are in `.gitignore`. Tests use made-up fixtures only.
 - Never log profile, resume, memory or description text. Logs contain IDs and counts.
-- The owner's personal job search lives elsewhere and must not be copied here.
+- The owner's personal job search lives elsewhere and must not be copied here. That includes their location, target roles and pay, in code, docs, tests, examples or commit messages. The history was rewritten once to remove such details; anything committed is public.
