@@ -2,7 +2,7 @@
 
 An open-source, local-first job search tool: an MCP server with a GUI. A job seeker connects their own AI agent (Claude Code, Cursor, or any other MCP client) to it. jhh finds and tracks jobs and stores everything the agent learns about the candidate. The agent does all the judgment: interviewing the user, writing the profile and filters, and screening jobs.
 
-Status: the design is agreed and the MVP build is starting. **Read `docs/design.md` before writing code.** It is the spec. `docs/decisions/` records why the key decisions were made, and `docs/roadmap.md` holds everything after the MVP. If a change would contradict the design, raise it with the owner before writing code.
+Status: milestones M0–M4 are built: jhh works from an agent over MCP. M5, the dashboard, is next. **Read `docs/design.md` before writing code.** It is the spec. `docs/decisions/` records why the key decisions were made, and `docs/roadmap.md` holds everything after the MVP. If a change would contradict the design, raise it with the owner before writing code.
 
 ## Key decisions (details in docs/)
 

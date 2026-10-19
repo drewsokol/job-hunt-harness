@@ -43,9 +43,9 @@ type NewCompany struct {
 	Origin       string
 }
 
-// AddCompany inserts a company and returns its id. A company that search
-// found under the same normalized name gets the board instead, so the
-// board's postings attach to the jobs search found.
+// AddCompany inserts a company and returns its id. A company with no board
+// under the same normalized name, which search or an agent added, gets the
+// board instead, so the board's postings attach to the jobs found before.
 func (s *Store) AddCompany(ctx context.Context, by Actor, c NewCompany) (int64, error) {
 	var id int64
 	err := s.write(ctx, func(tx *sql.Tx) error {
@@ -65,7 +65,7 @@ func addCompany(ctx context.Context, tx *sql.Tx, now string, by Actor, c NewComp
 	if c.Source != "none" {
 		var id int64
 		err := tx.QueryRowContext(ctx, `
-			SELECT id FROM companies WHERE name_key = ? AND source = 'none' AND origin = 'search' ORDER BY id LIMIT 1`, key).Scan(&id)
+			SELECT id FROM companies WHERE name_key = ? AND source = 'none' ORDER BY id LIMIT 1`, key).Scan(&id)
 		switch {
 		case err == nil:
 			if _, err := tx.ExecContext(ctx, `
@@ -165,4 +165,29 @@ func scanCompany(r scanner) (Company, error) {
 // nullString stores an empty string as NULL.
 func nullString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
+}
+
+// SetCompanyEnabled turns reading a company's board on or off. Its jobs
+// stay. Setting the value it already has does nothing.
+func (s *Store) SetCompanyEnabled(ctx context.Context, by Actor, id int64, enabled bool) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		var was bool
+		err := tx.QueryRowContext(ctx, "SELECT enabled FROM companies WHERE id = ?", id).Scan(&was)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("company %d: %w", id, ErrNotFound)
+		}
+		if err != nil || was == enabled {
+			return err
+		}
+		now := s.stamp()
+		if _, err := tx.ExecContext(ctx, "UPDATE companies SET enabled = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+			enabled, now, by, id); err != nil {
+			return err
+		}
+		kind := "company_disabled"
+		if enabled {
+			kind = "company_enabled"
+		}
+		return insertEvent(ctx, tx, now, by, kind, eventRefs{CompanyID: id}, nil)
+	})
 }

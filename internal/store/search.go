@@ -17,11 +17,12 @@ type Employer struct {
 	Covered bool
 }
 
-// Employers matches employer names from search results to companies by
-// their normalized name (dedupe.CompanyKey), adding a company with no
-// board (origin "search") for each one jhh doesn't know. The result is
+// Employers matches employer names from search results or agents to
+// companies by their normalized name (dedupe.CompanyKey), adding a company
+// with no board, with origin "search" or "agent", for each one jhh doesn't
+// know. The result is
 // keyed by the names as given.
-func (s *Store) Employers(ctx context.Context, by Actor, names []string) (map[string]Employer, error) {
+func (s *Store) Employers(ctx context.Context, by Actor, origin string, names []string) (map[string]Employer, error) {
 	out := map[string]Employer{}
 	err := s.write(ctx, func(tx *sql.Tx) error {
 		now := s.stamp()
@@ -51,7 +52,7 @@ func (s *Store) Employers(ctx context.Context, by Actor, names []string) (map[st
 			case errors.Is(err, sql.ErrNoRows):
 				res, err := tx.ExecContext(ctx, `
 					INSERT INTO companies (name, name_key, source, origin, created_at, created_by, updated_at, updated_by)
-					VALUES (?, ?, 'none', 'search', ?, ?, ?, ?)`, name, key, now, by, now, by)
+					VALUES (?, ?, 'none', ?, ?, ?, ?, ?)`, name, key, origin, now, by, now, by)
 				if err != nil {
 					return fmt.Errorf("adding company %q: %w", name, err)
 				}
@@ -59,7 +60,7 @@ func (s *Store) Employers(ctx context.Context, by Actor, names []string) (map[st
 					return err
 				}
 				if err := insertEvent(ctx, tx, now, by, "company_added", eventRefs{CompanyID: e.CompanyID},
-					map[string]string{"origin": "search"}); err != nil {
+					map[string]string{"origin": origin}); err != nil {
 					return err
 				}
 			case err != nil:

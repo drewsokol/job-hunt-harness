@@ -20,7 +20,7 @@ func found(id, title string) PostingInput {
 func TestEmployers(t *testing.T) {
 	f := newFetchFixture(t)
 	ctx := context.Background()
-	es, err := f.s.Employers(ctx, ActorSystem, []string{"Exampleco, Inc.", "Made-Up Labs", "made-up labs", "Made-Up Labs"})
+	es, err := f.s.Employers(ctx, ActorSystem, "search", []string{"Exampleco, Inc.", "Made-Up Labs", "made-up labs", "Made-Up Labs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestEmployers(t *testing.T) {
 	if err != nil || c.Name != "Made-Up Labs" || c.Source != "none" || c.Origin != "search" {
 		t.Errorf("%+v, %v", c, err)
 	}
-	again, err := f.s.Employers(ctx, ActorSystem, []string{"MADE-UP LABS LLC"})
+	again, err := f.s.Employers(ctx, ActorSystem, "search", []string{"MADE-UP LABS LLC"})
 	if err != nil || again["MADE-UP LABS LLC"] != labs {
 		t.Errorf("second lookup %+v, %v", again, err)
 	}
@@ -44,7 +44,7 @@ func TestEmployers(t *testing.T) {
 	if _, err := f.s.db.Exec("UPDATE companies SET enabled = 0 WHERE id = ?", f.company); err != nil {
 		t.Fatal(err)
 	}
-	if es, _ := f.s.Employers(ctx, ActorSystem, []string{"Exampleco"}); es["Exampleco"].Covered {
+	if es, _ := f.s.Employers(ctx, ActorSystem, "search", []string{"Exampleco"}); es["Exampleco"].Covered {
 		t.Error("disabled board still covers its results")
 	}
 }
@@ -52,7 +52,7 @@ func TestEmployers(t *testing.T) {
 func TestSearchPostingsClose(t *testing.T) {
 	f := newFetchFixture(t)
 	ctx := context.Background()
-	es, _ := f.s.Employers(ctx, ActorSystem, []string{"Made-Up Labs"})
+	es, _ := f.s.Employers(ctx, ActorSystem, "search", []string{"Made-Up Labs"})
 	labs := es["Made-Up Labs"].CompanyID
 	out, err := f.s.ApplyPostings(ctx, ActorSystem, labs, []PostingInput{found("1", "Backend Engineer"), found("2", "Data Engineer")})
 	if err != nil || len(out.NewJobs) != 2 {
@@ -91,7 +91,7 @@ func TestSearchPostingsClose(t *testing.T) {
 func TestBoardAddedLaterJoinsSearchJobs(t *testing.T) {
 	f := newFetchFixture(t)
 	ctx := context.Background()
-	es, _ := f.s.Employers(ctx, ActorSystem, []string{"Made-Up Labs"})
+	es, _ := f.s.Employers(ctx, ActorSystem, "search", []string{"Made-Up Labs"})
 	labs := es["Made-Up Labs"].CompanyID
 	if _, err := f.s.ApplyPostings(ctx, ActorSystem, labs, []PostingInput{found("1", "Backend Engineer")}); err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestBoardAddedLaterJoinsSearchJobs(t *testing.T) {
 func TestPrune(t *testing.T) {
 	f := newFetchFixture(t)
 	ctx := context.Background()
-	es, _ := f.s.Employers(ctx, ActorSystem, []string{"Made-Up Labs"})
+	es, _ := f.s.Employers(ctx, ActorSystem, "search", []string{"Made-Up Labs"})
 	labs := es["Made-Up Labs"].CompanyID
 	if _, err := f.s.ApplyPostings(ctx, ActorSystem, labs, []PostingInput{found("1", "Backend Engineer")}); err != nil {
 		t.Fatal(err)

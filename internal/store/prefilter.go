@@ -164,7 +164,7 @@ type PrefilterOutcome struct {
 // ApplyPrefilter records decisions made with filters version. Jobs that
 // haven't been screened move with the decision: pass makes them
 // unscreened, drop makes them filtered_out, and pending returns them to
-// new. Jobs further along keep their status; their decision is still
+// new. Jobs an agent added, and jobs further along, keep their status; their decision is still
 // recorded, so the UI can say a job no longer passes. Unchanged decisions
 // write nothing.
 func (s *Store) ApplyPrefilter(ctx context.Context, by Actor, version int64, ds []PrefilterDecision) (PrefilterOutcome, error) {
@@ -181,13 +181,13 @@ func applyPrefilter(ctx context.Context, tx *sql.Tx, now string, by Actor, versi
 	var out PrefilterOutcome
 	for _, d := range ds {
 		var (
-			status, prev, reasons string
-			score                 float64
-			prevVersion           int64
+			status, prev, reasons, origin string
+			score                         float64
+			prevVersion                   int64
 		)
 		err := tx.QueryRowContext(ctx, `
-			SELECT status, coalesce(prefilter_status, ''), prefilter_reasons, coalesce(prefilter_score, 0), coalesce(filters_version, 0)
-			FROM jobs WHERE id = ?`, d.JobID).Scan(&status, &prev, &reasons, &score, &prevVersion)
+			SELECT status, coalesce(prefilter_status, ''), prefilter_reasons, coalesce(prefilter_score, 0), coalesce(filters_version, 0), origin
+			FROM jobs WHERE id = ?`, d.JobID).Scan(&status, &prev, &reasons, &score, &prevVersion, &origin)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue // deleted since it was read
 		}
@@ -196,6 +196,9 @@ func applyPrefilter(ctx context.Context, tx *sql.Tx, now string, by Actor, versi
 		}
 		newReasons := jsonOr(d.Reasons, "[]")
 		to := nextStatus(JobStatus(status), d.Status)
+		if origin == "agent" {
+			to = JobStatus(status) // added on purpose; the decision is only recorded
+		}
 		if prev == d.Status && reasons == newReasons && score == d.Score && prevVersion == version && to == JobStatus(status) {
 			continue
 		}

@@ -122,7 +122,7 @@ queries:
 	for _, id := range order {
 		names = append(names, employer[id])
 	}
-	employers, err := r.Store.Employers(ctx, r.By, names)
+	employers, err := r.Store.Employers(ctx, r.By, "search", names)
 	if err != nil {
 		return sr, err
 	}

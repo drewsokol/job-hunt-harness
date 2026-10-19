@@ -142,6 +142,23 @@ func TestBinaryHandshake(t *testing.T) {
 	if !strings.Contains(res.Instructions, "untrusted") {
 		t.Errorf("instructions should explain untrusted content: %q", res.Instructions)
 	}
+
+	// The tools and playbooks work over the real transport.
+	tools, err := session.ListTools(ctx, nil)
+	if err != nil || len(tools.Tools) < 20 {
+		t.Fatalf("list tools: %v, %d tools", err, len(tools.Tools))
+	}
+	call, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_setup_state"})
+	if err != nil || call.IsError || len(call.Content) != 1 {
+		t.Fatalf("get_setup_state: %v %+v", err, call)
+	}
+	if text := call.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, `"next_steps"`) {
+		t.Errorf("get_setup_state: %s", text)
+	}
+	prompt, err := session.GetPrompt(ctx, &mcp.GetPromptParams{Name: "initialize"})
+	if err != nil || len(prompt.Messages) != 1 {
+		t.Fatalf("initialize prompt: %v", err)
+	}
 }
 
 func TestDoctorReportsDatabase(t *testing.T) {

@@ -11,7 +11,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - [x] M2 Fetch
 - [x] M3 Filter
 - [x] M3.5 Search and storage
-- [ ] M4 MCP (start using it day to day)
+- [x] M4 MCP (start using it day to day)
 - [ ] M5 Window (MVP complete)
 
 ## Next (M6–M8)

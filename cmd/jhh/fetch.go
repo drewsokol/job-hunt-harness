@@ -57,7 +57,7 @@ func refresh(ctx context.Context, args []string, stdout io.Writer, stderr *os.Fi
 
 	var opts core.RefreshOptions
 	if len(names) > 0 {
-		if opts.CompanyIDs, err = companyIDs(ctx, st, names); err != nil {
+		if opts.CompanyIDs, err = core.CompanyIDs(ctx, st, names); err != nil {
 			fmt.Fprintln(stderr, "jhh:", err)
 			return 1
 		}
@@ -119,28 +119,6 @@ func printRefresh(w io.Writer, res core.RefreshResult) {
 			fmt.Fprintf(w, "    %s: %s\n", e.Company, e.Error)
 		}
 	}
-}
-
-// companyIDs resolves company names or board keys.
-func companyIDs(ctx context.Context, st *store.Store, names []string) ([]int64, error) {
-	cs, err := st.Companies(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var ids []int64
-	for _, n := range names {
-		found := false
-		for _, c := range cs {
-			if strings.EqualFold(c.Name, n) || strings.EqualFold(c.BoardKey, n) {
-				ids = append(ids, c.ID)
-				found = true
-			}
-		}
-		if !found {
-			return nil, fmt.Errorf("no company named %q", n)
-		}
-	}
-	return ids, nil
 }
 
 // probe finds which board a company uses: given a slug, it asks every

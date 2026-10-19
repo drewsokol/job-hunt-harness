@@ -38,7 +38,10 @@ type PostingInput struct {
 	Partial bool
 	// Search means a search source found the posting: its job is created
 	// with origin "search", and it isn't closed by a board's list.
-	Search          bool
+	Search bool
+	// Agent means an agent added the posting (add_jobs): its job is
+	// created with origin "agent", which the prefilter never moves.
+	Agent           bool
 	Description     string
 	DescriptionHTML string // stored only when Flags isn't empty
 	Flags           []ContentFlag
@@ -389,7 +392,10 @@ func (a *applier) assignJob(companyID int64, p PostingInput) error {
 	}
 	if jobID == 0 {
 		origin := "feed"
-		if p.Search {
+		switch {
+		case p.Agent:
+			origin = "agent"
+		case p.Search:
 			origin = "search"
 		}
 		res, err := a.tx.ExecContext(a.ctx, `
@@ -678,4 +684,14 @@ func jsonOr(raw json.RawMessage, def string) string {
 		return def
 	}
 	return string(raw)
+}
+
+// PostingJob returns the job a posting belongs to.
+func (s *Store) PostingJob(ctx context.Context, postingID string) (int64, error) {
+	var id sql.NullInt64
+	err := s.db.QueryRowContext(ctx, "SELECT job_id FROM postings WHERE id = ?", postingID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !id.Valid {
+		return 0, fmt.Errorf("posting %s: %w", postingID, ErrNotFound)
+	}
+	return id.Int64, err
 }

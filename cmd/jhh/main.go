@@ -28,6 +28,8 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/datadir"
 	"github.com/drewsokol/job-hunt-harness/internal/logging"
 	"github.com/drewsokol/job-hunt-harness/internal/mcpserver"
+	"github.com/drewsokol/job-hunt-harness/internal/sources"
+	"github.com/drewsokol/job-hunt-harness/internal/sources/builtin"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -127,7 +129,9 @@ func serveStdio(ctx context.Context, stdin io.ReadCloser, stdout io.WriteCloser,
 		return 1
 	}
 	defer st.Close()
-	err = mcpserver.New(logger).Run(ctx, &mcp.IOTransport{Reader: stdin, Writer: stdout})
+	client := sources.NewClient()
+	srv := mcpserver.New(mcpserver.Deps{Store: st, Logger: logger, Sources: builtin.All(client), Searchers: builtin.Searchers(client)})
+	err = srv.Run(ctx, &mcp.IOTransport{Reader: stdin, Writer: stdout})
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
 		logger.Error("server stopped", "err", err)
 		return 1

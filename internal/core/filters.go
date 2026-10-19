@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
@@ -223,8 +224,8 @@ func tracked(st store.JobStatus) bool {
 // job with them, without fetching anything. The preview of its effect is
 // saved with the version.
 func SetFilters(ctx context.Context, s *store.Store, by store.Actor, f prefilter.Filters, rationale string) (int64, FilterPreview, store.PrefilterOutcome, error) {
-	if rationale == "" {
-		return 0, FilterPreview{}, store.PrefilterOutcome{}, fmt.Errorf("a rationale is required: say in a sentence why the filters are changing")
+	if rationale = strings.TrimSpace(rationale); rationale == "" {
+		return 0, FilterPreview{}, store.PrefilterOutcome{}, &InputError{Problems: []string{"rationale: say in a sentence why the filters are changing"}}
 	}
 	p, ds, unneeded, err := preview(ctx, s, f)
 	if err != nil {

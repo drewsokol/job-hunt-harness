@@ -124,3 +124,30 @@ func AddCompany(ctx context.Context, s *store.Store, by store.Actor, name string
 	cfg, _ := json.Marshal(sources.Board{Slug: b.Slug})
 	return s.AddCompany(ctx, by, store.NewCompany{Name: name, Source: b.Source, BoardKey: b.Key(), SourceConfig: cfg, Origin: origin})
 }
+
+// CompanyIDs resolves company names or board keys, ignoring case. A name
+// shared by several companies resolves to all of them.
+func CompanyIDs(ctx context.Context, s *store.Store, names []string) ([]int64, error) {
+	cs, err := s.Companies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	var missing []string
+	for _, n := range names {
+		found := false
+		for _, c := range cs {
+			if strings.EqualFold(c.Name, n) || c.BoardKey != "" && strings.EqualFold(c.BoardKey, n) {
+				ids = append(ids, c.ID)
+				found = true
+			}
+		}
+		if !found {
+			missing = append(missing, fmt.Sprintf("no company named %q", n))
+		}
+	}
+	if len(missing) > 0 {
+		return nil, &InputError{Problems: missing}
+	}
+	return ids, nil
+}
