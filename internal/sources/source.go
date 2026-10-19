@@ -8,6 +8,9 @@
 // source only has to describe its own board.
 //
 // Every source must pass the shared conformance suite in sources/conformance.
+//
+// Search sources (The Muse) implement Searcher instead: they find postings
+// across employers, and each result names its employer.
 package sources
 
 import (
@@ -80,6 +83,9 @@ type Posting struct {
 	// Partial is true when the listing omitted the description; a Detailer
 	// can fetch it.
 	Partial bool
+	// Company is the employer's name, set by search sources, whose results
+	// come from many employers. Board sources leave it empty.
+	Company string
 }
 
 // ListResult is what Source.List returns.
@@ -117,6 +123,49 @@ type Source interface {
 // (Greenhouse). Refresh calls Detail only for postings worth the request.
 type Detailer interface {
 	Detail(ctx context.Context, b Board, externalID string) (Posting, error)
+}
+
+// Query is one search, from the filters' search section. A posting matches
+// when it is in any of the categories, at any of the levels and in any of
+// the locations; an empty field doesn't narrow.
+type Query struct {
+	Categories []string
+	Levels     []string
+	Locations  []string
+}
+
+// SearchResult is one page of a search.
+type SearchResult struct {
+	Postings []Posting // each with Company set
+	// Pages is how many pages the whole search has.
+	Pages int
+}
+
+// Searcher finds postings across employers (The Muse). Each call is one
+// request, which search APIs count against a rate limit.
+type Searcher interface {
+	Name() string
+	// Prefix is the short form used in posting ids ("tm" in "tm:22008828").
+	Prefix() string
+	// Check returns what is wrong with q in this searcher's terms, such as
+	// a category it doesn't have, one problem per entry.
+	Check(q Query) []string
+	// Search returns one page of q; pages are numbered from 0.
+	Search(ctx context.Context, q Query, page int) (SearchResult, error)
+	// Lookup returns one posting, or ErrPostingNotFound once it's gone.
+	Lookup(ctx context.Context, externalID string) (Posting, error)
+}
+
+// ErrRateLimited means a search source refused a request because too many
+// were made; searching should stop until later.
+var ErrRateLimited = errors.New("rate limit reached")
+
+// ErrPostingNotFound means a search source no longer has the posting.
+var ErrPostingNotFound = errors.New("posting not found")
+
+// SearchPostingID builds jhh's id for a posting found by search: "tm:22008828".
+func SearchPostingID(s Searcher, externalID string) string {
+	return s.Prefix() + ":" + externalID
 }
 
 // ErrBoardNotFound means the board doesn't exist on this source.

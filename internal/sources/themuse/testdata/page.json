@@ -1,0 +1,45 @@
+{
+  "page": 0,
+  "page_count": 2,
+  "items_per_page": 20,
+  "took": 5,
+  "timed_out": false,
+  "total": 23,
+  "results": [
+    {
+      "contents": "<p>Exampleco builds made-up software for imaginary customers.</p><ul><li>Design services</li><li>Mentor the team</li></ul><p>The salary range is $170,000 - $210,000.</p>",
+      "name": "Senior Backend Engineer",
+      "type": "external",
+      "publication_date": "2026-10-12T14:05:09Z",
+      "short_name": "senior-backend-engineer-abc123",
+      "model_type": "jobs",
+      "id": 90000001,
+      "locations": [{ "name": "Flexible / Remote" }, { "name": "Columbus, OH" }],
+      "categories": [{ "name": "Software Engineering" }],
+      "levels": [{ "name": "Senior Level", "short_name": "senior" }],
+      "tags": [],
+      "refs": { "landing_page": "https://www.themuse.com/jobs/exampleco/senior-backend-engineer-abc123" },
+      "company": { "id": 501, "short_name": "exampleco", "name": "Exampleco, Inc." }
+    },
+    {
+      "contents": "<p>A made-up role keeping imaginary shelves stocked.</p>",
+      "name": "Store Associate",
+      "type": "external",
+      "publication_date": "2025-08-13T02:51:38Z",
+      "id": 90000002,
+      "locations": [{ "name": "Springfield, IL" }],
+      "categories": [{ "name": "Software Engineering" }],
+      "levels": [{ "name": "Entry Level", "short_name": "entry" }],
+      "refs": { "landing_page": "https://www.themuse.com/jobs/madeup-stores/store-associate-def456" },
+      "company": { "id": 502, "short_name": "madeup-stores", "name": "Madeup Stores" }
+    },
+    {
+      "contents": "<p>Nobody posted this.</p>",
+      "name": "Engineer with no employer",
+      "id": 90000003,
+      "locations": [],
+      "refs": { "landing_page": "https://www.themuse.com/jobs/x/y" },
+      "company": { "id": 0, "name": "" }
+    }
+  ]
+}

@@ -9,12 +9,13 @@
 CREATE TABLE companies (
     id              INTEGER PRIMARY KEY,
     name            TEXT    NOT NULL,
+    name_key        TEXT    NOT NULL DEFAULT '',       -- dedupe.CompanyKey(name): matches employers named by search results
     source          TEXT    NOT NULL,                  -- greenhouse | lever | ashby | none
     board_key       TEXT    UNIQUE,                    -- e.g. 'greenhouse:exampleco'; NULL when there is no board
     source_config   TEXT    NOT NULL DEFAULT '{}' CHECK (json_valid(source_config)),
     careers_url     TEXT,
     enabled         INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-    origin          TEXT    NOT NULL CHECK (origin IN ('registry', 'user', 'agent')),
+    origin          TEXT    NOT NULL CHECK (origin IN ('registry', 'user', 'agent', 'search')),
     etag            TEXT,
     last_fetch_at   TEXT,
     last_fetch_ok   INTEGER CHECK (last_fetch_ok IN (0, 1)),
@@ -28,6 +29,8 @@ CREATE TABLE companies (
     updated_by      TEXT    NOT NULL
 ) STRICT;
 
+CREATE INDEX companies_name_key ON companies (name_key);
+
 -- A job is what the user triages. Its id doubles as the short number shown
 -- to people and agents (#482); AUTOINCREMENT means a number is never reused.
 CREATE TABLE jobs (
@@ -40,13 +43,13 @@ CREATE TABLE jobs (
     pay_raw             TEXT,
     pay_ranges          TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(pay_ranges)),
     url                 TEXT,
-    description         TEXT,
+    description         TEXT,                          -- manual and agent jobs; feed jobs read their newest posting's
     posted_at           TEXT,
     first_seen_at       TEXT    NOT NULL,
     closed_at           TEXT,
     reposted_at         TEXT,
     hidden_at           TEXT,
-    origin              TEXT    NOT NULL CHECK (origin IN ('feed', 'manual', 'agent')),
+    origin              TEXT    NOT NULL CHECK (origin IN ('feed', 'search', 'manual', 'agent')),
     employment_type     TEXT,
     -- pending: stage 1 passed and the decision needs a description not yet fetched.
     prefilter_status    TEXT    CHECK (prefilter_status IN ('pass', 'drop', 'pending')),
@@ -90,8 +93,11 @@ CREATE TABLE postings (
     pay_raw              TEXT,
     pay_ranges           TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(pay_ranges)),
     employment_type      TEXT,
-    description          TEXT,
-    description_html_raw TEXT,
+    description          TEXT,                          -- kept only while needed (docs/design.md, "Storage and retention")
+    description_html_raw TEXT,                          -- kept only for postings with a content flag
+    -- Found by a search source (The Muse): closed by the search rules, not by
+    -- missing from a board's list.
+    search               INTEGER NOT NULL DEFAULT 0 CHECK (search IN (0, 1)),
     detail_fetched_at    TEXT,
     first_seen_at        TEXT    NOT NULL,
     last_seen_at         TEXT    NOT NULL,
@@ -99,6 +105,7 @@ CREATE TABLE postings (
 ) STRICT;
 
 CREATE INDEX postings_job ON postings (job_id);
+CREATE INDEX postings_search ON postings (source) WHERE search = 1 AND closed_at IS NULL;
 CREATE INDEX postings_company ON postings (company_id);
 CREATE INDEX postings_opening ON postings (company_id, opening_key) WHERE opening_key IS NOT NULL;
 CREATE INDEX postings_url ON postings (canonical_url) WHERE canonical_url IS NOT NULL;

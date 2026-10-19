@@ -7,6 +7,8 @@ import (
 
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
+	"github.com/drewsokol/job-hunt-harness/internal/sources"
+	"github.com/drewsokol/job-hunt-harness/internal/sources/themuse"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 )
 
@@ -33,19 +35,45 @@ func RunPrefilter(ctx context.Context, s *store.Store, by store.Actor, companyID
 	if err != nil || c == nil {
 		return store.PrefilterOutcome{}, err
 	}
-	return runPrefilter(ctx, s, by, c, version, companyID)
+	out, _, err := runPrefilter(ctx, s, by, c, version, companyID)
+	return out, err
 }
 
-func runPrefilter(ctx context.Context, s *store.Store, by store.Actor, c *prefilter.Compiled, version, companyID int64) (store.PrefilterOutcome, error) {
+// runPrefilter judges and records, then drops the stored descriptions of
+// jobs filtered out by stage 1, which never needed them. It returns how
+// many postings lost their description.
+func runPrefilter(ctx context.Context, s *store.Store, by store.Actor, c *prefilter.Compiled, version, companyID int64) (store.PrefilterOutcome, int, error) {
 	jobs, err := s.PrefilterJobs(ctx, companyID)
 	if err != nil {
-		return store.PrefilterOutcome{}, err
+		return store.PrefilterOutcome{}, 0, err
 	}
 	ds := make([]store.PrefilterDecision, 0, len(jobs))
+	var unneeded []int64
 	for _, j := range jobs {
-		ds = append(ds, decision(j.ID, c.Evaluate(prefilterInput(j))))
+		r := c.Evaluate(prefilterInput(j))
+		ds = append(ds, decision(j.ID, r))
+		if droppedWithoutDescription(c, j, r) {
+			unneeded = append(unneeded, j.ID)
+		}
 	}
-	return s.ApplyPrefilter(ctx, by, version, ds)
+	out, err := s.ApplyPrefilter(ctx, by, version, ds)
+	if err != nil || len(unneeded) == 0 {
+		return out, 0, err
+	}
+	cleared, err := s.ClearDescriptions(ctx, unneeded)
+	return out, cleared, err
+}
+
+// droppedWithoutDescription reports whether a job with a stored description
+// is dropped by stage 1 alone, so the description isn't needed to keep the
+// decision. Stage 2 drops keep theirs: the decision depends on it.
+func droppedWithoutDescription(c *prefilter.Compiled, j store.PrefilterJob, r prefilter.Result) bool {
+	if r.Status != prefilter.Drop || j.Description == "" {
+		return false
+	}
+	in := prefilterInput(j)
+	in.Description, in.DescriptionKnown = "", false
+	return c.Evaluate(in).Status == prefilter.Drop
 }
 
 func prefilterInput(j store.PrefilterJob) prefilter.Input {
@@ -99,24 +127,33 @@ const previewExamples = 5
 // PreviewFilters judges the stored open jobs with f and compares the
 // result with their current decisions. It changes nothing.
 func PreviewFilters(ctx context.Context, s *store.Store, f prefilter.Filters) (FilterPreview, error) {
-	p, _, err := preview(ctx, s, f)
+	p, _, _, err := preview(ctx, s, f)
 	return p, err
 }
 
-func preview(ctx context.Context, s *store.Store, f prefilter.Filters) (FilterPreview, []store.PrefilterDecision, error) {
+// preview also returns the decisions, and the jobs whose descriptions
+// stage 1 makes unneeded.
+func preview(ctx context.Context, s *store.Store, f prefilter.Filters) (FilterPreview, []store.PrefilterDecision, []int64, error) {
 	var p FilterPreview
+	if err := checkSearch(f); err != nil {
+		return p, nil, nil, err
+	}
 	c, err := prefilter.Compile(f)
 	if err != nil {
-		return p, nil, err
+		return p, nil, nil, err
 	}
 	jobs, err := s.PrefilterJobs(ctx, 0)
 	if err != nil {
-		return p, nil, err
+		return p, nil, nil, err
 	}
 	ds := make([]store.PrefilterDecision, 0, len(jobs))
+	var unneeded []int64
 	for _, j := range jobs {
 		r := c.Evaluate(prefilterInput(j))
 		ds = append(ds, decision(j.ID, r))
+		if droppedWithoutDescription(c, j, r) {
+			unneeded = append(unneeded, j.ID)
+		}
 		if j.Closed {
 			continue
 		}
@@ -148,7 +185,29 @@ func preview(ctx context.Context, s *store.Store, f prefilter.Filters) (FilterPr
 			}
 		}
 	}
-	return p, ds, nil
+	return p, ds, unneeded, nil
+}
+
+// checkSearch checks the search queries in a search source's own terms
+// (category and level names), which the filters package doesn't know.
+func checkSearch(f prefilter.Filters) error {
+	if f.Search == nil {
+		return nil
+	}
+	var problems []string
+	for i, q := range f.Search.TheMuse {
+		for _, p := range themuse.Check(museQuery(q)) {
+			problems = append(problems, fmt.Sprintf("search.themuse[%d].%s", i, p))
+		}
+	}
+	if len(problems) > 0 {
+		return &prefilter.ValidationError{Problems: problems}
+	}
+	return nil
+}
+
+func museQuery(q prefilter.MuseQuery) sources.Query {
+	return sources.Query{Categories: q.Categories, Levels: q.Levels, Locations: q.Locations}
 }
 
 // tracked reports whether the candidate has acted on a job in this status.
@@ -167,11 +226,14 @@ func SetFilters(ctx context.Context, s *store.Store, by store.Actor, f prefilter
 	if rationale == "" {
 		return 0, FilterPreview{}, store.PrefilterOutcome{}, fmt.Errorf("a rationale is required: say in a sentence why the filters are changing")
 	}
-	p, ds, err := preview(ctx, s, f)
+	p, ds, unneeded, err := preview(ctx, s, f)
 	if err != nil {
 		return 0, p, store.PrefilterOutcome{}, err
 	}
 	version, out, err := s.SetFilters(ctx, by, store.NewFilters{Filters: f.JSON(), Rationale: rationale, Effect: mustJSON(p)}, ds)
+	if err == nil && len(unneeded) > 0 {
+		_, err = s.ClearDescriptions(ctx, unneeded)
+	}
 	return version, p, out, err
 }
 

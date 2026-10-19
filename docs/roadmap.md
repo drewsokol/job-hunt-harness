@@ -10,6 +10,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - [x] M1 Store
 - [x] M2 Fetch
 - [x] M3 Filter
+- [x] M3.5 Search and storage
 - [ ] M4 MCP (start using it day to day)
 - [ ] M5 Window (MVP complete)
 
@@ -32,7 +33,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - Export (JSON) and backup command
 - Broader starter company list
 - README, CONTRIBUTING, docs on adding a source or a company
-- GitHub setup: license, branch protection, CI, security settings, issue and PR templates (design.md section 11)
+- GitHub setup: branch protection, CI, security settings, issue and PR templates (design.md section 11)
 - v0.1 release binaries
 
 ## Later
@@ -42,6 +43,9 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - Sources defined by config (Workable, Recruitee, SmartRecruiters, Rippling)
 - Lever server-side parameters per company
 - Workday source
+- Connect search services that need an account and key (Adzuna and others), with the key kept on the user's machine
+- Finding boards automatically for employers search keeps finding: probe Greenhouse, Lever and Ashby, and add the board only when it lists the same job titles
+- A maximum age for jobs from any source, as a filter
 - External source plugins over stdin/stdout, if people ask
 - Scheduled refresh and notifications
 - Re-screening jobs when the profile changes

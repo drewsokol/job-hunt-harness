@@ -73,28 +73,14 @@ func (s *Store) AddCompanies(ctx context.Context, by Actor, cs []NewCompany) (in
 	err := s.write(ctx, func(tx *sql.Tx) error {
 		now := s.stamp()
 		for _, c := range cs {
-			cfg := string(c.SourceConfig)
-			if cfg == "" {
-				cfg = "{}"
-			}
-			res, err := tx.ExecContext(ctx, `
-				INSERT INTO companies (name, source, board_key, source_config, careers_url, origin,
-				                       created_at, created_by, updated_at, updated_by)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (board_key) DO NOTHING`,
-				c.Name, c.Source, nullString(c.BoardKey), cfg, nullString(c.CareersURL), c.Origin,
-				now, by, now, by)
-			if err != nil {
-				return fmt.Errorf("adding company %q: %w", c.Name, err)
-			}
-			if n, _ := res.RowsAffected(); n == 0 {
-				continue
-			}
-			id, err := res.LastInsertId()
-			if err != nil {
+			var exists bool
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM companies WHERE board_key = ?)", c.BoardKey).Scan(&exists); err != nil {
 				return err
 			}
-			if err := insertEvent(ctx, tx, now, by, "company_added", eventRefs{CompanyID: id}, nil); err != nil {
+			if exists {
+				continue
+			}
+			if _, err := addCompany(ctx, tx, now, by, c); err != nil {
 				return err
 			}
 			added++

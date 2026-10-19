@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/drewsokol/job-hunt-harness/internal/dedupe"
 )
 
 // Company is a company whose jobs jhh tracks.
@@ -18,7 +20,7 @@ type Company struct {
 	SourceConfig  json.RawMessage
 	CareersURL    string
 	Enabled       bool
-	Origin        string // registry | user | agent
+	Origin        string // registry | user | agent | search
 	ETag          string
 	LastFetchAt   time.Time
 	LastError     string
@@ -41,30 +43,58 @@ type NewCompany struct {
 	Origin       string
 }
 
-// AddCompany inserts a company and returns its id.
+// AddCompany inserts a company and returns its id. A company that search
+// found under the same normalized name gets the board instead, so the
+// board's postings attach to the jobs search found.
 func (s *Store) AddCompany(ctx context.Context, by Actor, c NewCompany) (int64, error) {
+	var id int64
+	err := s.write(ctx, func(tx *sql.Tx) error {
+		var err error
+		id, err = addCompany(ctx, tx, s.stamp(), by, c)
+		return err
+	})
+	return id, err
+}
+
+func addCompany(ctx context.Context, tx *sql.Tx, now string, by Actor, c NewCompany) (int64, error) {
 	cfg := string(c.SourceConfig)
 	if cfg == "" {
 		cfg = "{}"
 	}
-	var id int64
-	err := s.write(ctx, func(tx *sql.Tx) error {
-		now := s.stamp()
-		res, err := tx.ExecContext(ctx, `
-			INSERT INTO companies (name, source, board_key, source_config, careers_url, origin,
-			                       created_at, created_by, updated_at, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			c.Name, c.Source, nullString(c.BoardKey), cfg, nullString(c.CareersURL), c.Origin,
-			now, by, now, by)
-		if err != nil {
-			return fmt.Errorf("adding company %q: %w", c.Name, err)
+	key := dedupe.CompanyKey(c.Name)
+	if c.Source != "none" {
+		var id int64
+		err := tx.QueryRowContext(ctx, `
+			SELECT id FROM companies WHERE name_key = ? AND source = 'none' AND origin = 'search' ORDER BY id LIMIT 1`, key).Scan(&id)
+		switch {
+		case err == nil:
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE companies SET name = ?, source = ?, board_key = ?, source_config = ?, careers_url = ?, origin = ?,
+				       updated_at = ?, updated_by = ?
+				WHERE id = ?`,
+				c.Name, c.Source, nullString(c.BoardKey), cfg, nullString(c.CareersURL), c.Origin, now, by, id); err != nil {
+				return 0, fmt.Errorf("adding a board to company %q: %w", c.Name, err)
+			}
+			return id, insertEvent(ctx, tx, now, by, "company_board_added", eventRefs{CompanyID: id},
+				map[string]string{"source": c.Source, "origin": c.Origin})
+		case !errors.Is(err, sql.ErrNoRows):
+			return 0, err
 		}
-		if id, err = res.LastInsertId(); err != nil {
-			return err
-		}
-		return insertEvent(ctx, tx, now, by, "company_added", eventRefs{CompanyID: id}, nil)
-	})
-	return id, err
+	}
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO companies (name, name_key, source, board_key, source_config, careers_url, origin,
+		                       created_at, created_by, updated_at, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.Name, key, c.Source, nullString(c.BoardKey), cfg, nullString(c.CareersURL), c.Origin,
+		now, by, now, by)
+	if err != nil {
+		return 0, fmt.Errorf("adding company %q: %w", c.Name, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, insertEvent(ctx, tx, now, by, "company_added", eventRefs{CompanyID: id}, nil)
 }
 
 const companyColumns = `id, name, source, board_key, source_config, careers_url, enabled, origin,

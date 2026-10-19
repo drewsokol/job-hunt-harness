@@ -41,6 +41,14 @@ func NewClient() *Client {
 // ErrTooLarge is returned when a response exceeds Client.MaxBytes.
 var ErrTooLarge = errors.New("response too large")
 
+// StatusError is an HTTP reply other than 200, 304 or 404.
+type StatusError struct {
+	URL  string
+	Code int
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("%s: HTTP %d", e.URL, e.Code) }
+
 // GetJSON fetches url and decodes the JSON body into v. If etag is not
 // empty it is sent as If-None-Match, and a 304 reply returns
 // notModified=true without touching v. A 404 returns ErrBoardNotFound. A 429
@@ -82,9 +90,9 @@ func (c *Client) get(ctx context.Context, url, etag string, v any) (notModified 
 	case resp.StatusCode == http.StatusNotFound:
 		return false, "", -1, ErrBoardNotFound
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-		return false, "", retryDelay(resp.Header.Get("Retry-After")), fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
+		return false, "", retryDelay(resp.Header.Get("Retry-After")), &StatusError{URL: url, Code: resp.StatusCode}
 	case resp.StatusCode != http.StatusOK:
-		return false, "", -1, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
+		return false, "", -1, &StatusError{URL: url, Code: resp.StatusCode}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, c.MaxBytes+1))

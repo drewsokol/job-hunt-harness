@@ -44,7 +44,7 @@ type Job struct {
 	Title       string
 	URL         string
 	Description string
-	Origin      string // feed | manual | agent
+	Origin      string // feed | search | manual | agent
 	Status      JobStatus
 	FirstSeenAt time.Time
 	ClosedAt    time.Time
@@ -98,9 +98,9 @@ func (s *Store) Job(ctx context.Context, id int64) (Job, error) {
 		status, createdBy, updatedBy                     string
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, company_id, title, url, description, origin, status, first_seen_at, closed_at, applied_at,
-		       notes, created_at, created_by, updated_at, updated_by
-		FROM jobs WHERE id = ?`, id).
+		SELECT j.id, j.company_id, j.title, j.url, `+jobDescription+`, j.origin, j.status, j.first_seen_at, j.closed_at, j.applied_at,
+		       j.notes, j.created_at, j.created_by, j.updated_at, j.updated_by
+		FROM jobs j WHERE j.id = ?`, id).
 		Scan(&j.ID, &j.CompanyID, &j.Title, &url, &desc, &j.Origin, &status, &firstSeen, &closed, &applied,
 			&j.Notes, &createdAt, &createdBy, &updatedAt, &updatedBy)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -104,15 +104,21 @@ type PrefilterJob struct {
 	FiltersVersion   int64
 }
 
+// jobDescription is a job's description: its own for jobs from agents and
+// people, otherwise the newest open posting's that has one.
+const jobDescription = `coalesce(j.description, (
+	SELECT p.description FROM postings p WHERE p.job_id = j.id AND p.description IS NOT NULL
+	ORDER BY p.closed_at IS NOT NULL, p.first_seen_at DESC, p.id DESC LIMIT 1), '')`
+
 // PrefilterJobs returns every job of the company, or of every company when
-// companyID is 0. A feed job's description is known once any of its
-// postings had one fetched; jobs from agents and people carry what they
+// companyID is 0. A feed or search job's description is known once any of
+// its postings had one stored; jobs from agents and people carry what they
 // were given.
 func (s *Store) PrefilterJobs(ctx context.Context, companyID int64) ([]PrefilterJob, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT j.id, j.company_id, c.name, j.title, j.workplace, j.locations, j.pay_ranges,
-		       coalesce(j.employment_type, ''), coalesce(j.description, ''),
-		       j.origin <> 'feed' OR EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.detail_fetched_at IS NOT NULL),
+		       coalesce(j.employment_type, ''), `+jobDescription+`,
+		       j.origin NOT IN ('feed', 'search') OR EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.detail_fetched_at IS NOT NULL),
 		       j.closed_at IS NOT NULL, j.status, coalesce(j.prefilter_status, ''), j.prefilter_reasons,
 		       coalesce(j.prefilter_score, 0), coalesce(j.filters_version, 0)
 		FROM jobs j JOIN companies c ON c.id = j.company_id
@@ -251,6 +257,9 @@ type Candidate struct {
 	Score       float64
 	Reasons     json.RawMessage
 	FirstSeenAt time.Time
+	// Via names the search source the job came through ("themuse") when it
+	// has no posting from a board, so its link goes to that source's page.
+	Via string
 }
 
 // Candidates returns open jobs with the given status, highest prefilter
@@ -261,7 +270,9 @@ func (s *Store) Candidates(ctx context.Context, status JobStatus, limit int) ([]
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT j.id, c.name, j.title, j.workplace, j.locations, j.pay_ranges, coalesce(j.pay_raw, ''), coalesce(j.url, ''),
-		       coalesce(j.prefilter_score, 0), j.prefilter_reasons, j.first_seen_at
+		       coalesce(j.prefilter_score, 0), j.prefilter_reasons, j.first_seen_at,
+		       CASE WHEN EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0) THEN ''
+		            ELSE coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id AND p.search = 1 LIMIT 1), '') END
 		FROM jobs j JOIN companies c ON c.id = j.company_id
 		WHERE j.status = ? AND j.closed_at IS NULL AND j.hidden_at IS NULL
 		ORDER BY j.prefilter_score DESC, j.first_seen_at DESC, j.id DESC
@@ -278,7 +289,7 @@ func (s *Store) Candidates(ctx context.Context, status JobStatus, limit int) ([]
 			firstSeen          sql.NullString
 		)
 		if err := rows.Scan(&c.ID, &c.Company, &c.Title, &c.Workplace, &locs, &pay, &c.PayRaw, &c.URL,
-			&c.Score, &reasons, &firstSeen); err != nil {
+			&c.Score, &reasons, &firstSeen, &c.Via); err != nil {
 			return nil, err
 		}
 		c.Locations, c.PayRanges, c.Reasons = json.RawMessage(locs), json.RawMessage(pay), json.RawMessage(reasons)

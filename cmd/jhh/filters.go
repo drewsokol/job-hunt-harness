@@ -219,7 +219,11 @@ func printCandidates(ctx context.Context, st *store.Store, w io.Writer, status s
 		}
 		fmt.Fprintf(w, "         %s\n", strings.Join(details, " · "))
 		if c.URL != "" {
-			fmt.Fprintf(w, "         %s\n", oneLine(c.URL))
+			via := ""
+			if c.Via == "themuse" {
+				via = " (via The Muse: apply from its page)"
+			}
+			fmt.Fprintf(w, "         %s%s\n", oneLine(c.URL), via)
 		}
 	}
 }

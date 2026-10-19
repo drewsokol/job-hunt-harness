@@ -4,7 +4,7 @@
 // Usage:
 //
 //	jhh            run as an MCP server over stdio (what your agent launches)
-//	jhh refresh    fetch job boards now
+//	jhh refresh    fetch job boards and run searches now
 //	jhh probe      find which job board a company uses
 //	jhh candidates list the jobs that passed the filters
 //	jhh filters    show, preview or set the filters
@@ -35,7 +35,7 @@ const usage = `jhh: Job Hunt Harness
 
 Usage:
   jhh            run as an MCP server over stdio (what your agent launches)
-  jhh refresh    fetch job boards now [--company NAME ...]
+  jhh refresh    fetch job boards and run searches now [--company NAME ...]
   jhh probe      find which job board a company uses: jhh probe <slug or posting URL>
   jhh candidates list the jobs that passed the filters [--status STATUS] [--limit N]
   jhh filters    show the filters; jhh filters preview|set <file> (usually your agent does this)

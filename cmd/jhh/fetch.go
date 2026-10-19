@@ -20,7 +20,8 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 )
 
-// refresh fetches every enabled company's board, or the named ones.
+// refresh fetches every enabled company's board and runs the searches in
+// the filters, or fetches only the named companies.
 func refresh(ctx context.Context, args []string, stdout io.Writer, stderr *os.File) int {
 	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -51,7 +52,8 @@ func refresh(ctx context.Context, args []string, stdout io.Writer, stderr *os.Fi
 	}
 	defer st.Close()
 
-	srcs := builtin.All(sources.NewClient())
+	client := sources.NewClient()
+	srcs := builtin.All(client)
 	if n, err := core.SeedRegistry(ctx, st, srcs); err != nil {
 		fmt.Fprintln(stderr, "jhh:", err)
 		return 1
@@ -66,7 +68,7 @@ func refresh(ctx context.Context, args []string, stdout io.Writer, stderr *os.Fi
 			return 1
 		}
 	}
-	r := &core.Refresher{Store: st, Sources: srcs, Logger: logger, By: store.ActorUser}
+	r := &core.Refresher{Store: st, Sources: srcs, Searchers: builtin.Searchers(client), Logger: logger, By: store.ActorUser}
 	res, err := r.Refresh(ctx, opts)
 	printRefresh(stdout, res)
 	if err != nil {
@@ -91,7 +93,22 @@ func printRefresh(w io.Writer, res core.RefreshResult) {
 		line("new candidates", len(res.Passed))
 		line("filtered out", len(res.FilteredOut))
 	} else {
-		fmt.Fprintln(w, "  No filters are set, so jobs weren't judged and Greenhouse descriptions weren't fetched.")
+		fmt.Fprintln(w, "  No filters are set, so jobs weren't judged, Greenhouse descriptions weren't fetched and nothing was searched.")
+	}
+	if s := res.Search; s.Queries > 0 {
+		line("The Muse", fmt.Sprintf("%d queries, %d requests, %d postings (%d skipped: jhh reads the employer's board), %d too old, %d closed",
+			s.Queries, s.Requests, s.Postings, s.Covered, s.Old, s.Closed))
+		if s.Stopped != "" {
+			fmt.Fprintf(w, "    Searching stopped early: %s. The rest waits for the next refresh.\n", s.Stopped)
+		}
+		if len(s.Incomplete) > 0 {
+			fmt.Fprintf(w, "    Not read in full: %s. Narrow them or raise their pages cap; until every query is read in full, jobs The Muse no longer lists aren't closed.\n",
+				strings.Join(s.Incomplete, ", "))
+		}
+	}
+	if p := res.Pruned; res.DescriptionsCleared+p.JobsDeleted+p.CompaniesDeleted+p.DescriptionsCleared > 0 {
+		line("cleanup", fmt.Sprintf("%d unneeded descriptions dropped; old closed jobs: %d deleted, %d descriptions dropped; %d companies deleted",
+			res.DescriptionsCleared, p.JobsDeleted, p.DescriptionsCleared, p.CompaniesDeleted))
 	}
 	if len(res.Suspect) > 0 {
 		slices.Sort(res.Suspect)

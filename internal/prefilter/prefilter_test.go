@@ -21,7 +21,9 @@ const exampleFilters = `{
   "keywords": {"title_any": ["ai", "agent", "llm"], "body_any": ["llm", "agentic", "mcp", "rag", "evals"],
                "min_body_hits_without_title_match": 2},
   "pay_floor": {"amount": 150000, "currency": "USD"},
-  "flag": {"title_any": ["forward deployed", "solutions", "customer"]}
+  "flag": {"title_any": ["forward deployed", "solutions", "customer"]},
+  "search": {"themuse": [{"categories": ["Software Engineering"], "levels": ["Senior Level"],
+                          "locations": ["Flexible / Remote", "Columbus, OH"], "pages": 10}]}
 }`
 
 func compile(t *testing.T, doc string) *Compiled {
@@ -228,6 +230,10 @@ func TestParseRejects(t *testing.T) {
 		{`{"schema_version": 1, "keywords": {"body_any": ["llm"], "min_body_hits_without_title_match": 3}}`, "more than the 1 body_any terms"},
 		{`{"schema_version": 1, "keywords": {"title_any": ["--"]}}`, `keywords.title_any[0]: "--" has no letters`},
 		{`{"schema_version": 1, "pay_floor": {"amount": 100000, "currency": "usd"}}`, `pay_floor.currency: "usd"`},
+		{`{"schema_version": 1, "search": {}}`, "search: add at least one themuse query"},
+		{`{"schema_version": 1, "search": {"themuse": [{"levels": ["Senior Level"]}]}}`, "search.themuse[0]: set categories, locations or both"},
+		{`{"schema_version": 1, "search": {"themuse": [{"locations": ["Flexible / Remote"], "pages": 251}]}}`, "search.themuse[0].pages: must be between 1 and 250"},
+		{`{"schema_version": 1, "search": {"themuse": [{"categories": [" "]}]}}`, "search.themuse[0].categories[0]: must be 1 to 100 characters"},
 	}
 	for _, tt := range tests {
 		_, err := Parse([]byte(tt.doc))

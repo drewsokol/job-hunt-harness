@@ -35,23 +35,28 @@ const (
 	DefaultMaxDetails        = 250
 )
 
-// Refresher fetches company boards, stores what changed and runs the
-// prefilter.
+// Refresher fetches company boards, runs the searches in the filters,
+// stores what changed, runs the prefilter and applies the storage rules.
 //
-// For boards that list jobs without descriptions (Greenhouse), the
-// prefilter's stage 1 decides which descriptions are fetched: after the
-// listing is stored, the company's jobs are judged, and descriptions are
-// fetched only for postings of jobs that passed or are waiting for one,
-// when the posting is new or the board says it changed. With no filters
-// set, no descriptions are fetched.
+// The prefilter's stage 1 decides which descriptions are kept. For boards
+// that list jobs without descriptions (Greenhouse), after the listing is
+// stored the company's jobs are judged, and descriptions are fetched only
+// for postings of jobs that passed or are waiting for one, when the posting
+// is new or the board says it changed. With no filters set, no descriptions
+// are fetched. Listings that include descriptions (Lever, Ashby, search)
+// are stored without them first, and after judging only the descriptions
+// that are wanted are stored.
 type Refresher struct {
 	Store             *store.Store
 	Sources           map[string]sources.Source
+	Searchers         map[string]sources.Searcher
 	Logger            *slog.Logger
 	By                store.Actor
 	Concurrency       int
 	DetailConcurrency int
 	MaxDetails        int
+	MaxSearchRequests int // per refresh, across every query
+	MaxLookups        int // pursued search postings checked per refresh
 }
 
 // RefreshOptions narrows a refresh.
@@ -81,7 +86,12 @@ type RefreshResult struct {
 	Filtered    bool
 	Passed      []int64 // jobs that moved to unscreened
 	FilteredOut []int64 // jobs that moved to filtered_out
-	Duration    time.Duration
+	// DescriptionsCleared counts postings whose stored description stage 1
+	// made unneeded.
+	DescriptionsCleared int
+	Search              SearchSummary
+	Pruned              store.PruneOutcome
+	Duration            time.Duration
 }
 
 // Refresh fetches the companies' boards concurrently and applies each
@@ -136,17 +146,8 @@ func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshRe
 			if out.Suspect {
 				res.Suspect = append(res.Suspect, c.Name)
 			}
-			for _, pre := range cr.prefilter {
-				for _, id := range pre.Passed {
-					moves[id] = store.StatusUnscreened
-				}
-				for _, id := range pre.FilteredOut {
-					moves[id] = store.StatusFilteredOut
-				}
-				for _, id := range pre.Waiting {
-					moves[id] = store.StatusNew
-				}
-			}
+			res.DescriptionsCleared += cr.cleared
+			addMoves(moves, cr.prefilter)
 			r.logger().Debug("refreshed company", "company_id", c.ID, "postings", len(fetch.Postings),
 				"new_jobs", len(out.NewJobs), "closed_jobs", len(out.ClosedJobs), "details", cr.details,
 				"not_modified", fetch.NotModified, "error", fetch.Err)
@@ -154,6 +155,24 @@ func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshRe
 		})
 	}
 	runErr := g.Wait()
+	// Search runs after the boards, so a result whose employer's board was
+	// just added is recognized as covered.
+	if runErr == nil && filters != nil && len(opts.CompanyIDs) == 0 {
+		sr, err := r.search(ctx, filters, version)
+		res.Search = sr.summary
+		res.NewPostings += sr.out.NewPostings
+		res.NewJobs = append(res.NewJobs, sr.out.NewJobs...)
+		res.ClosedJobs = append(res.ClosedJobs, sr.out.ClosedJobs...)
+		res.RepostedJobs = append(res.RepostedJobs, sr.out.RepostedJobs...)
+		res.Flags += sr.out.Flags
+		res.DescriptionsCleared += sr.cleared
+		res.Errors = append(res.Errors, sr.errors...)
+		addMoves(moves, sr.prefilter)
+		runErr = err
+	}
+	if runErr == nil {
+		res.Pruned, runErr = r.Store.Prune(ctx)
+	}
 	for id, st := range moves {
 		switch st {
 		case store.StatusUnscreened:
@@ -179,8 +198,25 @@ func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshRe
 	r.logger().Info("refresh finished", "run", res.RunID, "companies", res.Companies, "not_modified", res.NotModified,
 		"postings", res.Postings, "new_jobs", len(res.NewJobs), "closed_jobs", len(res.ClosedJobs),
 		"details", res.Details, "passed", len(res.Passed), "errors", len(res.Errors),
+		"search_requests", res.Search.Requests, "search_postings", res.Search.Postings,
+		"descriptions_cleared", res.DescriptionsCleared, "jobs_pruned", res.Pruned.JobsDeleted,
 		"duration", res.Duration.Round(time.Millisecond))
 	return res, runErr
+}
+
+// addMoves records each job's last prefilter move.
+func addMoves(moves map[int64]store.JobStatus, outs []store.PrefilterOutcome) {
+	for _, pre := range outs {
+		for _, id := range pre.Passed {
+			moves[id] = store.StatusUnscreened
+		}
+		for _, id := range pre.FilteredOut {
+			moves[id] = store.StatusFilteredOut
+		}
+		for _, id := range pre.Waiting {
+			moves[id] = store.StatusNew
+		}
+	}
 }
 
 // companyResult is what refreshing one company did.
@@ -189,33 +225,58 @@ type companyResult struct {
 	out                             store.FetchOutcome
 	prefilter                       []store.PrefilterOutcome // in order
 	details, detailErrors, deferred int
+	cleared                         int
 }
 
 // refreshCompany fetches one company's board and stores it, runs the
-// prefilter on its jobs, then fetches the descriptions stage 1 asked for
-// and runs the prefilter again on what they changed. Details are also
-// fetched after a 304, for jobs still waiting on one.
+// prefilter on its jobs, then stores or fetches the descriptions stage 1
+// asked for and runs the prefilter again on what they changed. Details are
+// also fetched after a 304, for jobs still waiting on one; a board that
+// lists descriptions is read in full instead, ignoring its ETag.
 func (r *Refresher) refreshCompany(ctx context.Context, c store.Company, filters *prefilter.Compiled, version int64) (companyResult, error) {
 	var cr companyResult
-	src, board, fetch := r.fetch(ctx, c)
+	etag := c.ETag
+	if _, detailer := r.Sources[c.Source].(sources.Detailer); !detailer && filters != nil && etag != "" {
+		waiting, err := r.Store.PostingsNeedingDetail(ctx, c.ID, c.Source)
+		if err != nil {
+			return cr, err
+		}
+		if len(waiting) > 0 {
+			etag = ""
+		}
+	}
+	src, board, fetch := r.fetch(ctx, c, etag)
+	held := holdDescriptions(&fetch)
 	cr.fetch = fetch
 	var err error
 	if cr.out, err = r.Store.ApplyFetch(ctx, r.By, fetch); err != nil {
 		return cr, err
 	}
-	if fetch.Err != nil || filters == nil {
+	if fetch.Err != nil {
 		return cr, nil
 	}
 	judge := func() error {
-		out, err := runPrefilter(ctx, r.Store, r.By, filters, version, c.ID)
+		if filters == nil {
+			return nil
+		}
+		out, cleared, err := runPrefilter(ctx, r.Store, r.By, filters, version, c.ID)
 		cr.prefilter = append(cr.prefilter, out)
+		cr.cleared += cleared
 		return err
 	}
 	if err := judge(); err != nil {
 		return cr, err
 	}
+	if len(held) > 0 {
+		out, n, err := r.storeHeld(ctx, c.ID, c.Source, held)
+		cr.out.Flags += out.Flags
+		if err != nil || n == 0 {
+			return cr, err
+		}
+		return cr, judge()
+	}
 	d, ok := src.(sources.Detailer)
-	if !ok {
+	if !ok || filters == nil {
 		return cr, nil
 	}
 	refs, err := r.Store.PostingsNeedingDetail(ctx, c.ID, c.Source)
@@ -231,7 +292,7 @@ func (r *Refresher) refreshCompany(ctx context.Context, c store.Company, filters
 	if err != nil || len(ps) == 0 {
 		return cr, err
 	}
-	out, err := r.Store.ApplyDetails(ctx, r.By, c.ID, ps)
+	out, err := r.Store.ApplyPostings(ctx, r.By, c.ID, ps)
 	if err != nil {
 		return cr, err
 	}
@@ -261,9 +322,51 @@ func (r *Refresher) companies(ctx context.Context, opts RefreshOptions) ([]store
 	return out, nil
 }
 
+// holdDescriptions takes the descriptions out of a listing that included
+// them and returns the full postings, so that only the ones stage 1 wants
+// are stored (storeHeld). The postings left in f are partial, which keeps
+// any description stored before.
+func holdDescriptions(f *store.CompanyFetch) map[string]store.PostingInput {
+	held := map[string]store.PostingInput{}
+	for i, p := range f.Postings {
+		if p.Partial || p.Description == "" && len(p.Flags) == 0 {
+			continue
+		}
+		held[p.ID] = p
+		f.Postings[i] = withoutDescription(p)
+	}
+	return held
+}
+
+func withoutDescription(p store.PostingInput) store.PostingInput {
+	p.Description, p.DescriptionHTML, p.Flags, p.Partial = "", "", nil, true
+	return p
+}
+
+// storeHeld stores the held-back postings whose jobs want a description
+// (store.PostingsWantingDescription) and returns how many it stored.
+func (r *Refresher) storeHeld(ctx context.Context, companyID int64, source string, held map[string]store.PostingInput) (store.FetchOutcome, int, error) {
+	want, err := r.Store.PostingsWantingDescription(ctx, companyID, source)
+	if err != nil {
+		return store.FetchOutcome{}, 0, err
+	}
+	var ps []store.PostingInput
+	for id := range want {
+		if p, ok := held[id]; ok {
+			ps = append(ps, p)
+		}
+	}
+	if len(ps) == 0 {
+		return store.FetchOutcome{}, 0, nil
+	}
+	slices.SortFunc(ps, func(a, b store.PostingInput) int { return strings.Compare(a.ID, b.ID) })
+	out, err := r.Store.ApplyPostings(ctx, r.By, companyID, ps)
+	return out, len(ps), err
+}
+
 // fetch reads one company's board and normalizes its postings. Errors are
 // returned inside the CompanyFetch, for the store to record.
-func (r *Refresher) fetch(ctx context.Context, c store.Company) (sources.Source, sources.Board, store.CompanyFetch) {
+func (r *Refresher) fetch(ctx context.Context, c store.Company, etag string) (sources.Source, sources.Board, store.CompanyFetch) {
 	f := store.CompanyFetch{CompanyID: c.ID, Source: c.Source}
 	src, ok := r.Sources[c.Source]
 	if !ok {
@@ -275,7 +378,7 @@ func (r *Refresher) fetch(ctx context.Context, c store.Company) (sources.Source,
 		f.Err = err
 		return src, board, f
 	}
-	list, err := src.List(ctx, board, c.ETag)
+	list, err := src.List(ctx, board, etag)
 	if err != nil {
 		f.Err = err
 		return src, board, f
@@ -328,8 +431,20 @@ func (r *Refresher) details(ctx context.Context, c store.Company, src sources.So
 // Normalize turns a source's posting into what the store keeps: untrusted
 // text cleaned, location and pay parsed, dedupe keys computed, and content
 // aimed at AI agents flagged. Detection runs on the raw text, before
-// cleaning, so hidden content is still there to find.
+// cleaning, so hidden content is still there to find. The raw HTML is kept
+// only when something was flagged, for review.
 func Normalize(src sources.Source, board sources.Board, p sources.Posting) store.PostingInput {
+	return normalizePosting(sources.PostingID(src, board, p.ExternalID), src.Name(), p)
+}
+
+// NormalizeFound is Normalize for a posting a search source found.
+func NormalizeFound(s sources.Searcher, p sources.Posting) store.PostingInput {
+	in := normalizePosting(sources.SearchPostingID(s, p.ExternalID), s.Name(), p)
+	in.Search = true
+	return in
+}
+
+func normalizePosting(id, source string, p sources.Posting) store.PostingInput {
 	title := strings.TrimSpace(untrusted.Clean(p.Title))
 	locRaw := strings.TrimSpace(untrusted.Clean(p.LocationRaw))
 	loc := normalize.ParseLocation(locRaw, title, p.Workplace, p.Country)
@@ -356,8 +471,8 @@ func Normalize(src sources.Source, board sources.Board, p sources.Posting) store
 	}
 
 	in := store.PostingInput{
-		ID:              sources.PostingID(src, board, p.ExternalID),
-		Source:          src.Name(),
+		ID:              id,
+		Source:          source,
 		ExternalID:      p.ExternalID,
 		OpeningKey:      p.OpeningKey,
 		CanonicalURL:    dedupe.CanonicalURL(p.URL),
@@ -379,6 +494,9 @@ func Normalize(src sources.Source, board sources.Board, p sources.Posting) store
 	}
 	if text != "" {
 		in.Fingerprint = dedupe.Fingerprint(text, strings.Split(locRaw, " | ")...)
+	}
+	if len(flags) == 0 {
+		in.DescriptionHTML = ""
 	}
 	return in
 }

@@ -60,6 +60,25 @@ func TestFingerprintNeedsEnoughText(t *testing.T) {
 	}
 }
 
+func TestCompanyKey(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"Example Corp, Inc.", "example"},
+		{"example corp", "example"},
+		{"The Example Company", "example"},
+		{"Exampleco GmbH", "exampleco"},
+		{"Smith & Jones LLP", "smith and jones"},
+		{"Made-Up Labs", "made up labs"},
+		{"The Company", "the company"},
+		{"Co", "co"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := CompanyKey(tt.in); got != tt.want {
+			t.Errorf("CompanyKey(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestCanonicalURL(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"https://boards.greenhouse.io/exampleco/jobs/123?gh_src=abc&utm_source=x", "https://boards.greenhouse.io/exampleco/jobs/123"},

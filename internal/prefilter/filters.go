@@ -42,6 +42,9 @@ type Filters struct {
 	Keywords          *Keywords `json:"keywords,omitempty"`
 	PayFloor          *PayFloor `json:"pay_floor,omitempty"`
 	Flag              *Flag     `json:"flag,omitempty"`
+	// Search holds the queries search sources run. It finds jobs; the rest
+	// of the filters judge them, wherever they came from.
+	Search *Search `json:"search,omitempty"`
 }
 
 // Titles are words and phrases matched against the job title.
@@ -83,6 +86,34 @@ type PayFloor struct {
 type Flag struct {
 	TitleAny []string `json:"title_any,omitempty"`
 }
+
+// Search holds each search source's queries.
+type Search struct {
+	TheMuse []MuseQuery `json:"themuse,omitempty"`
+}
+
+// MuseQuery is one search of The Muse. A job matches when it is in any of
+// the categories, at any of the levels and in any of the locations; a field
+// left out doesn't narrow. Category and level names are checked against The
+// Muse's lists when the filters are saved. A location also matches every
+// remote job ("Flexible / Remote"). Pages optionally caps how many pages of
+// 20 a refresh reads; by default it reads them all, within the refresh's
+// request limit.
+type MuseQuery struct {
+	Categories []string `json:"categories,omitempty"`
+	Levels     []string `json:"levels,omitempty"`
+	Locations  []string `json:"locations,omitempty"`
+	Pages      int      `json:"pages,omitempty"`
+}
+
+// Search limits. MaxSearchPages matches the default request limit of a
+// refresh (core.DefaultMaxSearchRequests).
+const (
+	MaxSearchPages   = 250
+	maxQueries       = 10
+	maxQueryValues   = 20
+	maxQueryValueLen = 100
+)
 
 // Policies for unclear cases.
 const (
@@ -217,6 +248,36 @@ func (f Filters) Validate() error {
 	}
 	if fl := f.Flag; fl != nil {
 		terms("flag.title_any", fl.TitleAny)
+	}
+	if s := f.Search; s != nil {
+		switch n := len(s.TheMuse); {
+		case n == 0:
+			add("search: add at least one themuse query, or leave search out")
+		case n > maxQueries:
+			add("search.themuse: %d queries is too many; the limit is %d", n, maxQueries)
+		}
+		for i, q := range s.TheMuse {
+			field := fmt.Sprintf("search.themuse[%d]", i)
+			if len(q.Categories) == 0 && len(q.Locations) == 0 {
+				add("%s: set categories, locations or both, so the query doesn't ask for every job", field)
+			}
+			for _, list := range []struct {
+				name   string
+				values []string
+			}{{"categories", q.Categories}, {"levels", q.Levels}, {"locations", q.Locations}} {
+				if len(list.values) > maxQueryValues {
+					add("%s.%s: more than %d values", field, list.name, maxQueryValues)
+				}
+				for j, v := range list.values {
+					if strings.TrimSpace(v) == "" || len(v) > maxQueryValueLen {
+						add("%s.%s[%d]: must be 1 to %d characters", field, list.name, j, maxQueryValueLen)
+					}
+				}
+			}
+			if q.Pages < 0 || q.Pages > MaxSearchPages {
+				add("%s.pages: must be between 1 and %d", field, MaxSearchPages)
+			}
+		}
 	}
 	if len(p) > 0 {
 		return &ValidationError{Problems: p}

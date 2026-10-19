@@ -133,6 +133,31 @@ func CanonicalURL(raw string) string {
 	return u.String()
 }
 
+// companySuffixes are legal-form words that don't tell companies apart.
+var companySuffixes = []string{"inc", "incorporated", "llc", "ltd", "limited", "corp", "corporation", "co", "company", "plc", "gmbh", "ag", "sa", "bv", "pbc", "lp", "llp"}
+
+// CompanyKey normalizes a company name so the employer a search result
+// names can be matched to a company jhh already has: case, punctuation, a
+// leading "the" and trailing legal forms are ignored, so "Example Corp,
+// Inc." and "example corp" are the same company. A name that is nothing but
+// those words keeps them.
+func CompanyKey(name string) string {
+	words := strings.FieldsFunc(strings.ToLower(abbrevs.Replace(name)), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	all := words
+	for len(words) > 0 && slices.Contains(companySuffixes, words[len(words)-1]) {
+		words = words[:len(words)-1]
+	}
+	if len(words) > 0 && words[0] == "the" {
+		words = words[1:]
+	}
+	if len(words) == 0 {
+		words = all
+	}
+	return strings.Join(words, " ")
+}
+
 // dropLocationSuffix removes trailing comma-separated parts that together
 // are a location: "Software Engineer, Remote" and "Engineer, New York, NY"
 // lose them, "Engineer, Platform" keeps its qualifier.

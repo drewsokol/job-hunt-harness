@@ -97,7 +97,7 @@ func TestPrefilterJobsKnowWhenDescriptionsAreMissing(t *testing.T) {
 
 	full := posting("1", described("fp"), located("Columbus, OH", "hybrid"))
 	full.SourceUpdatedAt = f.clock.Add(-time.Hour)
-	if _, err := f.s.ApplyDetails(ctx, ActorSystem, f.company, []PostingInput{full}); err != nil {
+	if _, err := f.s.ApplyPostings(ctx, ActorSystem, f.company, []PostingInput{full}); err != nil {
 		t.Fatal(err)
 	}
 	js, _ = f.s.PrefilterJobs(ctx, f.company)
