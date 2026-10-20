@@ -178,17 +178,18 @@ func RecordScreenings(ctx context.Context, s *store.Store, by store.Actor, ss []
 
 // ApplicationInput is a pipeline change from an agent or person.
 type ApplicationInput struct {
-	Status     string
-	AppliedAt  string // RFC 3339; converted to UTC
-	Notes      *string
-	AppendNote string
+	Status         string
+	AppliedAt      string // RFC 3339; converted to UTC
+	ClearAppliedAt bool   // undoes a "mark applied"
+	Notes          *string
+	AppendNote     string
 }
 
 // UpdateApplication checks and applies a pipeline change.
 func UpdateApplication(ctx context.Context, s *store.Store, by store.Actor, id int64, in ApplicationInput) error {
 	var (
 		problems []string
-		c        = store.ApplicationChange{Notes: in.Notes, AppendNote: strings.TrimSpace(in.AppendNote)}
+		c        = store.ApplicationChange{Notes: in.Notes, AppendNote: strings.TrimSpace(in.AppendNote), ClearAppliedAt: in.ClearAppliedAt}
 	)
 	if in.Status != "" {
 		if c.Status = store.JobStatus(in.Status); !c.Status.Valid() {
@@ -207,7 +208,10 @@ func UpdateApplication(ctx context.Context, s *store.Store, by store.Actor, id i
 	if in.Notes != nil && utf8.RuneCountInString(*in.Notes) > maxNotesLen || utf8.RuneCountInString(c.AppendNote) > maxNotesLen {
 		problems = append(problems, fmt.Sprintf("notes: keep them under %d characters", maxNotesLen))
 	}
-	if c.Status == "" && c.AppliedAt == nil && c.Notes == nil && c.AppendNote == "" {
+	if in.ClearAppliedAt && in.AppliedAt != "" {
+		problems = append(problems, "applied_at: give a date or clear it, not both")
+	}
+	if c.Status == "" && c.AppliedAt == nil && !c.ClearAppliedAt && c.Notes == nil && c.AppendNote == "" {
 		problems = append(problems, "nothing to change: give a status, applied_at, notes or append_note")
 	}
 	if len(problems) > 0 {

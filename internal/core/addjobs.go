@@ -63,6 +63,8 @@ type boardRef struct {
 // posting with source "agent". Each goes through the dedupe ladder. A new
 // job lands in unscreened whatever the filters say, since the agent chose
 // it, and the prefilter's decision is recorded for the screener to see.
+// Jobs the user adds (by is ActorUser) get origin "manual" and land in
+// review: they found the job themselves.
 func AddJobs(ctx context.Context, s *store.Store, srcs map[string]sources.Source, by store.Actor, jobs []AgentJob) ([]AddedJob, error) {
 	refs, err := checkAgentJobs(srcs, jobs)
 	if err != nil {
@@ -71,6 +73,10 @@ func AddJobs(ctx context.Context, s *store.Store, srcs map[string]sources.Source
 	companies, err := s.Companies(ctx)
 	if err != nil {
 		return nil, err
+	}
+	origin, companyOrigin, status := "agent", "agent", store.StatusUnscreened
+	if by == store.ActorUser {
+		origin, companyOrigin, status = "manual", "user", store.StatusReview
 	}
 	out := make([]AddedJob, len(jobs))
 	touched := map[int64]bool{}
@@ -97,9 +103,9 @@ func AddJobs(ctx context.Context, s *store.Store, srcs map[string]sources.Source
 		} else {
 			in = agentPosting(j)
 		}
-		in.Agent = true
+		in.Chosen = origin
 		if companyID == 0 {
-			es, err := s.Employers(ctx, by, "agent", []string{j.Company})
+			es, err := s.Employers(ctx, by, companyOrigin, []string{j.Company})
 			if err != nil {
 				return out, err
 			}
@@ -115,7 +121,7 @@ func AddJobs(ctx context.Context, s *store.Store, srcs map[string]sources.Source
 		}
 		out[i].JobID, out[i].Existing = id, !slices.Contains(res.NewJobs, id)
 		if !out[i].Existing {
-			if err := s.SetJobStatus(ctx, by, id, store.StatusUnscreened); err != nil {
+			if err := s.SetJobStatus(ctx, by, id, status); err != nil {
 				return out, err
 			}
 		}

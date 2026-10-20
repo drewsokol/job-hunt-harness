@@ -19,9 +19,8 @@ type Employer struct {
 
 // Employers matches employer names from search results or agents to
 // companies by their normalized name (dedupe.CompanyKey), adding a company
-// with no board, with origin "search" or "agent", for each one jhh doesn't
-// know. The result is
-// keyed by the names as given.
+// with no board, with the given origin ("search", "agent" or "user"), for
+// each one jhh doesn't know. The result is keyed by the names as given.
 func (s *Store) Employers(ctx context.Context, by Actor, origin string, names []string) (map[string]Employer, error) {
 	out := map[string]Employer{}
 	err := s.write(ctx, func(tx *sql.Tx) error {

@@ -63,4 +63,4 @@ jhh reads the job boards of companies the user chooses, on Greenhouse, Lever and
 
 ## 8. Wrap up
 
-Summarize what is set up: profile, filters, companies, how many jobs are waiting for review. Tell the user they can say "what's new" any day for a check-in, "screen new jobs" after a refresh, and that jhh's dashboard shows everything.
+Summarize what is set up: profile, filters, companies, how many jobs are waiting for review. Tell the user they can say "what's new" any day for a check-in, "screen new jobs" after a refresh, and "open my dashboard" to see everything (call `open_dashboard`). Offer to open it now.

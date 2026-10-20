@@ -80,10 +80,11 @@ func (s *Store) RecordScreenings(ctx context.Context, by Actor, profileVersion i
 // ApplicationChange is a change to a job's place in the pipeline; nil and
 // empty fields are left alone.
 type ApplicationChange struct {
-	Status     JobStatus
-	AppliedAt  *time.Time
-	Notes      *string // replaces the notes
-	AppendNote string  // added on a new line
+	Status         JobStatus
+	AppliedAt      *time.Time
+	ClearAppliedAt bool    // undoes a "mark applied"
+	Notes          *string // replaces the notes
+	AppendNote     string  // added on a new line
 }
 
 // UpdateApplication changes a job's status, applied date or notes in one
@@ -112,7 +113,7 @@ func (s *Store) UpdateApplication(ctx context.Context, by Actor, id int64, c App
 			if err := insertEvent(ctx, tx, now, by, "status_changed", ref, map[string]JobStatus{"from": JobStatus(from), "to": c.Status}); err != nil {
 				return err
 			}
-			if c.Status == StatusApplied && c.AppliedAt == nil && !applied.Valid {
+			if c.Status == StatusApplied && c.AppliedAt == nil && !c.ClearAppliedAt && !applied.Valid {
 				t := s.now()
 				c.AppliedAt = &t
 			}
@@ -126,6 +127,13 @@ func (s *Store) UpdateApplication(ctx context.Context, by Actor, id int64, c App
 				return err
 			}
 			if err := insertEvent(ctx, tx, now, by, "applied_at_set", ref, map[string]string{"applied_at": at.String}); err != nil {
+				return err
+			}
+		} else if c.ClearAppliedAt && applied.Valid {
+			if _, err := tx.ExecContext(ctx, "UPDATE jobs SET applied_at = NULL, applied_unconfirmed = 0 WHERE id = ?", id); err != nil {
+				return err
+			}
+			if err := insertEvent(ctx, tx, now, by, "applied_at_cleared", ref, nil); err != nil {
 				return err
 			}
 		}
@@ -187,4 +195,100 @@ func orNone(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// Content flag reviews.
+const (
+	FlagKeep   = "keep"   // the user read it and the job stays
+	FlagHide   = "hide"   // the job goes to skipped
+	FlagReopen = "reopen" // undoes either
+)
+
+// ReviewContentFlag records the user's decision on a content flag and
+// returns the flagged job. Keeping can reclassify the flag as kind (for
+// example canary). Hiding skips the job if nobody has acted on it yet.
+func (s *Store) ReviewContentFlag(ctx context.Context, by Actor, flagID int64, action, kind string) (int64, error) {
+	var jobID int64
+	err := s.write(ctx, func(tx *sql.Tx) error {
+		var (
+			oldKind string
+			status  string
+		)
+		err := tx.QueryRowContext(ctx, `
+			SELECT p.job_id, f.kind, j.status FROM content_flags f JOIN postings p ON p.id = f.posting_id JOIN jobs j ON j.id = p.job_id
+			WHERE f.id = ?`, flagID).Scan(&jobID, &oldKind, &status)
+		if errNoRows(err) {
+			return fmt.Errorf("content flag %d: %w", flagID, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+		now := s.stamp()
+		data := map[string]any{"flag": flagID, "action": action}
+		switch action {
+		case FlagKeep:
+			if kind == "" {
+				kind = oldKind
+			}
+			_, err = tx.ExecContext(ctx, "UPDATE content_flags SET status = 'kept', kind = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ?",
+				kind, now, by, flagID)
+			if kind != oldKind {
+				data["kind"] = kind
+			}
+		case FlagHide:
+			_, err = tx.ExecContext(ctx, "UPDATE content_flags SET status = 'hidden', reviewed_at = ?, reviewed_by = ? WHERE id = ?",
+				now, by, flagID)
+			if err == nil && triaged[JobStatus(status)] {
+				if _, err = tx.ExecContext(ctx, "UPDATE jobs SET status = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+					StatusSkipped, now, by, jobID); err == nil {
+					err = insertEvent(ctx, tx, now, by, "status_changed", eventRefs{JobID: jobID},
+						map[string]any{"from": status, "to": StatusSkipped, "cause": "content_flag"})
+				}
+			}
+		case FlagReopen:
+			_, err = tx.ExecContext(ctx, "UPDATE content_flags SET status = 'open', reviewed_at = NULL, reviewed_by = NULL WHERE id = ?", flagID)
+		default:
+			return fmt.Errorf("unknown flag review %q", action)
+		}
+		if err != nil {
+			return err
+		}
+		return insertEvent(ctx, tx, now, by, "content_flag_reviewed", eventRefs{JobID: jobID}, data)
+	})
+	return jobID, err
+}
+
+// SetPrefilterOverride sends a job the prefilter dropped to screening
+// anyway (on), or undoes that (off). While it is on, the prefilter records
+// its decisions on the job without moving it.
+func (s *Store) SetPrefilterOverride(ctx context.Context, by Actor, id int64, on bool) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		var status, decision string
+		err := tx.QueryRowContext(ctx, "SELECT status, coalesce(prefilter_status, '') FROM jobs WHERE id = ?", id).Scan(&status, &decision)
+		if errNoRows(err) {
+			return fmt.Errorf("job %d: %w", id, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+		from, to := JobStatus(status), JobStatus(status)
+		switch {
+		case on && from != StatusFilteredOut:
+			return fmt.Errorf("job %d is %s, not filtered out: %w", id, status, ErrConflict)
+		case on:
+			to = StatusUnscreened
+		case from == StatusUnscreened && decision == "drop":
+			to = StatusFilteredOut
+		}
+		now := s.stamp()
+		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET prefilter_override = ?, status = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+			on, to, now, by, id); err != nil {
+			return err
+		}
+		if to == from {
+			return nil
+		}
+		return insertEvent(ctx, tx, now, by, "status_changed", eventRefs{JobID: id},
+			map[string]any{"from": from, "to": to, "cause": "prefilter_override"})
+	})
 }

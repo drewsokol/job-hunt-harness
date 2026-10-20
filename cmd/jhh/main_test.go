@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/datadir"
+	"github.com/drewsokol/job-hunt-harness/internal/web"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -24,6 +27,7 @@ import (
 // lands on stderr and that stdout holds nothing but JSON-RPC messages.
 func TestStdioStdoutCarriesOnlyProtocol(t *testing.T) {
 	t.Setenv(datadir.EnvVar, t.TempDir())
+	t.Setenv(web.PortEnv, "0") // never the real dashboard's port
 	afterStdoutRedirect = func() { fmt.Println("stray print") }
 	t.Cleanup(func() { afterStdoutRedirect = func() {} })
 
@@ -125,7 +129,7 @@ func TestBinaryHandshake(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(), datadir.EnvVar+"="+t.TempDir())
+	cmd.Env = append(os.Environ(), datadir.EnvVar+"="+t.TempDir(), web.PortEnv+"=0")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
@@ -159,6 +163,35 @@ func TestBinaryHandshake(t *testing.T) {
 	if err != nil || len(prompt.Messages) != 1 {
 		t.Fatalf("initialize prompt: %v", err)
 	}
+
+	// The process serves the dashboard, and open_dashboard's link signs a
+	// browser in to it.
+	call, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "open_dashboard", Arguments: map[string]any{"open_browser": false}})
+	if err != nil || call.IsError {
+		t.Fatalf("open_dashboard: %v %+v", err, call)
+	}
+	var dash struct {
+		URL    string `json:"url"`
+		Opened bool   `json:"opened"`
+	}
+	if err := json.Unmarshal([]byte(call.Content[0].(*mcp.TextContent).Text), &dash); err != nil || dash.Opened {
+		t.Fatalf("open_dashboard: %v %+v", err, dash)
+	}
+	jar, _ := cookiejar.New(nil)
+	browser := &http.Client{Jar: jar, Timeout: 5 * time.Second}
+	resp, err := browser.Get(dash.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	resp, err = browser.Get(strings.Split(dash.URL, "/?")[0] + "/api/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("the dashboard after signing in: status %d", resp.StatusCode)
+	}
 }
 
 func TestDoctorReportsDatabase(t *testing.T) {
@@ -183,7 +216,7 @@ func TestDoctorReportsDatabase(t *testing.T) {
 	code := doctor(context.Background(), outW)
 	outW.Close()
 	<-done
-	if code != 0 || !strings.Contains(out.String(), "schema v1, integrity ok") {
+	if code != 0 || !strings.Contains(out.String(), "schema v2, integrity ok") {
 		t.Errorf("doctor exit %d, output:\n%s", code, out.String())
 	}
 }

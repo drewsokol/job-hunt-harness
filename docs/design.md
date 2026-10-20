@@ -50,6 +50,7 @@ The reference scripts already proved the loop works: about 12k roles fetched, ab
 
 - **The normal setup: the agent launches jhh.** You install the single `jhh` binary, then register it once as an MCP server, for example `claude mcp add jhh -- jhh`. The client starts `jhh` over stdio. On startup, jhh also serves the web UI on `127.0.0.1:7878` if no other jhh process is already serving it. The `open_dashboard` tool returns the URL and can open it in the browser, so "show me my dashboard" works from the chat.
 - **Several agent sessions at once** each start their own process. They share the SQLite file in WAL mode. Whichever process got the port first serves the UI. If that process exits, the next `open_dashboard` call from any other process takes over the port.
+- **`jhh dashboard`** opens the dashboard from a terminal. If no agent's jhh is serving it, that command serves it until Ctrl+C. `JHH_UI_PORT` moves the dashboard off 7878.
 - **`jhh serve`** is for people who want the window open without an agent running, or whose client only connects to MCP servers over HTTP. It runs the UI and streamable HTTP MCP at `/mcp` as a long-lived process.
 - **Live updates across processes:** the UI process notices writes from other processes by polling SQLite's `PRAGMA data_version` about once a second, then tells the browser over server-sent events.
 - **Core services** are Go packages with no web or MCP code in them. The JSON API and the MCP tools are thin layers over the same functions, so the UI and the agent can never drift apart.
@@ -383,6 +384,7 @@ jobs           id (AUTOINCREMENT, never reused; doubles as the short number #482
                posted_at, first_seen_at, closed_at, reposted_at,
                origin(feed|search|manual|agent), employment_type,
                prefilter_status(pass|drop|pending), prefilter_reasons_json, prefilter_score, filters_version,
+               prefilter_override (the user sent a dropped job to screening),
                status, applied_at, applied_unconfirmed, notes, updated_at, updated_by
 screenings     id, job_id, fit(strong|good|stretch|no), reason, gaps, flags_json,
                profile_version, screened_by, screened_at        -- history kept; latest is current
@@ -402,6 +404,7 @@ settings       key, value                                       -- ask_percentil
 fetch_runs     id, started_at, finished_at, companies, postings, new_jobs, passed, errors_json
 content_flags  id, posting_id, detector(rule:<name>|agent:<name>), kind(canary|hostile|hidden_text|unclear),
                excerpt, status(open|kept|hidden), created_at, reviewed_at
+ui_tokens      hash (SHA-256 of the token), kind(login|session), created_at, expires_at  -- dashboard sign-in
 ```
 
 **Job status** (one column, with every change also written to `events`):
@@ -424,7 +427,7 @@ content_flags  id, posting_id, detector(rule:<name>|agent:<name>), kind(canary|h
 
 `closed_at` sits alongside the status rather than being a status, because a closed posting you already applied to is still an application. The user can move a job from any status to any other in the UI; the arrows show the normal flow. `screened_out` jobs are kept, so a re-screen or a profile change can bring them back.
 
-The **suggested ask** is computed from the pay range parsed for the user's location: `min + ask_percentile × (max − min)`, rounded to $5k, and only shown when the currency matches the pay floor's currency. The 85% hard-coded in `tracker.html` becomes a setting.
+The **suggested ask** is `min + ask_percentile × (max − min)` of the job's yearly pay range, rounded to $5k. It is shown only when the currency matches the pay floor's and exactly one such range is posted: with one range per location, picking one would be a guess. The original tracker hard-coded 85%; it is now the `ask_percentile` setting (default 0.85).
 
 ## 5. MCP surface
 
@@ -492,7 +495,7 @@ The server also sends a short `instructions` string when an MCP client connects:
 
 The UI is a window onto the data the agent works with, not a separate app. It is there to read and triage, make quick edits, watch the agent work, and undo changes. Anything that involves judgment (screening, writing the profile, tuning filters) is done by asking the agent. Where it helps, the UI shows the phrase to say, for example an empty To review tab reads: "Ask your agent: screen new jobs".
 
-It is built with static HTML, CSS and vanilla JS, ported from `reference/tracker.html` (the layout, tokens, dark mode and row design carry over). The data layer changes from `window.claude.use("db")` to `fetch('/api/...')`. Changes the agent makes show up live through a small server-sent events stream that announces "something changed", and the page then re-fetches. The reference's "don't redraw while typing" logic is kept.
+It is built with static HTML, CSS and vanilla JS, ported from the original personal tracker (the layout, tokens, dark mode and row design carried over), with its data layer moved onto `fetch('/api/...')`. Changes the agent makes show up live through a small server-sent events stream that announces "something changed", and the page then re-fetches. The reference's "don't redraw while typing" logic is kept.
 
 | Screen | Contents |
 |---|---|
@@ -510,6 +513,14 @@ It is built with static HTML, CSS and vanilla JS, ported from `reference/tracker
 The summary strip from the reference (to review, applications, applied in the last 7 days, interviewing, follow-ups due) stays at the top.
 
 **Fast triage (MVP):** keyboard shortcuts in To review (`j`/`k` to move, `a` applied, `s` skip, `o` open the posting, `n` notes), an undo toast after every action, and bulk skip. When you click through to a posting and come back to the tab, a prompt asks "Did you apply?", so you rarely have to mark it by hand.
+
+**How the MVP behaves (M5):**
+- The MVP's Profile tab is read-only: the profile with its headings, the memories by kind (inferred ones marked), and the active filters with their rationale. The editing screens in the table are M6.
+- **Hide job** marks the flag hidden and moves the job to skipped, if nobody acted on it yet. **Keep** can reclassify the flag as `canary`. Both can be undone.
+- **Send to screening** moves a filtered-out job to unscreened and sets `prefilter_override`, so later prefilter runs record their decision without moving it back. The undo clears the override.
+- **Add a role** goes through `add_jobs`' code: a Greenhouse, Lever or Ashby link is read from the board. The job gets origin `manual` and lands in To review, since you found it yourself. Like agent jobs, the prefilter never moves it.
+- **Undo** is done by the page: it remembers what an action changed and sends the reverse (including clearing an applied date it set). `u` or Ctrl+Z triggers it while the toast shows.
+- An empty To review says what to ask the agent: "initialize job hunt harness" before setup, "screen new jobs" when jobs wait for screening.
 
 **After the MVP:** mute a company, team or title pattern, which the agent turns into filter rules.
 
@@ -534,7 +545,7 @@ The summary strip from the reference (to review, applications, applied in the la
 **Security baseline for the localhost server:**
 - Bind to `127.0.0.1` only.
 - Check the `Host` and `Origin` headers on every request, which the MCP spec calls for to block DNS-rebinding attacks.
-- **Session token.** `open_dashboard` returns a URL with a random one-time token. The server swaps it for an `HttpOnly`, `SameSite=Strict` cookie and removes it from the address bar. Every API request must carry that cookie, and state-changing requests must also be `application/json`, so the browser checks with the server before sending them. Together these stop other websites (cross-site request forgery) and other local users from using the API.
+- **Session token.** `open_dashboard` returns a URL with a random one-time token. The server swaps it for an `HttpOnly`, `SameSite=Strict` cookie and removes it from the address bar. Every API request must carry that cookie, and state-changing requests must also be `application/json`, so the browser checks with the server before sending them. Together these stop other websites (cross-site request forgery) and other local users from using the API. As built: tokens are stored only as SHA-256 hashes in `ui_tokens`, so any jhh process can hand out a link to the one serving the port. A link works once, for 15 minutes; a session lasts 30 days. API requests whose `Sec-Fetch-Site` is anything but `same-origin` (or `none`) are refused too. The page itself can be opened from anywhere, so links from a chat app work.
 - A strict Content Security Policy (`default-src 'self'`): no inline scripts and no third-party scripts. The UI's JavaScript is a separate embedded file.
 - Text from listings is rendered as text only; links follow the rules in "Untrusted content and prompt injection".
 - Responses read from feeds have a size limit, and slugs must match `^[a-z0-9-]+$` before they go into a URL. Probing only contacts the known job-board hosts.
@@ -563,7 +574,6 @@ internal/
   playbooks/             # initialize.md, screen_new_jobs.md, … (embedded)
 examples/                # fictional profiles
 docs/                    # design.md, adding-a-source.md, adding-companies.md
-reference/tracker.html   # the original dashboard; delete once the UI is ported (M5)
 ```
 
 Everything lives under `internal/`, so v1 promises no public Go API. Test fixtures sit in each package's `testdata/`, as Go convention expects.
@@ -614,7 +624,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 
 ## 9. Open questions for the owner
 
-**Settled:** the name is Job Hunt Harness, the binary is `jhh`, and the module path is `github.com/drewsokol/job-hunt-harness`. The MVP in section 8 gets built first, and features come after it works. The license is MIT (`LICENSE`). jhh isn't registered with The Muse for now. There's no starter company list: every user's companies come from their own search, so jhh doesn't ship anyone's idea of which employers matter. Employers that search finds are probed for a board only on request (the agent suggests, you decide); doing it automatically is on the roadmap. The reference fetch and probe scripts were ported and removed from the history along with the owner's personal details; `reference/tracker.html` stays until the UI is ported.
+**Settled:** the name is Job Hunt Harness, the binary is `jhh`, and the module path is `github.com/drewsokol/job-hunt-harness`. The MVP in section 8 gets built first, and features come after it works. The license is MIT (`LICENSE`). jhh isn't registered with The Muse for now. There's no starter company list: every user's companies come from their own search, so jhh doesn't ship anyone's idea of which employers matter. Employers that search finds are probed for a board only on request (the agent suggests, you decide); doing it automatically is on the roadmap. The reference fetch and probe scripts were ported and removed from the history along with the owner's personal details, and `reference/tracker.html` was deleted once the dashboard was ported (M5).
 
 1. **Inferred memories.** Should the agent save inferred memories without asking (labelled, shown in the UI, given less weight: the current proposal), or only after you agree in the chat?
 2. **Fit scale.** Keep the reference's three levels plus an explicit `no`, or use a numeric score?

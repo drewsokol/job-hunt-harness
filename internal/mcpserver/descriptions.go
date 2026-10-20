@@ -51,6 +51,8 @@ var descriptions = map[string]string{
 
 	"whats_new": `The daily check-in, since the last call (or since a time you give): new jobs waiting for screening or review with their fit ratings, follow-ups due, applications whose posting closed or came back, content flags waiting for the user's review, and feeds that look broken. Also when jhh last refreshed; if that was long ago, offer to call refresh_jobs.`,
 
+	"open_dashboard": `Open jhh's dashboard, where the user reviews jobs, tracks applications and outreach, and sees the profile, memories and filters you set up. Makes sure the dashboard is running, opens it in the browser (unless open_browser is false), and returns the link. Call it when the user asks to see their dashboard or jobs.`,
+
 	"refresh_jobs": `Fetch new jobs now: every enabled company's board and every search in the filters, then judge them with the filters. Takes from seconds to a few minutes. companies narrows it to some companies, by name or board key, and skips searching. Returns counts; the jobs are in list_candidates.`,
 
 	"preview_filters": `Show what a filters change would do to the jobs already stored, without saving it: how many pass now and would pass, and examples of jobs newly dropped and newly kept with the reasons. drops_tracked counts dropped jobs the user is already reviewing or applying to, which usually means a filter is wrong. Call it before set_filters and show the user the result.`,

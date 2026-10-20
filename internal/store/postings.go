@@ -39,9 +39,10 @@ type PostingInput struct {
 	// Search means a search source found the posting: its job is created
 	// with origin "search", and it isn't closed by a board's list.
 	Search bool
-	// Agent means an agent added the posting (add_jobs): its job is
-	// created with origin "agent", which the prefilter never moves.
-	Agent           bool
+	// Chosen is "agent" when an agent added the posting (add_jobs) and
+	// "manual" when the user did (the dashboard). Its job is created with
+	// that origin, which the prefilter never moves.
+	Chosen          string
 	Description     string
 	DescriptionHTML string // stored only when Flags isn't empty
 	Flags           []ContentFlag
@@ -393,8 +394,8 @@ func (a *applier) assignJob(companyID int64, p PostingInput) error {
 	if jobID == 0 {
 		origin := "feed"
 		switch {
-		case p.Agent:
-			origin = "agent"
+		case p.Chosen != "":
+			origin = p.Chosen
 		case p.Search:
 			origin = "search"
 		}

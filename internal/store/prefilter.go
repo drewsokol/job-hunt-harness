@@ -184,10 +184,11 @@ func applyPrefilter(ctx context.Context, tx *sql.Tx, now string, by Actor, versi
 			status, prev, reasons, origin string
 			score                         float64
 			prevVersion                   int64
+			override                      bool
 		)
 		err := tx.QueryRowContext(ctx, `
-			SELECT status, coalesce(prefilter_status, ''), prefilter_reasons, coalesce(prefilter_score, 0), coalesce(filters_version, 0), origin
-			FROM jobs WHERE id = ?`, d.JobID).Scan(&status, &prev, &reasons, &score, &prevVersion, &origin)
+			SELECT status, coalesce(prefilter_status, ''), prefilter_reasons, coalesce(prefilter_score, 0), coalesce(filters_version, 0), origin, prefilter_override
+			FROM jobs WHERE id = ?`, d.JobID).Scan(&status, &prev, &reasons, &score, &prevVersion, &origin, &override)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue // deleted since it was read
 		}
@@ -196,8 +197,8 @@ func applyPrefilter(ctx context.Context, tx *sql.Tx, now string, by Actor, versi
 		}
 		newReasons := jsonOr(d.Reasons, "[]")
 		to := nextStatus(JobStatus(status), d.Status)
-		if origin == "agent" {
-			to = JobStatus(status) // added on purpose; the decision is only recorded
+		if origin == "agent" || origin == "manual" || override {
+			to = JobStatus(status) // chosen on purpose; the decision is only recorded
 		}
 		if prev == d.Status && reasons == newReasons && score == d.Score && prevVersion == version && to == JobStatus(status) {
 			continue

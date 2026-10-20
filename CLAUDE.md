@@ -2,7 +2,7 @@
 
 An open-source, local-first job search tool: an MCP server with a GUI. A job seeker connects their own AI agent (Claude Code, Cursor, or any other MCP client) to it. jhh finds and tracks jobs and stores everything the agent learns about the candidate. The agent does all the judgment: interviewing the user, writing the profile and filters, and screening jobs.
 
-Status: milestones M0–M4 are built: jhh works from an agent over MCP. M5, the dashboard, is next. **Read `docs/design.md` before writing code.** It is the spec. `docs/decisions/` records why the key decisions were made, and `docs/roadmap.md` holds everything after the MVP. If a change would contradict the design, raise it with the owner before writing code.
+Status: the MVP (milestones M0–M5) is built: jhh works from an agent over MCP and has a local dashboard. Next it gets used on a real search; features after the MVP wait for that. **Read `docs/design.md` before writing code.** It is the spec. `docs/decisions/` records why the key decisions were made, and `docs/roadmap.md` holds everything after the MVP. If a change would contradict the design, raise it with the owner before writing code.
 
 ## Key decisions (details in docs/)
 
@@ -21,9 +21,7 @@ Status: milestones M0–M4 are built: jhh works from an agent over MCP. M5, the 
 
 ## Reference code
 
-`reference/tracker.html` is the dashboard from the original personal version: the design to port in M5. Its inline script must become an external file to satisfy the strict Content Security Policy. Delete it once the UI is ported.
-
-The original fetch and probe scripts were removed from the repo and its history once their logic was ported (`internal/sources`, `internal/prefilter`, `jhh probe`). There is no starter company list: each user's companies come from their own search and choices.
+The original personal version's scripts and dashboard were removed from the repo once ported: fetch and probe into `internal/sources`, `internal/prefilter` and `jhh probe`, and the tracker page into `internal/web`. There is no starter company list: each user's companies come from their own search and choices.
 
 ## Lessons from the reference code
 
@@ -46,6 +44,9 @@ The original fetch and probe scripts were removed from the repo and its history 
 
 - Line endings are LF (`.gitattributes`). Editors or scripts on Windows that write CRLF will show every line as changed.
 - Tests never touch the network. Sources are tested against made-up fixtures through `internal/sources/conformance`. For a live check, run `jhh refresh` with `JHH_DATA_DIR` pointing at a scratch directory, never at real data.
+- Tests that start jhh set `JHH_UI_PORT=0`, so they never take the real dashboard's port.
+- The dashboard page never parses HTML: it builds elements with its `h` helper, which makes text nodes only, and a test fails on `innerHTML` and the like. Keep it that way; listing text is untrusted.
+- To check the dashboard by eye, run it on a scratch database with made-up data and use headless Edge or Chrome. `--screenshot` never finishes while the page holds its event stream, so pass `--timeout=5000`, or drive the browser over the DevTools protocol to click and type.
 
 ## Privacy rules for this repo
 

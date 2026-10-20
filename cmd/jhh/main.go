@@ -8,6 +8,7 @@
 //	jhh companies  list companies, or add one with its job board
 //	jhh probe      find which job board a company uses
 //	jhh candidates list the jobs that passed the filters
+//	jhh dashboard  open the dashboard in the browser
 //	jhh filters    show, preview or set the filters
 //	jhh doctor     check the installation and data directory
 //	jhh version    print the version
@@ -31,6 +32,7 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/builtin"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
+	"github.com/drewsokol/job-hunt-harness/internal/web"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -42,6 +44,7 @@ Usage:
   jhh companies  list companies; jhh companies add <name> [slug or posting URL]
   jhh probe      find which job board a company uses: jhh probe <slug or posting URL>
   jhh candidates list the jobs that passed the filters [--status STATUS] [--limit N]
+  jhh dashboard  open the dashboard in the browser (serves it until Ctrl+C if no agent does)
   jhh filters    show the filters; jhh filters preview|set <file> (usually your agent does this)
   jhh doctor     check the installation and data directory
   jhh version    print the version
@@ -53,6 +56,7 @@ Register jhh with your agent once, for example in Claude Code:
 Environment:
   JHH_DATA_DIR   where jhh keeps its data (default: a per-user directory)
   JHH_LOG_LEVEL  debug, info, warn or error (default: info)
+  JHH_UI_PORT    the dashboard's port on 127.0.0.1 (default: 7878)
 `
 
 func main() {
@@ -79,6 +83,8 @@ func run(ctx context.Context, args []string, stdin io.ReadCloser, stdout io.Writ
 		return companies(ctx, args[1:], stdout, stderr)
 	case "probe":
 		return probe(ctx, args[1:], stdout, stderr)
+	case "dashboard":
+		return dashboard(ctx, stdout, stderr)
 	case "candidates":
 		return candidates(ctx, args[1:], stdout, stderr)
 	case "filters":
@@ -130,7 +136,20 @@ func serveStdio(ctx context.Context, stdin io.ReadCloser, stdout io.WriteCloser,
 	}
 	defer st.Close()
 	client := sources.NewClient()
-	srv := mcpserver.New(mcpserver.Deps{Store: st, Logger: logger, Sources: builtin.All(client), Searchers: builtin.Searchers(client)})
+	srcs := builtin.All(client)
+	// The dashboard is served alongside, unless another jhh already serves it.
+	port, err := web.Port()
+	if err != nil {
+		logger.Error("starting the dashboard", "err", err)
+		return 1
+	}
+	dash := web.NewDashboard(ctx, web.Deps{Store: st, Logger: logger, Sources: srcs, Instance: web.Instance(dir.DB())}, port)
+	if err := dash.Start(); err != nil {
+		logger.Warn("not serving the dashboard", "err", err)
+	}
+	defer dash.Close()
+	srv := mcpserver.New(mcpserver.Deps{Store: st, Logger: logger, Sources: srcs, Searchers: builtin.Searchers(client),
+		Dashboard: dash, OpenBrowser: web.OpenBrowser})
 	err = srv.Run(ctx, &mcp.IOTransport{Reader: stdin, Writer: stdout})
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
 		logger.Error("server stopped", "err", err)

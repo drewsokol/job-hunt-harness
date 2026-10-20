@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Job Hunt Harness</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Job Hunt</h1>
+      <p class="sub">Jobs your agent rated land in To review. Mark them applied when you submit, keep notes on each one, and log messages to people under Outreach.</p>
+    </div>
+    <span id="live" class="live" hidden>Live</span>
+  </header>
+  <section class="strip" id="strip" aria-label="Summary"></section>
+  <div id="banners"></div>
+  <nav class="tabs" role="tablist" id="tabs" aria-label="Views"></nav>
+  <main id="view"><div class="empty"><strong>Loading</strong>Your jobs, applications and outreach will appear here.</div></main>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

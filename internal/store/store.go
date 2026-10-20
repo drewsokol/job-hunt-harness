@@ -38,8 +38,9 @@ type Options struct {
 
 // Store is an open, migrated database.
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db   *sql.DB
+	path string
+	now  func() time.Time
 }
 
 // Open opens (creating if needed) the database at path and brings its
@@ -52,7 +53,7 @@ func Open(ctx context.Context, path string, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening %s: %w", path, err)
 	}
-	s := &Store{db: db, now: opts.Now}
+	s := &Store{db: db, path: path, now: opts.Now}
 	if s.now == nil {
 		s.now = utc.Now
 	}
@@ -103,6 +104,9 @@ func enableWAL(ctx context.Context, db *sql.DB) error {
 		}
 	}
 }
+
+// Path returns the database file's path.
+func (s *Store) Path() string { return s.path }
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }

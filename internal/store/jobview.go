@@ -35,9 +35,13 @@ type JobRow struct {
 	ClosedAt       time.Time
 	RepostedAt     time.Time
 	AppliedAt      time.Time
-	Description    string // only when asked for
-	Screening      *Screening
-	OpenFlags      []string // kinds of content flags waiting for review
+	// AppliedUnconfirmed means an agent wasn't sure the user submitted.
+	AppliedUnconfirmed bool
+	CompanySuspect     bool   // the company's last fetch looked wrong
+	Notes              string // the user's and agents' notes
+	Description        string // only when asked for
+	Screening          *Screening
+	OpenFlags          []string // kinds of content flags waiting for review
 }
 
 // Screening is an agent's fit rating of a job.
@@ -88,6 +92,41 @@ func (s *Store) ListJobs(ctx context.Context, q JobQuery) ([]JobRow, int, error)
 		 j.prefilter_score DESC, j.first_seen_at DESC, j.id DESC`, q.Offset, q.Limit, q.WithDescription)
 }
 
+// BoardQuery selects jobs for one of the dashboard's lists.
+type BoardQuery struct {
+	Statuses []JobStatus
+	// Recent orders by the latest change instead of best fit first.
+	Recent bool
+	Limit  int
+}
+
+// BoardJobs returns the jobs with any of the statuses, and how many match.
+// Closed jobs are left out of the triage statuses, as in ListJobs.
+func (s *Store) BoardJobs(ctx context.Context, q BoardQuery) ([]JobRow, int, error) {
+	if len(q.Statuses) == 0 {
+		return nil, 0, errors.New("no statuses")
+	}
+	args := make([]any, len(q.Statuses))
+	openOnly := true
+	for i, st := range q.Statuses {
+		if !st.Valid() {
+			return nil, 0, fmt.Errorf("unknown job status %q", st)
+		}
+		args[i] = st
+		openOnly = openOnly && listOpenOnly[st]
+	}
+	where := "j.status IN (" + placeholders(len(args)) + ") AND j.hidden_at IS NULL"
+	if openOnly {
+		where += " AND j.closed_at IS NULL"
+	}
+	order := `CASE sc.fit WHEN 'strong' THEN 0 WHEN 'good' THEN 1 WHEN 'stretch' THEN 2 WHEN 'no' THEN 3 ELSE 4 END,
+		j.prefilter_score DESC, j.first_seen_at DESC, j.id DESC`
+	if q.Recent {
+		order = "coalesce(j.applied_at, j.updated_at) DESC, j.id DESC"
+	}
+	return s.queryJobs(ctx, where, args, order, 0, q.Limit, false)
+}
+
 // queryJobs returns the jobs matching where (over jobs j, companies c and
 // the latest screening sc), in order, and how many match in all.
 func (s *Store) queryJobs(ctx context.Context, where string, args []any, order string, offset, limit int, withDescription bool) ([]JobRow, int, error) {
@@ -116,7 +155,6 @@ func (s *Store) queryJobs(ctx context.Context, where string, args []any, order s
 // JobDetail is everything about one job.
 type JobDetail struct {
 	JobRow
-	Notes      string
 	Postings   []PostingView
 	Screenings []Screening // newest first
 	Flags      []ContentFlagView
@@ -168,9 +206,6 @@ func (s *Store) GetJobDetail(ctx context.Context, id int64) (JobDetail, error) {
 		return d, fmt.Errorf("job %d: %w", id, ErrNotFound)
 	}
 	d.JobRow = rs[0]
-	if err := s.db.QueryRowContext(ctx, "SELECT notes FROM jobs WHERE id = ?", id).Scan(&d.Notes); err != nil {
-		return d, err
-	}
 	if d.Postings, err = s.jobPostings(ctx, id); err != nil {
 		return d, err
 	}
@@ -202,6 +237,7 @@ const jobRowColumns = `j.id, j.company_id, c.name, j.title, j.status, j.origin, 
 	CASE WHEN EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0) THEN ''
 	     ELSE coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id AND p.search = 1 LIMIT 1), '') END,
 	coalesce(j.prefilter_score, 0), j.prefilter_reasons, j.first_seen_at, j.posted_at, j.closed_at, j.reposted_at, j.applied_at,
+	j.applied_unconfirmed, c.suspect, j.notes,
 	sc.id, sc.fit, sc.reason, sc.gaps, sc.flags, sc.profile_version, sc.screened_by, sc.screened_at`
 
 func scanJobRows(rows *sql.Rows) ([]JobRow, error) {
@@ -218,6 +254,7 @@ func scanJobRows(rows *sql.Rows) ([]JobRow, error) {
 		if err := rows.Scan(&r.ID, &r.CompanyID, &r.Company, &r.Title, &status, &r.Origin, &r.Workplace, &locs,
 			&r.PayRaw, &pay, &r.EmploymentType, &r.URL, &r.PostingID, &r.Via,
 			&r.Score, &reasons, &first, &posted, &closed, &repost, &applied,
+			&r.AppliedUnconfirmed, &r.CompanySuspect, &r.Notes,
 			&scID, &fit, &reason, &gaps, &flags, &scVersion, &by, &at, &r.Description); err != nil {
 			return nil, err
 		}
