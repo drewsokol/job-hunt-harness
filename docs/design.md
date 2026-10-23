@@ -161,7 +161,7 @@ How jhh uses it:
 - **Ads jhh can't read are left out and counted:** a first line without separators, an employer part that's a sentence, a question or a role ("Senior Engineer | Remote"). In October 2026 that was 29 of 266 comments, mostly replies and remarks rather than ads; a few prose ads were among them, which the agent can still add with `add_jobs`. An ad whose header says it's closed or filled is treated as gone.
 - **The link is the ad's page on Hacker News**, which says how to apply (an email address or a careers page). The agent mentions it when screening, and offers `add_company` when the ad links to a Greenhouse, Lever or Ashby board.
 - **Closing** follows the shared rules: when every thread was read, an ad missing from them is closed, so last month's ads close once their thread falls out of `months`. Pursued ads are looked up and closed only when deleted or marked filled.
-- **Dedupe:** an employer who posts the same ad two months running gets one job (same title and description fingerprint; for an ad naming no role, the fingerprint alone). When the employer's board is added later, a board posting joins the ad's job if its title matches one of the ad's roles.
+- **Dedupe:** an employer who posts the same ad two months running gets one job (same title and description fingerprint; for an ad naming no role, the fingerprint alone). When the employer's board is added later, a board posting joins the ad's job if its title matches one of the ad's roles, and the job takes the board's title: the board has confirmed which opening it is, so the ad's other roles no longer count for or against it.
 
 ### What each board's API allows (tested against live feeds, 2026-10-18)
 

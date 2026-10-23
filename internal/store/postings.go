@@ -424,6 +424,16 @@ func (a *applier) assignJob(companyID int64, p PostingInput) error {
 			map[string]string{"posting": p.ID, "rule": rule}); err != nil {
 			return err
 		}
+		// A board posting that joined one role of a search ad naming several
+		// confirms which opening this is: the job takes the board's title.
+		if rule == "search_copy" {
+			if _, err := a.tx.ExecContext(a.ctx, `
+				UPDATE jobs SET title = ?, title_key = ?, updated_at = ?, updated_by = ?
+				WHERE id = ? AND title_key <> ?`,
+				p.Title, p.TitleKey, a.now, a.by, jobID, p.TitleKey); err != nil {
+				return err
+			}
+		}
 	}
 	if _, err := a.tx.ExecContext(a.ctx, "UPDATE postings SET job_id = ? WHERE id = ?", jobID, p.ID); err != nil {
 		return err
@@ -510,7 +520,7 @@ func (a *applier) match(companyID int64, p PostingInput) (int64, string, error) 
 func (a *applier) searchCopy(companyID int64, key string) (int64, error) {
 	rows, err := a.tx.QueryContext(a.ctx, `
 		SELECT j.id, j.title, j.title_key,
-		       coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id LIMIT 1), '')
+		       coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id ORDER BY p.first_seen_at, p.id LIMIT 1), '')
 		FROM jobs j
 		WHERE j.company_id = ? AND j.origin = 'search' AND j.closed_at IS NULL
 		  AND NOT EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0)

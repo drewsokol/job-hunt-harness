@@ -114,9 +114,11 @@ const jobDescription = `coalesce(j.description, (
 	ORDER BY p.closed_at IS NOT NULL, p.first_seen_at DESC, p.id DESC LIMIT 1), '')`
 
 // jobVia is the search source a job came through when it has no posting
-// from a board, or ”.
+// from a board, or ”. The first posting made the job and its title, so its
+// source decides.
 const jobVia = `CASE WHEN EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0) THEN ''
-		            ELSE coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id AND p.search = 1 LIMIT 1), '') END`
+		            ELSE coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id AND p.search = 1
+		                           ORDER BY p.first_seen_at, p.id LIMIT 1), '') END`
 
 // PrefilterJobs returns every job of the company, or of every company when
 // companyID is 0. A feed or search job's description is known once any of

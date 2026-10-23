@@ -136,7 +136,8 @@ func (s *Source) Lookup(ctx context.Context, externalID string) (sources.Posting
 	case adFilled:
 		return sources.Posting{}, sources.ErrPostingNotFound
 	case adUnreadable:
-		// Still there, just without a header jhh can read.
+		// Still there, just without a header jhh can read. Callers only
+		// need to know it isn't gone; the company and title are empty.
 		return sources.Posting{ExternalID: externalID, URL: ItemURL(externalID), DescriptionHTML: c.Text}, nil
 	default:
 		return p, nil

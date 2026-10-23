@@ -128,13 +128,16 @@ func TestHackerNewsDedupe(t *testing.T) {
 		gone: map[string]bool{},
 	}
 	f.r.Searchers = map[string]sources.Searcher{"hackernews": hn}
-	f.setFilters(`{"schema_version": 1, "titles": {"require_any": ["engineer"]}, "search": {"hackernews": {}}}`)
+	f.setFilters(`{"schema_version": 1, "titles": {"require_any": ["engineer"], "exclude_any": ["manager"]}, "search": {"hackernews": {}}}`)
 	f.refresh()
 	if all, _ := f.s.PrefilterJobs(context.Background(), 0); len(all) != 2 {
 		t.Fatalf("%d jobs, want one for each ad, even the one naming no role", len(all))
 	}
 	jobs := f.jobsByTitle()
 	found := jobs["Engineering Manager · Platform Engineer"]
+	if found.PrefilterStatus != "pass" {
+		t.Fatalf("prefilter %q for the ad, want pass: one of its roles fits", found.PrefilterStatus)
+	}
 
 	// The employer's board is added: its posting for one of the ad's roles
 	// joins the job the ad made.
@@ -147,8 +150,14 @@ func TestHackerNewsDedupe(t *testing.T) {
 	if res := f.refresh(); len(res.NewJobs) != 0 {
 		t.Errorf("new jobs %v; the board's posting should join the ad's job", res.NewJobs)
 	}
-	if js := f.jobsByTitle(); len(js) != 2 || js["Engineering Manager · Platform Engineer"].ID != found.ID {
-		t.Errorf("jobs %+v", js)
+	// The board confirmed which role this is: the job takes its title, and
+	// the ad's other role no longer counts against it.
+	js := f.jobsByTitle()
+	if len(js) != 2 || js["Platform Engineer"].ID != found.ID {
+		t.Fatalf("jobs %+v", js)
+	}
+	if got := js["Platform Engineer"].PrefilterStatus; got != "pass" {
+		t.Errorf("prefilter %q after the board posting joined, want pass", got)
 	}
 }
 
