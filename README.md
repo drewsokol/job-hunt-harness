@@ -66,3 +66,5 @@ jhh ships no list of companies: yours starts empty and grows from what search fi
 Tests never touch the network: each source is tested against made-up fixtures by the shared conformance suite in `internal/sources/conformance`.
 
 Never commit real profiles, resumes, salary numbers, contacts or databases. Test fixtures are always made up.
+
+Pull requests to `main` need the owner's review. When the owner opens one, a GitHub Action has Claude review it and post one summary comment (`.github/workflows/claude-review.yml`); the owner can also run that review by hand on any PR. It never runs on its own for outside PRs.
