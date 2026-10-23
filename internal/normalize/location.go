@@ -61,18 +61,34 @@ var (
 // title. With no hint and no workplace words, the workplace is unknown: a
 // city alone doesn't say whether remote work is possible.
 func ParseLocation(raw, title, workplaceHint, countryHint string) Location {
-	return parseLocation(raw, title, workplaceHint, countryHint, false)
+	return parseLocation(raw, title, workplaceHint, countryHint, lenient)
 }
+
+// placeMode says how parsePlaces treats words it doesn't recognize.
+type placeMode int
+
+const (
+	// lenient reads a location field: a known place inside a longer phrase
+	// is found ("DE Frankfurt a.M."), and other text is kept as a city.
+	lenient placeMode = iota
+	// freeform reads location text a person wrote freely: known places are
+	// found inside phrases, and other words are ignored.
+	freeform
+	// exact reads text that may not be a location at all, such as a title
+	// part: only a part that is a known place counts ("Boston Dynamics"
+	// isn't Boston).
+	exact
+)
 
 // ParseFreeformLocation is ParseLocation for location text a person wrote
 // freely, such as a Hacker News ad's header ("Remote (some overlap with
 // PST)"): only places jhh recognizes count, and other words are ignored
 // instead of kept as a city.
 func ParseFreeformLocation(raw, title, workplaceHint, countryHint string) Location {
-	return parseLocation(raw, title, workplaceHint, countryHint, true)
+	return parseLocation(raw, title, workplaceHint, countryHint, freeform)
 }
 
-func parseLocation(raw, title, workplaceHint, countryHint string, strict bool) Location {
+func parseLocation(raw, title, workplaceHint, countryHint string, mode placeMode) Location {
 	var loc Location
 	var remote, hybrid, onsite bool
 	add := func(p Place) {
@@ -80,22 +96,22 @@ func parseLocation(raw, title, workplaceHint, countryHint string, strict bool) L
 			loc.Places = append(loc.Places, p)
 		}
 	}
-	scan := func(seg string, strict bool) {
+	scan := func(seg string, mode placeMode) {
 		remote = remote || remoteWords.MatchString(seg)
 		hybrid = hybrid || hybridWords.MatchString(seg)
 		onsite = onsite || onsiteWords.MatchString(seg)
-		for _, p := range parsePlaces(seg, strict) {
+		for _, p := range parsePlaces(seg, mode) {
 			add(p)
 		}
 	}
 	for _, seg := range segmentSep.Split(raw, -1) {
-		scan(seg, strict)
+		scan(seg, mode)
 	}
 	// The first title part is the role itself; only trailing parts can be
 	// locations, and only recognized places count.
 	if parts := titleSep.Split(title, -1); len(parts) > 1 {
 		for _, seg := range parts[1:] {
-			scan(seg, true)
+			scan(seg, exact)
 		}
 	}
 
@@ -132,9 +148,9 @@ func parseLocation(raw, title, workplaceHint, countryHint string, strict bool) L
 	return loc
 }
 
-// parsePlaces reads the places in one segment. In strict mode only
-// recognized places are returned.
-func parsePlaces(seg string, strict bool) []Place {
+// parsePlaces reads the places in one segment; mode says what happens to
+// words it doesn't recognize.
+func parsePlaces(seg string, mode placeMode) []Place {
 	seg = worldWords.ReplaceAllString(seg, " worldwide ")
 	seg = remoteWords.ReplaceAllString(seg, " ")
 	seg = hybridWords.ReplaceAllString(seg, " ")
@@ -155,7 +171,12 @@ func parsePlaces(seg string, strict bool) []Place {
 		if p, ok := knownPlace(parts[0]); ok {
 			return []Place{p}
 		}
-		if strict || !looksLikeName(parts[0]) {
+		if mode != exact {
+			if p, ok := placeInWords(parts[0]); ok {
+				return []Place{p}
+			}
+		}
+		if mode != lenient || !looksLikeName(parts[0]) {
 			return nil
 		}
 		return []Place{{City: parts[0]}}
@@ -210,15 +231,34 @@ func parsePlaces(seg string, strict bool) []Place {
 	for _, part := range parts {
 		if kp, ok := knownPlace(part); ok {
 			known = append(known, kp)
+		} else if mode != exact {
+			if kp, ok := placeInWords(part); ok {
+				known = append(known, kp)
+			}
 		}
 	}
 	if len(known) > 0 {
 		return dropCovered(known)
 	}
-	if strict || !looksLikeName(strings.Join(parts, " ")) {
+	if mode != lenient || !looksLikeName(strings.Join(parts, " ")) {
 		return nil
 	}
 	return []Place{{City: strings.Join(parts, ", ")}}
+}
+
+// placeInWords finds a place named inside a longer phrase ("DE Frankfurt
+// a.M.", "Greater Boston Area"): the longest run of up to three words that
+// is a place jhh knows, the first one when runs tie.
+func placeInWords(s string) (Place, bool) {
+	words := strings.Fields(s)
+	for n := min(3, len(words)-1); n >= 1; n-- {
+		for i := 0; i+n <= len(words); i++ {
+			if p, ok := knownPlace(strings.Trim(strings.Join(words[i:i+n], " "), edgeJunk)); ok {
+				return p, true
+			}
+		}
+	}
+	return Place{}, false
 }
 
 // slashedPlaces splits "US/Canada" into its places when every piece is one
@@ -346,9 +386,9 @@ func looksLikeName(s string) bool {
 func IsLocationText(s string) bool {
 	if remoteWords.MatchString(s) || hybridWords.MatchString(s) || onsiteWords.MatchString(s) {
 		rest := strings.Trim(onsiteWords.ReplaceAllString(hybridWords.ReplaceAllString(remoteWords.ReplaceAllString(s, ""), ""), ""), edgeJunk)
-		return rest == "" || len(parsePlaces(rest, true)) > 0
+		return rest == "" || len(parsePlaces(rest, exact)) > 0
 	}
-	return len(parsePlaces(s, true)) > 0
+	return len(parsePlaces(s, exact)) > 0
 }
 
 var (

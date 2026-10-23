@@ -191,6 +191,22 @@ func TestEvaluateUnknownLocationDrop(t *testing.T) {
 	}
 }
 
+// With only remote_in, an office job is out wherever it is, even when the
+// listing doesn't say where; with onsite_or_hybrid_in, an unknown place
+// follows location.unknown.
+func TestEvaluateOfficeJobWithUnknownPlace(t *testing.T) {
+	remoteOnly := compile(t, `{"schema_version": 1, "location": {"remote_in": ["US"]}}`)
+	officeToo := compile(t, `{"schema_version": 1, "location": {"remote_in": ["US"], "onsite_or_hybrid_in": ["Columbus, OH"]}}`)
+	for _, w := range []string{normalize.Hybrid, normalize.Onsite} {
+		if got := remoteOnly.Evaluate(job(at(w))); got.Status != Drop {
+			t.Errorf("%s, no place, remote only: %s %+v, want drop", w, got.Status, got.Reasons)
+		}
+		if got := officeToo.Evaluate(job(at(w))); got.Status != Pass || got.Reasons[0].Rule != "location.unknown" {
+			t.Errorf("%s, no place, office allowed: %s %+v, want pass with a location.unknown note", w, got.Status, got.Reasons)
+		}
+	}
+}
+
 func TestEvaluateRegions(t *testing.T) {
 	c := compile(t, `{"schema_version": 1, "location": {"remote_in": ["Europe"]}}`)
 	for _, tt := range []struct {

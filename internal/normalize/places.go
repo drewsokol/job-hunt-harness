@@ -69,6 +69,8 @@ var cities = map[string]Place{
 	"montréal": {"Montreal", "QC", "CA"}, "ottawa": {"Ottawa", "ON", "CA"}, "calgary": {"Calgary", "AB", "CA"}, "waterloo": {"Waterloo", "ON", "CA"},
 	"london": {"London", "", "GB"}, "manchester": {"Manchester", "", "GB"}, "edinburgh": {"Edinburgh", "", "GB"},
 	"dublin": {"Dublin", "", "IE"}, "berlin": {"Berlin", "", "DE"}, "munich": {"Munich", "", "DE"}, "hamburg": {"Hamburg", "", "DE"},
+	"frankfurt": {"Frankfurt", "", "DE"}, "frankfurt am main": {"Frankfurt", "", "DE"}, "cologne": {"Cologne", "", "DE"}, "köln": {"Cologne", "", "DE"},
+	"stuttgart": {"Stuttgart", "", "DE"}, "düsseldorf": {"Düsseldorf", "", "DE"}, "dusseldorf": {"Düsseldorf", "", "DE"},
 	"paris": {"Paris", "", "FR"}, "amsterdam": {"Amsterdam", "", "NL"}, "madrid": {"Madrid", "", "ES"}, "barcelona": {"Barcelona", "", "ES"},
 	"lisbon": {"Lisbon", "", "PT"}, "zurich": {"Zurich", "", "CH"}, "stockholm": {"Stockholm", "", "SE"}, "copenhagen": {"Copenhagen", "", "DK"},
 	"warsaw": {"Warsaw", "", "PL"}, "tel aviv": {"Tel Aviv", "", "IL"},
