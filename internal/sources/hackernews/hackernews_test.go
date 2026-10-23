@@ -177,6 +177,14 @@ func TestParseAd(t *testing.T) {
 			ad{Company: "Exampleco", Title: "Senior Engineer", Location: "Remote (US)"}, adOK},
 		// Level words alone describe the company, not roles; a 401(k) is a
 		// benefit, not pay; and "!" can be part of a name.
+		// A figure about funding or revenue isn't pay.
+		{"Exampleco | 2 Full Stack Engineers, 1 GTM | REMOTE | Full-Time | $250k seed raised",
+			ad{Company: "Exampleco", Title: "2 Full Stack Engineers, 1 GTM", Location: "REMOTE", Employment: "Full-Time"}, adOK},
+		{"Exampleco | Backend Engineer | Remote | $3M ARR, profitable",
+			ad{Company: "Exampleco", Title: "Backend Engineer", Location: "Remote"}, adOK},
+		// ...but pay beside the company's stage is still pay.
+		{"Exampleco | Backend Engineer | Remote | $180k, Series A",
+			ad{Company: "Exampleco", Title: "Backend Engineer", Location: "Remote", Pay: "$180k, Series A"}, adOK},
 		{"Exampleco | Series A, 20 staff | Remote (US)",
 			ad{Company: "Exampleco", Location: "Remote (US)"}, adOK},
 		{"Exampleco | Senior Engineer | Remote (US), 401k match",

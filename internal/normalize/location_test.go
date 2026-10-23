@@ -59,6 +59,12 @@ func TestParseLocation(t *testing.T) {
 			wantPlaces: []Place{us("San Francisco", "CA"), us("Seattle", "WA"), us("New York", "NY")},
 		},
 		{name: "in office stays onsite", raw: "In-office - Austin", wantWorkplace: Onsite, wantPlaces: []Place{us("Austin", "TX")}},
+		{name: "slashed countries", raw: "REMOTE (US/Canada)", wantWorkplace: Remote, wantPlaces: []Place{country("US"), country("CA")}},
+		{name: "slash in other text stays whole", raw: "Eastern/Central", wantWorkplace: Unknown, wantPlaces: []Place{{City: "Eastern/Central"}}},
+		{name: "everywhere", raw: "Remote(Everywhere)", wantWorkplace: Remote, wantPlaces: []Place{{Region: Worldwide}}},
+		{name: "anywhere in the world", raw: "REMOTE ALMOST ANYWHERE IN THE WORLD", wantWorkplace: Remote, wantPlaces: []Place{{Region: Worldwide}}},
+		{name: "anywhere alone is not worldwide", raw: "Remote anywhere in the US", wantWorkplace: Remote, wantPlaces: []Place{country("US")}},
+		{name: "but", raw: "Remote but Austin based only", wantWorkplace: Remote, wantPlaces: []Place{us("Austin", "TX")}},
 
 		// Titles
 		{
@@ -83,5 +89,29 @@ func TestParseLocation(t *testing.T) {
 					tt.raw, tt.title, tt.hint, tt.cHint, got.Workplace, got.Places, tt.wantWorkplace, tt.wantPlaces)
 			}
 		})
+	}
+}
+
+// Free-form text, such as a Hacker News ad's header, keeps only places jhh
+// recognizes: time zones, schedules and other words don't become cities.
+func TestParseFreeformLocation(t *testing.T) {
+	tests := []struct {
+		raw           string
+		wantWorkplace string
+		wantPlaces    []Place
+	}{
+		{"Remote (async)", Remote, nil},
+		{"REMOTE (Some overlap w/ PST required)", Remote, nil},
+		{"Remote (U.S. Eastern/Central Time)", Remote, nil},
+		{"Remote but Austin based only", Remote, []Place{{City: "Austin", Region: "TX", Country: "US"}}},
+		{"REMOTE (US/Canada)", Remote, []Place{{Country: "US"}, {Country: "CA"}}},
+		{"Onsite | Columbus, OH", Onsite, []Place{{City: "Columbus", Region: "OH", Country: "US"}}},
+		{"Springfield", Unknown, nil},
+	}
+	for _, tt := range tests {
+		got := ParseFreeformLocation(tt.raw, "", "", "")
+		if got.Workplace != tt.wantWorkplace || !reflect.DeepEqual(got.Places, tt.wantPlaces) {
+			t.Errorf("ParseFreeformLocation(%q)\n got  %s %+v\n want %s %+v", tt.raw, got.Workplace, got.Places, tt.wantWorkplace, tt.wantPlaces)
+		}
 	}
 }

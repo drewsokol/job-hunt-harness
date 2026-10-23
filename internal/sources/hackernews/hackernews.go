@@ -154,15 +154,16 @@ func (c item) posting() (sources.Posting, adState) {
 	}
 	id := strconv.FormatInt(c.ID, 10)
 	return sources.Posting{
-		ExternalID:      id,
-		Company:         ad.Company,
-		Title:           ad.Title,
-		LocationRaw:     ad.Location,
-		PayRaw:          ad.Pay,
-		EmploymentType:  ad.Employment,
-		URL:             ItemURL(id),
-		PostedAt:        sources.ParseTime(c.CreatedAt),
-		DescriptionHTML: c.Text,
+		ExternalID:       id,
+		Company:          ad.Company,
+		Title:            ad.Title,
+		LocationRaw:      ad.Location,
+		LocationFreeform: true,
+		PayRaw:           ad.Pay,
+		EmploymentType:   ad.Employment,
+		URL:              ItemURL(id),
+		PostedAt:         sources.ParseTime(c.CreatedAt),
+		DescriptionHTML:  c.Text,
 	}, adOK
 }
 

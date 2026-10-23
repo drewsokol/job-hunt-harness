@@ -38,11 +38,14 @@ var (
 	trailingParen = regexp.MustCompile(`\s*[(\[]([^()\[\]]*)[)\]]\s*$`)
 	// money is a figure that can only be pay: a currency sign or "k". A
 	// 401(k) retirement plan is a benefit, not pay (see hasMoney).
-	money       = regexp.MustCompile(`(?i)[$€£¥]\s*\d|\b\d+(?:[.,]\d+)?\s*k\b`)
-	plan401k    = regexp.MustCompile(`(?i)\b401\s*\(?k\)?`)
-	payWords    = regexp.MustCompile(`(?i)\b(?:salary|equity|compensation|usd|eur|gbp|cad)\b`)
-	employment  = regexp.MustCompile(`(?i)^(?:full[- ]?time|part[- ]?time|contract(?:or)?s?|freelance|internships?|interns?|perm(?:anent)?|fte|temporary|employment|or|and|[\s/,&+-])+$`)
-	filledWords = regexp.MustCompile(`(?i)\b(?:closed now|now closed|no longer hiring|(?:positions?|roles?|jobs?) (?:(?:has|have) been |(?:is|are) )?(?:closed|filled))\b|[\[(]\s*(?:closed|filled)\s*[\])]`)
+	money    = regexp.MustCompile(`(?i)[$€£¥]\s*\d|\b\d+(?:[.,]\d+)?\s*k\b`)
+	plan401k = regexp.MustCompile(`(?i)\b401\s*\(?k\)?`)
+	// fundingFigure is a figure about the company, not pay: "$250k seed
+	// raised", "$3M ARR", "raised $12M".
+	fundingFigure = regexp.MustCompile(`(?i)[$€£]?\s*\d+(?:[.,]\d+)?\s*[kmb]?\+?\s+(?:in\s+)?(?:pre-seed|seed|series [a-f]|raised|funding|arr|mrr|revenue|valuation)\b|\b(?:raised|valued at|valuation of|arr of|revenue of)\s+[$€£]?\s*\d+(?:[.,]\d+)?\s*[kmb]?\b`)
+	payWords      = regexp.MustCompile(`(?i)\b(?:salary|equity|compensation|usd|eur|gbp|cad)\b`)
+	employment    = regexp.MustCompile(`(?i)^(?:full[- ]?time|part[- ]?time|contract(?:or)?s?|freelance|internships?|interns?|perm(?:anent)?|fte|temporary|employment|or|and|[\s/,&+-])+$`)
+	filledWords   = regexp.MustCompile(`(?i)\b(?:closed now|now closed|no longer hiring|(?:positions?|roles?|jobs?) (?:(?:has|have) been |(?:is|are) )?(?:closed|filled))\b|[\[(]\s*(?:closed|filled)\s*[\])]`)
 	// roleWords mark a part of the header that names roles. Level words
 	// ("senior", "staff") aren't among them: alone they also describe the
 	// company ("20 staff").
@@ -203,5 +206,8 @@ func isRoles(s string) bool {
 	return roleWords.MatchString(s) && len(s) <= maxRolesLen && !hasMoney(parenthetical.ReplaceAllString(s, ""))
 }
 
-// hasMoney reports whether s states pay.
-func hasMoney(s string) bool { return money.MatchString(plan401k.ReplaceAllString(s, "")) }
+// hasMoney reports whether s states pay. A figure about the company's
+// funding or revenue isn't pay.
+func hasMoney(s string) bool {
+	return money.MatchString(fundingFigure.ReplaceAllString(plan401k.ReplaceAllString(s, ""), ""))
+}

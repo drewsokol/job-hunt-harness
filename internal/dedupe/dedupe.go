@@ -58,6 +58,39 @@ func TitleKey(title string) string {
 	return strings.Join(words, " ")
 }
 
+// SharesRole reports whether two titles naming roles (joined with
+// normalize.RoleSeparator) have a role in common: one role of each using
+// mostly the same words, with notes in parentheses left out. "Software
+// Engineer" and "Software Engineer (all levels)" share a role; "Backend
+// Engineer" and "Frontend Engineer" don't.
+func SharesRole(a, b string) bool {
+	for ra := range strings.SplitSeq(a, normalize.RoleSeparator) {
+		wa := roleWords(ra)
+		for rb := range strings.SplitSeq(b, normalize.RoleSeparator) {
+			wb := roleWords(rb)
+			shared := 0
+			for w := range wa {
+				if wb[w] {
+					shared++
+				}
+			}
+			// More than half of all the words the two use.
+			if shared > 0 && 2*shared > len(wa)+len(wb)-shared {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func roleWords(role string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.Fields(TitleKey(parenthetic.ReplaceAllString(role, " "))) {
+		out[w] = true
+	}
+	return out
+}
+
 // minFingerprintText is the shortest normalized description worth
 // fingerprinting. Shorter texts ("Apply on our site") would match unrelated
 // postings.
