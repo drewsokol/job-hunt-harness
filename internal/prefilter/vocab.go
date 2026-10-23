@@ -54,23 +54,26 @@ var employmentTitleWords = map[string][]term{
 	"internship": newTerms([]string{"intern", "internship", "co-op"}),
 }
 
-// employmentOf reads the kinds of employment from the board's field
-// ("FullTime", "Full-time", "Contract") and the title ("Contract Engineer").
-func employmentOf(field string, title *text) map[string]bool {
+// employmentField reads every kind of employment the board's field lists
+// ("FullTime", "Full-time", "Full-time / Part-time / Contract").
+func employmentField(field string) map[string]bool {
 	out := map[string]bool{}
 	key := strings.Join(words(field), "")
-	switch {
-	case strings.Contains(key, "fulltime"):
-		out["full-time"] = true
-	case strings.Contains(key, "parttime"):
-		out["part-time"] = true
-	case strings.Contains(key, "intern"):
-		out["internship"] = true
-	case strings.Contains(key, "contract"), strings.Contains(key, "freelance"):
-		out["contract"] = true
-	case strings.Contains(key, "temp"), strings.Contains(key, "seasonal"):
-		out["temporary"] = true
+	for _, k := range []struct{ kind, word string }{
+		{"full-time", "fulltime"}, {"part-time", "parttime"}, {"internship", "intern"},
+		{"contract", "contract"}, {"contract", "freelance"}, {"temporary", "temp"}, {"temporary", "seasonal"},
+	} {
+		if strings.Contains(key, k.word) {
+			out[k.kind] = true
+		}
 	}
+	return out
+}
+
+// employmentTitle reads the kinds of employment a title states ("Contract
+// Engineer").
+func employmentTitle(title *text) map[string]bool {
+	out := map[string]bool{}
 	for kind, ts := range employmentTitleWords {
 		for _, tm := range ts {
 			if title.has(tm, false) {

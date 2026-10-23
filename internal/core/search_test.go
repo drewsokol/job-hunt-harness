@@ -218,6 +218,31 @@ func TestRefreshSearchLooksUpPursuedJobs(t *testing.T) {
 	}
 }
 
+// The board often words a job differently from the search result. The
+// title still joins the board's posting to the job search found.
+func TestRefreshSearchAttachesBoardPostingWithOtherText(t *testing.T) {
+	f, _ := newSearchFixture(t, musePosting(1, "Made-Up Labs", "Platform Engineer"))
+	f.setFilters(searchFilters(10))
+	f.refresh()
+	found := f.jobsByTitle()["Platform Engineer"]
+
+	if _, err := f.s.AddCompany(context.Background(), store.ActorUser, store.NewCompany{
+		Name: "Made-Up Labs", Source: "fake", BoardKey: "fake:madeup", SourceConfig: []byte(`{"slug":"madeup"}`), Origin: "user",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p := fakePosting("77", "Platform Engineer")
+	p.DescriptionHTML = "<p>Made-Up Labs runs imaginary platforms. " + strings.Repeat("Different words on the board. ", 12) + "</p>"
+	f.src.complete = true // the board lists descriptions, so the posting has a fingerprint of its own
+	f.src.set("madeup", p)
+	if res := f.refresh(); len(res.NewJobs) != 0 {
+		t.Errorf("new jobs %v; the board's posting should join the job search found", res.NewJobs)
+	}
+	if js := f.jobsByTitle(); js["Platform Engineer"].ID != found.ID {
+		t.Errorf("jobs %+v", js)
+	}
+}
+
 func TestRefreshSearchAttachesBoardPostingsLater(t *testing.T) {
 	f, _ := newSearchFixture(t, musePosting(1, "Made-Up Labs", "Platform Engineer"))
 	f.setFilters(searchFilters(10))

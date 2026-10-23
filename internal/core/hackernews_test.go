@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
@@ -158,6 +159,62 @@ func TestHackerNewsDedupe(t *testing.T) {
 	}
 	if got := js["Platform Engineer"].PrefilterStatus; got != "pass" {
 		t.Errorf("prefilter %q after the board posting joined, want pass", got)
+	}
+}
+
+// An employer posts its ad again in each month's thread, with a new id and
+// some roles or words changed. Ads that share a role, or that name none,
+// are one job, titled with the newest ad's roles; an employer's ad for
+// other roles is its own job.
+func TestHackerNewsAdRepostedAcrossThreads(t *testing.T) {
+	f := newRefreshFixture(t, "exampleco")
+	october, september := time.Date(2026, 10, 1, 15, 0, 0, 0, time.UTC), time.Date(2026, 9, 1, 15, 0, 0, 0, time.UTC)
+	ad := func(id, company, title, text string, posted time.Time) sources.Posting {
+		p := hnAd(id, company, title)
+		p.DescriptionHTML = "<p>" + text + "</p>"
+		p.PostedAt = posted
+		return p
+	}
+	hn := &fakeThreads{
+		threads: []sources.Thread{{ID: "901"}, {ID: "801"}},
+		ads: map[string][]sources.Posting{
+			"901": {
+				ad("911", "Made-Up Labs", "Platform Engineer · Agent Engineer", "Made-Up Labs is hiring.", october),
+				ad("912", "Sample Co", "", "Sample Co is hiring across the team.", october),
+				ad("913", "Fictional Freight", "Office Manager", "Run the front desk.", october),
+			},
+			"801": {
+				ad("811", "Made-Up Labs", "Platform Engineer · ML Engineer", "Made-Up Labs is hiring again.", september),
+				ad("812", "Sample Co", "", "Sample Co is hiring; see our site.", september),
+				ad("813", "Fictional Freight", "Data Engineer", "Build data pipelines.", september),
+			},
+		},
+		gone: map[string]bool{},
+	}
+	f.r.Searchers = map[string]sources.Searcher{"hackernews": hn}
+	f.setFilters(`{"schema_version": 1, "search": {"hackernews": {}}}`)
+	f.refresh()
+	ctx := context.Background()
+	all, err := f.s.PrefilterJobs(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, j := range all {
+		titles = append(titles, j.Company+": "+j.Title)
+	}
+	slices.Sort(titles)
+	want := []string{
+		"Fictional Freight: Data Engineer",
+		"Fictional Freight: Office Manager",
+		"Made-Up Labs: Platform Engineer · Agent Engineer", // shares a role; the newest ad's roles
+		"Sample Co: ", // no roles, but much the same text
+	}
+	if !slices.Equal(titles, want) {
+		t.Errorf("jobs\n got  %q\n want %q", titles, want)
+	}
+	if res := f.refresh(); len(res.NewJobs) != 0 {
+		t.Errorf("a second refresh made jobs %v", res.NewJobs)
 	}
 }
 

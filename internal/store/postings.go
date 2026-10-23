@@ -13,6 +13,7 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/dedupe"
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
+	"github.com/drewsokol/job-hunt-harness/internal/utc"
 )
 
 // PostingInput is one posting as refresh read it, already normalized. Text
@@ -434,6 +435,21 @@ func (a *applier) assignJob(companyID int64, p PostingInput) error {
 				return err
 			}
 		}
+		// An employer's newest ad says which roles are open now, unless a
+		// board posting has already said which opening the job is.
+		if rule == "ad_repost" && !p.PostedAt.IsZero() {
+			posted, err := timeText(p.PostedAt)
+			if err != nil {
+				return err
+			}
+			if _, err := a.tx.ExecContext(a.ctx, `
+				UPDATE jobs SET title = ?, title_key = ?, updated_at = ?, updated_by = ?
+				WHERE id = ? AND title_key <> ?
+				  AND NOT EXISTS (SELECT 1 FROM postings o WHERE o.job_id = jobs.id AND (o.search = 0 OR o.posted_at > ?))`,
+				p.Title, p.TitleKey, a.now, a.by, jobID, p.TitleKey, posted); err != nil {
+				return err
+			}
+		}
 	}
 	if _, err := a.tx.ExecContext(a.ctx, "UPDATE postings SET job_id = ? WHERE id = ?", jobID, p.ID); err != nil {
 		return err
@@ -485,21 +501,27 @@ func (a *applier) match(companyID int64, p PostingInput) (int64, string, error) 
 			WHERE p.company_id = ? AND p.title_key = ? AND p.fingerprint = ? AND p.id <> ?
 			ORDER BY j.closed_at IS NOT NULL, j.closed_at DESC LIMIT 1`,
 			companyID, p.TitleKey, p.Fingerprint, p.ID).Scan(&id, &closed)
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, "", nil
-		}
-		if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			// No earlier posting has this text; the steps below may still match.
+		case err != nil:
 			return 0, "", err
-		}
-		if !closed.Valid {
+		case !closed.Valid:
 			return id, "fingerprint", nil
+		default:
+			closedAt, err := parseTime(closed)
+			if err != nil {
+				return 0, "", err
+			}
+			if a.at.Sub(closedAt) <= repostWindow {
+				return id, "repost", nil
+			}
 		}
-		closedAt, err := parseTime(closed)
-		if err != nil {
-			return 0, "", err
-		}
-		if a.at.Sub(closedAt) <= repostWindow {
-			return id, "repost", nil
+	}
+	if p.Search && sources.OneAdPerEmployer(p.Source) {
+		id, err := a.adRepost(companyID, p)
+		if err != nil || id != 0 {
+			return id, "ad_repost", err
 		}
 	}
 	if !p.Search && p.TitleKey != "" {
@@ -512,6 +534,39 @@ func (a *applier) match(companyID int64, p PostingInput) (int64, string, error) 
 		}
 	}
 	return 0, "", nil
+}
+
+// adRepost finds the job an employer's ad continues, on a source with one
+// ad per employer (sources.OneAdPerEmployer): the company's job from an
+// earlier ad on that source that shares a role (dedupe.SharesRole). An ad
+// that names no role continues the employer's last ad, and is continued by
+// the next. An open job comes first, then one that closed within the
+// repost window.
+func (a *applier) adRepost(companyID int64, p PostingInput) (int64, error) {
+	rows, err := a.tx.QueryContext(a.ctx, `
+		SELECT j.id, o.title
+		FROM postings o JOIN jobs j ON j.id = o.job_id
+		WHERE o.company_id = ? AND o.source = ? AND o.id <> ?
+		  AND (j.closed_at IS NULL OR j.closed_at >= ?)
+		ORDER BY j.closed_at IS NOT NULL, o.posted_at DESC, o.id DESC`,
+		companyID, p.Source, p.ID, utc.Format(a.at.Add(-repostWindow)))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id    int64
+			title string
+		)
+		if err := rows.Scan(&id, &title); err != nil {
+			return 0, err
+		}
+		if p.TitleKey == "" || dedupe.TitleKey(title) == "" || dedupe.SharesRole(p.Title, title) {
+			return id, nil
+		}
+	}
+	return 0, rows.Err()
 }
 
 // searchCopy finds the open search job at the company whose title has key,

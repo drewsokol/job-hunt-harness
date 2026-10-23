@@ -97,3 +97,25 @@ func TestCanonicalURL(t *testing.T) {
 		}
 	}
 }
+
+func TestSharesRole(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"Software Engineer", "Software Engineer (all levels)", true},
+		{"AI Engineer (Agentic Systems)", "AI Engineer · Product Designer", true},
+		{"Senior AI Engineer and Senior Product Engineer", "Senior Product Engineer", true},
+		{"Lead Engineer", "Lead Software Engineer", true},
+		{"Platform Engineer · ML Engineer", "Agent Engineer · Platform Engineer", true},
+		{"Senior Backend Engineer", "Senior Frontend Engineer", false},
+		{"AI Engineer", "Customer Engineer", false},
+		{"Designer", "Member of Technical Staff", false},
+		{"", "Software Engineer", false},
+	}
+	for _, tt := range tests {
+		if got := SharesRole(tt.a, tt.b); got != tt.want {
+			t.Errorf("SharesRole(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}

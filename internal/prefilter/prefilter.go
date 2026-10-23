@@ -215,12 +215,27 @@ func (c *Compiled) evaluate(in Input) Result {
 		}
 	}
 
-	// Employment type.
-	kinds := employmentOf(in.EmploymentType, title)
+	// Employment type. A kind the title states is the role's own. A field
+	// listing several kinds offers the job as any of them, so it drops only
+	// when every kind it lists is excluded, and otherwise notes the rest.
+	fieldKinds, titleKinds := employmentField(in.EmploymentType), employmentTitle(title)
+	var listed []string
 	for _, e := range c.f.EmploymentExclude {
-		if kinds[e] {
+		switch {
+		case titleKinds[e]:
+			reason("employment_exclude", EffectDrop, "%s", e)
+		case fieldKinds[e]:
+			listed = append(listed, e)
+		}
+	}
+	switch {
+	case len(listed) == 0:
+	case len(listed) == len(fieldKinds):
+		for _, e := range listed {
 			reason("employment_exclude", EffectDrop, "%s", e)
 		}
+	default:
+		reason("employment_exclude", EffectNote, "also offered as %s", strings.Join(listed, ", "))
 	}
 
 	// Location.

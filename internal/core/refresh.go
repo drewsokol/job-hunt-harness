@@ -446,7 +446,11 @@ func NormalizeFound(s sources.Searcher, p sources.Posting) store.PostingInput {
 func normalizePosting(id, source string, p sources.Posting) store.PostingInput {
 	title := strings.TrimSpace(untrusted.Clean(p.Title))
 	locRaw := strings.TrimSpace(untrusted.Clean(p.LocationRaw))
-	loc := normalize.ParseLocation(locRaw, title, p.Workplace, p.Country)
+	parse := normalize.ParseLocation
+	if p.LocationFreeform {
+		parse = normalize.ParseFreeformLocation
+	}
+	loc := parse(locRaw, title, p.Workplace, p.Country)
 
 	text := p.DescriptionText
 	if text == "" && p.DescriptionHTML != "" {

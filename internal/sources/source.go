@@ -65,6 +65,10 @@ type Posting struct {
 	// LocationRaw is the board's location text, possibly several places
 	// joined with " | ".
 	LocationRaw string
+	// LocationFreeform says LocationRaw was written freely, not taken from a
+	// location field, so only places jhh recognizes in it count
+	// (normalize.ParseFreeformLocation).
+	LocationFreeform bool
 	// Workplace is the board's own remote/hybrid/onsite field, already
 	// corrected for the board's quirks: "remote", "hybrid", "onsite" or "".
 	Workplace string
@@ -244,3 +248,9 @@ func SearchTitle(name string) string {
 // roles joined with normalize.RoleSeparator (a Hacker News ad's do), so the
 // prefilter judges them role by role.
 func TitlesNameRoles(name string) bool { return name == "hackernews" }
+
+// OneAdPerEmployer reports whether a search source holds one ad per
+// employer at a time, posted again each period (Hacker News allows one
+// post per company in each month's thread). An employer's new ad there
+// usually continues its last one, with new ids and some roles changed.
+func OneAdPerEmployer(name string) bool { return name == "hackernews" }

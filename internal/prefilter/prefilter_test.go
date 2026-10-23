@@ -100,6 +100,20 @@ func TestEvaluate(t *testing.T) {
 		{name: "no level passes with a note", in: job(titled("AI Engineer")), want: Pass, wantRules: []string{"level_unknown"}},
 		{name: "contract by field", in: job(func(in *Input) { in.EmploymentType = "Contract" }), want: Drop, wantRules: []string{"employment_exclude"}},
 		{name: "contract by title", in: job(titled("Senior AI Engineer (Contract)")), want: Drop, wantRules: []string{"employment_exclude"}},
+		// A field listing several kinds offers the job as any of them: it
+		// drops only when every kind is excluded, and notes the rest.
+		{
+			name: "several kinds, one allowed", in: job(func(in *Input) { in.EmploymentType = "Full-time / Part-time / Contract" }),
+			want: Pass, wantRules: []string{"employment_exclude"}, wantInText: "also offered as contract, part-time",
+		},
+		{
+			name: "several kinds, all excluded", in: job(func(in *Input) { in.EmploymentType = "Part-time or Contract" }),
+			want: Drop, wantRules: []string{"employment_exclude", "employment_exclude"},
+		},
+		{
+			name: "title kind drops whatever the field lists", in: job(titled("Senior AI Engineer (Contract)"), func(in *Input) { in.EmploymentType = "Full-time, Contract" }),
+			want: Drop, wantRules: []string{"employment_exclude"},
+		},
 		{name: "contracts are a subject", in: job(titled("Senior AI Engineer, Contracts Platform")), want: Pass},
 
 		// Titles naming several roles (Hacker News ads) pass when one does.

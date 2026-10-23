@@ -43,8 +43,11 @@ var (
 	remoteWords = regexp.MustCompile(`(?i)\b(?:fully[- ]remote|remote[- ]first|remote|work from home|wfh|anywhere|distributed)\b`)
 	hybridWords = regexp.MustCompile(`(?i)\bhybrid\b`)
 	onsiteWords = regexp.MustCompile(`(?i)\b(?:on[- ]?site|in[- ]office|in[- ]person|office[- ]based)\b`)
-	fillerWords = regexp.MustCompile(`(?i)\b(?:based|only|in|within|from|the|location|locations|all|select|position|positions|role|opportunity|hq|headquarters|office|offices|campus|hub)\b`)
-	edgeJunk    = " \t-–—,.:()[]*+/"
+	fillerWords = regexp.MustCompile(`(?i)\b(?:but|based|only|in|within|from|the|location|locations|all|select|position|positions|role|opportunity|hq|headquarters|office|offices|campus|hub)\b`)
+	// worldWords say a job is open in any country. "Anywhere" alone doesn't:
+	// "remote anywhere in the US".
+	worldWords = regexp.MustCompile(`(?i)\b(?:(?:almost|nearly)\s+)?(?:anywhere\s+in\s+the\s+world|everywhere|world[- ]?wide|globally)\b`)
+	edgeJunk   = " \t-–—,.:()[]*+/"
 )
 
 // ParseLocation reads a posting's workplace and places from the board's
@@ -58,6 +61,18 @@ var (
 // title. With no hint and no workplace words, the workplace is unknown: a
 // city alone doesn't say whether remote work is possible.
 func ParseLocation(raw, title, workplaceHint, countryHint string) Location {
+	return parseLocation(raw, title, workplaceHint, countryHint, false)
+}
+
+// ParseFreeformLocation is ParseLocation for location text a person wrote
+// freely, such as a Hacker News ad's header ("Remote (some overlap with
+// PST)"): only places jhh recognizes count, and other words are ignored
+// instead of kept as a city.
+func ParseFreeformLocation(raw, title, workplaceHint, countryHint string) Location {
+	return parseLocation(raw, title, workplaceHint, countryHint, true)
+}
+
+func parseLocation(raw, title, workplaceHint, countryHint string, strict bool) Location {
 	var loc Location
 	var remote, hybrid, onsite bool
 	add := func(p Place) {
@@ -74,7 +89,7 @@ func ParseLocation(raw, title, workplaceHint, countryHint string) Location {
 		}
 	}
 	for _, seg := range segmentSep.Split(raw, -1) {
-		scan(seg, false)
+		scan(seg, strict)
 	}
 	// The first title part is the role itself; only trailing parts can be
 	// locations, and only recognized places count.
@@ -120,6 +135,7 @@ func ParseLocation(raw, title, workplaceHint, countryHint string) Location {
 // parsePlaces reads the places in one segment. In strict mode only
 // recognized places are returned.
 func parsePlaces(seg string, strict bool) []Place {
+	seg = worldWords.ReplaceAllString(seg, " worldwide ")
 	seg = remoteWords.ReplaceAllString(seg, " ")
 	seg = hybridWords.ReplaceAllString(seg, " ")
 	seg = onsiteWords.ReplaceAllString(seg, " ")
@@ -129,7 +145,7 @@ func parsePlaces(seg string, strict bool) []Place {
 	for _, p := range strings.Split(seg, ",") {
 		p = strings.Join(strings.Fields(strings.Trim(p, edgeJunk)), " ")
 		if p != "" && !placeholders[strings.ToLower(p)] {
-			parts = append(parts, p)
+			parts = append(parts, slashedPlaces(p)...)
 		}
 	}
 	switch len(parts) {
@@ -203,6 +219,22 @@ func parsePlaces(seg string, strict bool) []Place {
 		return nil
 	}
 	return []Place{{City: strings.Join(parts, ", ")}}
+}
+
+// slashedPlaces splits "US/Canada" into its places when every piece is one
+// jhh knows; other text with a slash ("Eastern/Central Time") stays whole.
+func slashedPlaces(p string) []string {
+	pieces := strings.Split(p, "/")
+	if len(pieces) < 2 {
+		return []string{p}
+	}
+	for i, piece := range pieces {
+		pieces[i] = strings.TrimSpace(piece)
+		if _, ok := knownPlace(pieces[i]); !ok {
+			return []string{p}
+		}
+	}
+	return pieces
 }
 
 // dropCovered removes places that a more specific place in the list
