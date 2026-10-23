@@ -3,6 +3,7 @@
 # It runs on its own only when the owner opens a non-draft PR that changes
 # more than docs. To review again after fixes, or to review someone else's
 # PR, the owner runs it by hand from the Actions tab with the PR number.
+# A PR opened as a draft gets no automatic review; run it by hand when it's ready.
 # Nobody else can start it, so outside PRs can't spend the review budget.
 #
 # The PR's code is checked out into pr-head/ only to be read. Nothing runs
@@ -47,8 +48,11 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
     steps:
       # The base branch, trusted: Claude Code reads its CLAUDE.md and settings.
+      # On a pull_request event the default ref is the PR merged into main,
+      # so pin the base commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -59,6 +63,11 @@ jobs:
           path: pr-head
           fetch-depth: 1
           persist-credentials: false
+
+      # Claude Code loads CLAUDE.md files from folders it reads, so keep the
+      # PR's own instructions and settings out of its way.
+      - name: Remove the PR's agent instructions
+        run: find pr-head \( -name CLAUDE.md -o -name CLAUDE.local.md -o -name .claude \) -prune -exec rm -r {} +
 
       - uses: anthropics/claude-code-action@8d70a0dd265122bd65b8e09d3d959e65373ae2a1 # v1.0.260
         with:

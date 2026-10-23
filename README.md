@@ -67,4 +67,4 @@ Tests never touch the network: each source is tested against made-up fixtures by
 
 Never commit real profiles, resumes, salary numbers, contacts or databases. Test fixtures are always made up.
 
-Pull requests to `main` need the owner's review. When the owner opens one, a GitHub Action has Claude review it and post one summary comment (`.github/workflows/claude-review.yml`); the owner can also run that review by hand on any PR. It never runs on its own for outside PRs.
+Pull requests to `main` need the owner's review. When the owner opens one that isn't a draft, a GitHub Action has Claude review it and post one summary comment (`.github/workflows/claude-review.yml`); the owner can also run that review by hand on any PR, such as a draft that is now ready. It never runs on its own for outside PRs.
