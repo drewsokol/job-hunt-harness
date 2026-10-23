@@ -7,6 +7,7 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/core"
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
+	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -70,7 +71,7 @@ type jobOut struct {
 // only flags and notes, which is what a screener needs.
 func job(r store.JobRow, allReasons bool) jobOut {
 	out := jobOut{
-		Job: r.ID, Status: string(r.Status), Origin: r.Origin, Workplace: r.Workplace, Via: viaName(r.Via),
+		Job: r.ID, Status: string(r.Status), Origin: r.Origin, Workplace: r.Workplace, Via: sources.SearchTitle(r.Via),
 		ContentFlags: r.OpenFlags, Score: r.Score,
 		FirstSeen: timeOrEmpty(r.FirstSeenAt), Posted: timeOrEmpty(r.PostedAt), Closed: timeOrEmpty(r.ClosedAt),
 		Reposted: timeOrEmpty(r.RepostedAt), Applied: timeOrEmpty(r.AppliedAt),
@@ -100,13 +101,6 @@ func screening(sc store.Screening) *fitOut {
 		f.Flags = sc.Flags
 	}
 	return f
-}
-
-func viaName(source string) string {
-	if source == "themuse" {
-		return "The Muse"
-	}
-	return source
 }
 
 func (t *tools) addJobTools(s *mcp.Server) {

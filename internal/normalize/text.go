@@ -15,6 +15,11 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/untrusted"
 )
 
+// RoleSeparator joins the roles in the title of a listing that names
+// several, such as a Hacker News ad ("Senior Engineer · Product Designer").
+// The prefilter judges each role on its own.
+const RoleSeparator = " · "
+
 // skipContent lists elements whose content is never shown as text.
 var skipContent = map[string]bool{"script": true, "style": true, "noscript": true, "template": true, "head": true, "title": true}
 

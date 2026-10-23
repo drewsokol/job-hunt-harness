@@ -23,7 +23,8 @@ const exampleFilters = `{
   "pay_floor": {"amount": 150000, "currency": "USD"},
   "flag": {"title_any": ["forward deployed", "solutions", "customer"]},
   "search": {"themuse": [{"categories": ["Software Engineering"], "levels": ["Senior Level"],
-                          "locations": ["Flexible / Remote", "Columbus, OH"], "pages": 10}]}
+                          "locations": ["Flexible / Remote", "Columbus, OH"], "pages": 10}],
+             "hackernews": {}}
 }`
 
 func compile(t *testing.T, doc string) *Compiled {
@@ -99,6 +100,12 @@ func TestEvaluate(t *testing.T) {
 		{name: "contract by field", in: job(func(in *Input) { in.EmploymentType = "Contract" }), want: Drop, wantRules: []string{"employment_exclude"}},
 		{name: "contract by title", in: job(titled("Senior AI Engineer (Contract)")), want: Drop, wantRules: []string{"employment_exclude"}},
 		{name: "contracts are a subject", in: job(titled("Senior AI Engineer, Contracts Platform")), want: Pass},
+
+		// Titles naming several roles (Hacker News ads) pass when one does.
+		{name: "one of several roles fits", in: job(titled("Engineering Manager · Senior AI Engineer")), want: Pass},
+		{name: "none of several roles fits", in: job(titled("Product Designer · Senior Sales Engineer")), want: Drop, wantRules: []string{"titles.exclude_any"}},
+		{name: "no title", in: job(titled("")), want: Pass, wantRules: []string{"titles.require_any", "level_unknown"}, wantInText: "names no role"},
+		{name: "no title or keywords", in: job(titled(""), described("Made-up work.")), want: Drop, wantRules: []string{"keywords", "titles.require_any", "level_unknown"}},
 
 		// Location.
 		{name: "remote in a state", in: job(at(normalize.Remote, "California")), want: Pass},
@@ -230,10 +237,11 @@ func TestParseRejects(t *testing.T) {
 		{`{"schema_version": 1, "keywords": {"body_any": ["llm"], "min_body_hits_without_title_match": 3}}`, "more than the 1 body_any terms"},
 		{`{"schema_version": 1, "keywords": {"title_any": ["--"]}}`, `keywords.title_any[0]: "--" has no letters`},
 		{`{"schema_version": 1, "pay_floor": {"amount": 100000, "currency": "usd"}}`, `pay_floor.currency: "usd"`},
-		{`{"schema_version": 1, "search": {}}`, "search: add at least one themuse query"},
+		{`{"schema_version": 1, "search": {}}`, "search: add themuse queries, hackernews or both"},
 		{`{"schema_version": 1, "search": {"themuse": [{"levels": ["Senior Level"]}]}}`, "search.themuse[0]: set categories, locations or both"},
 		{`{"schema_version": 1, "search": {"themuse": [{"locations": ["Flexible / Remote"], "pages": 251}]}}`, "search.themuse[0].pages: must be between 1 and 250"},
 		{`{"schema_version": 1, "search": {"themuse": [{"categories": [" "]}]}}`, "search.themuse[0].categories[0]: must be 1 to 100 characters"},
+		{`{"schema_version": 1, "search": {"hackernews": {"months": 4}}}`, "search.hackernews.months: must be between 1 and 3"},
 	}
 	for _, tt := range tests {
 		_, err := Parse([]byte(tt.doc))
@@ -266,5 +274,18 @@ func TestWords(t *testing.T) {
 	title := newText("Engineer, Ahead of the curve")
 	if title.has(newTerm("head of"), true) {
 		t.Error("'head of' matched inside 'ahead of'")
+	}
+}
+
+func TestHackerNewsSearch(t *testing.T) {
+	f, err := Parse([]byte(`{"schema_version": 1, "search": {"hackernews": {}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := f.Search.HackerNews; h == nil || h.MonthsOrDefault() != DefaultHackerNewsMonths {
+		t.Errorf("hackernews %+v", h)
+	}
+	if got := string(f.JSON()); !strings.Contains(got, `"hackernews":{}`) {
+		t.Errorf("an empty hackernews section must survive saving: %s", got)
 	}
 }

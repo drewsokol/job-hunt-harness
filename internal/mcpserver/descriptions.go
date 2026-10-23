@@ -57,7 +57,7 @@ var descriptions = map[string]string{
 
 	"preview_filters": `Show what a filters change would do to the jobs already stored, without saving it: how many pass now and would pass, and examples of jobs newly dropped and newly kept with the reasons. drops_tracked counts dropped jobs the user is already reviewing or applying to, which usually means a filter is wrong. Call it before set_filters and show the user the result.`,
 
-	"set_filters": `Replace the active filters with a new version and judge every stored job with them; nothing is fetched. Send the whole filters object (see get_context for the current one) and a one-sentence rationale. Show the user the change and the preview_filters result, and save only after they agree. Returns the version and its effect.`,
+	"set_filters": `Replace the active filters with a new version and judge every stored job with them; nothing is fetched. Send the whole filters object (see get_context for the current one) and a one-sentence rationale. Show the user the change and the preview_filters result, and save only after they agree. Returns the version and its effect. The search section says where refresh looks beyond company boards: "themuse" holds queries for The Muse, and "hackernews": {"months": 2} reads every ad in the latest monthly "Ask HN: Who is hiring?" threads (1 to 3 months; the rest of the filters judge them).`,
 
 	"list_companies": `The companies jhh knows: those whose job boards it reads (with the board, whether reading is enabled, open postings and whether the last fetch failed) and those search found. A company search found has its name inside "untrusted", since it comes from a listing.`,
 

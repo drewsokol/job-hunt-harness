@@ -14,6 +14,10 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - [x] M4 MCP (start using it day to day)
 - [x] M5 Window (MVP complete)
 
+## Since the MVP
+
+- [x] Hacker News's monthly "Who is hiring?" threads as a search source (`search.hackernews` in the filters)
+
 ## Next (M6–M8)
 
 ### Setup and curation (M6)

@@ -1,0 +1,50 @@
+{
+  "id": 90000301,
+  "type": "story",
+  "author": "whoishiring",
+  "title": "Ask HN: Who is hiring? (October 2026)",
+  "created_at": "2026-10-01T15:00:00.000Z",
+  "children": [
+    {
+      "id": 90000311, "type": "comment", "author": "made_up_one", "created_at": "2026-10-01T15:04:05.000Z",
+      "text": "Exampleco (YC W25) | Senior Backend Engineer, Payments | REMOTE (US) | Full-time | $160k-$190k + equity | <a href=\"https:&#x2F;&#x2F;exampleco.example&#x2F;jobs\">https:&#x2F;&#x2F;exampleco.example&#x2F;jobs</a><p>We make made-up software for made-up shops. Apply at jobs@exampleco.example.",
+      "children": [
+        {"id": 90000312, "type": "comment", "author": "curious_reader", "created_at": "2026-10-01T16:00:00.000Z", "text": "Is this open to Canada?", "children": []}
+      ]
+    },
+    {
+      "id": 90000313, "type": "comment", "author": "made_up_two", "created_at": "2026-10-01T15:10:00.000Z",
+      "text": "Made-Up Labs | Staff Engineer (Rust), Product Designer, Engineering Manager | Columbus, OH | Hybrid<p>Three openings on a small team.",
+      "children": []
+    },
+    {
+      "id": 90000314, "type": "comment", "author": "made_up_three", "created_at": "2026-10-01T15:20:00.000Z",
+      "text": "Fictional Freight | ONSITE | Columbus, OH<p>We&#x27;re hiring a platform engineer and a data analyst.",
+      "children": []
+    },
+    {
+      "id": 90000315, "type": "comment", "author": "made_up_four", "created_at": "2026-10-01T15:30:00.000Z",
+      "text": "Sample Robotics — Robotics Software Engineer — Remote (EU)<p>Build made-up robots.",
+      "children": []
+    },
+    {
+      "id": 90000316, "type": "comment", "author": "made_up_five", "created_at": "2026-10-01T15:40:00.000Z",
+      "text": "Placeholder Bank | Data Engineer | London, UK | CLOSED NOW, thanks everyone<p>Filled.",
+      "children": []
+    },
+    {
+      "id": 90000317, "type": "comment", "author": "made_up_six", "created_at": "2026-10-01T15:50:00.000Z",
+      "text": "There used to be many more posts in these threads.",
+      "children": []
+    },
+    {
+      "id": 90000318, "type": "comment", "author": "", "created_at": "2026-10-01T15:55:00.000Z",
+      "text": "", "children": []
+    },
+    {
+      "id": 90000319, "type": "comment", "author": "made_up_seven", "created_at": "2026-10-01T16:05:00.000Z",
+      "text": "Senior Python Engineer | REMOTE (EMEA)<p>Message me for details.",
+      "children": []
+    }
+  ]
+}

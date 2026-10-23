@@ -23,7 +23,7 @@ The reference scripts already proved the loop works: about 12k roles fetched, ab
 4. **What the system knows about you lives in the harness, not in the agent.** That means the profile you write, the memories the agent saves, the filters it builds and every screening. All of it is in the SQLite file and reached over MCP, so you can switch from Claude Code to Cursor or anything else and keep everything that has built up. The agent is replaceable; the data isn't.
 5. **The agent configures the system, and you can see everything it did.** The agent writes the filters and saves memories through MCP. Each change is versioned and shown in the UI, and you can revert it there.
 6. **The prefilter only drops a role on clear evidence.** If a location, level or pay is unclear, the role goes through to the agent. Every drop records a reason the user can see.
-7. **Public feeds only.** Greenhouse, Lever and Ashby job board APIs, The Muse's public jobs API, plus jobs the agent adds. No scraping of LinkedIn or of logged-in pages.
+7. **Public feeds only.** Greenhouse, Lever and Ashby job board APIs, The Muse's public jobs API, Hacker News's monthly "Who is hiring?" threads through the public HN Search API, plus jobs the agent adds. No scraping of LinkedIn or of logged-in pages.
 
 ## 2. Architecture
 
@@ -45,7 +45,7 @@ The reference scripts already proved the loop works: about 12k roles fetched, ab
         │ HTTPS (public feeds only)                    │
         ▼                                     Web UI at localhost:7878
   Greenhouse / Lever / Ashby boards           (a window onto the same data)
-  The Muse (search)
+  The Muse, Hacker News (search)
 ```
 
 - **The normal setup: the agent launches jhh.** You install the single `jhh` binary, then register it once as an MCP server, for example `claude mcp add jhh -- jhh`. The client starts `jhh` over stdio. On startup, jhh also serves the web UI on `127.0.0.1:7878` if no other jhh process is already serving it. The `open_dashboard` tool returns the URL and can open it in the browser, so "show me my dashboard" works from the chat.
@@ -106,14 +106,28 @@ Sources declare what they can do through optional interfaces, such as `Detailer`
 Board sources only find jobs at companies jhh already knows. A **search source** finds postings across every employer an aggregator covers, so you don't have to know the companies up front:
 
 ```go
-// Searcher finds postings across employers (The Muse).
+// Searcher finds postings across employers.
 type Searcher interface {
     Name() string    // "themuse"
     Prefix() string  // "tm", used in posting ids: "tm:22008828"
+    Lookup(ctx context.Context, externalID string) (Posting, error) // ErrPostingNotFound once it's gone
+}
+
+// QuerySearcher runs queries a page at a time (The Muse).
+type QuerySearcher interface {
+    Searcher
     Search(ctx context.Context, q Query, page int) (SearchResult, error) // one page, one request
-    Lookup(ctx context.Context, externalID string) (Posting, error)       // ErrPostingNotFound once it's gone
+}
+
+// ThreadSearcher reads monthly hiring threads (Hacker News).
+type ThreadSearcher interface {
+    Searcher
+    Threads(ctx context.Context, n int) ([]Thread, error)        // the newest n, one request
+    ReadThread(ctx context.Context, id string) (ThreadResult, error) // a whole thread, one request
 }
 ```
+
+Both kinds share what happens after: results older than 90 days are skipped, employers jhh reads a board for are skipped, the rest are stored under companies found by search, and a source read in full closes what it no longer returns (looking up pursued jobs first).
 
 **The Muse is the built-in search source.** Its public jobs API (themuse.com/developers/api/v2) needs no account or key, so it works the moment jhh is installed. jhh is a personal tool: each user's copy calls the API for that user, the way they could call it themselves, and nothing is hosted or resold. Services that need an account and key, such as Adzuna, can be connected later (see the roadmap).
 
@@ -136,6 +150,18 @@ How jhh uses it:
 - **Descriptions** arrive with the results, so they are handled like Lever and Ashby: held in memory while stage 1 runs, and stored only for jobs that pass.
 - **Finding boards** (M4): your agent can suggest adding a company that search keeps finding, and `add_company` probes its board on Greenhouse, Lever and Ashby, which every company uses the same way, so there's no custom work per employer. jhh doesn't probe on its own: you decide which companies to add.
 - The CLI (and in M5 the UI) labels these jobs "via The Muse".
+
+**Hacker News** was added after the MVP, to find the startups and tech companies that The Muse, which leans toward large employers, mostly misses. Each month the `whoishiring` account posts "Ask HN: Who is hiring?", and every top-level comment is one employer's ad. The ads lean toward startups and tech companies, the kind people can't list up front. What its API offers, checked on 2026-10-23:
+- **The public HN Search API by Algolia** (hn.algolia.com/api), with no account or key. `search_by_date?tags=story,author_whoishiring` lists the account's threads; the same account also posts "Who wants to be hired?" and freelancer threads, which jhh skips by title. `items/<id>` returns a whole thread with every comment in one request: October 2026 was about 480 KB for 266 ads. The limit is 10,000 requests an hour; a refresh makes one plus one per month.
+- **Ads are free text.** By convention the first line is a header such as `Exampleco | Senior Engineer | Remote (US) | $150k-$180k | Full-time`; about 9 in 10 ads follow it, in any order after the employer, and some use dashes instead of bars. A deleted ad disappears from the thread, and its own item returns 404 or no text.
+
+How jhh uses it:
+- **Turned on in the filters** with `"search": {"hackernews": {"months": 2}}` (1–3 months, default 2, so the days after a thread opens still see last month's ads). There's nothing to search on Hacker News's side: every ad in those threads goes through the rest of the filters.
+- **One ad is one job.** The header's first part is the employer, with web addresses and notes in parentheses removed ("Exampleco (YC W25)" is Exampleco). The other parts are sorted by what they say: roles (a part with a role word such as "engineer" or "staff", short, with any pay in parentheses), places and workplace (a part jhh's location parser reads as remote, hybrid, onsite or a known country or region), pay, and employment type. Several roles become one title joined with " · ", which the prefilter judges role by role. A header that names no role leaves the title empty; the dashboard shows "Roles in the post", and the prefilter doesn't drop it for its title.
+- **Ads jhh can't read are left out and counted:** a first line without separators, an employer part that's a sentence, a question or a role ("Senior Engineer | Remote"). In October 2026 that was 29 of 266 comments, mostly replies and remarks rather than ads; a few prose ads were among them, which the agent can still add with `add_jobs`. An ad whose header says it's closed or filled is treated as gone.
+- **The link is the ad's page on Hacker News**, which says how to apply (an email address or a careers page). The agent mentions it when screening, and offers `add_company` when the ad links to a Greenhouse, Lever or Ashby board.
+- **Closing** follows the shared rules: when every thread was read, an ad missing from them is closed, so last month's ads close once their thread falls out of `months`. Pursued ads are looked up and closed only when deleted or marked filled.
+- **Dedupe:** an employer who posts the same ad two months running gets one job (same title and description fingerprint).
 
 ### What each board's API allows (tested against live feeds, 2026-10-18)
 
@@ -248,6 +274,7 @@ Unscreened jobs move with the decision: pass makes them `unscreened`, drop makes
 - **Levels** come from a shipped vocabulary: intern, junior, mid, senior, lead, staff, principal, distinguished, read from words like "Sr.", "II" and "III". Role words such as "architect" are not levels. `level_unknown` (`pass` by default) decides titles that state no level.
 - **Location.** `remote_in` takes countries, states or regions; `onsite_or_hybrid_in` takes those or a city with its state or country ("Columbus, OH"). A remote job passes when one of its places overlaps `remote_in` ("Remote - US" for someone who said "Ohio", "Remote - North America" for someone who said "US"). An onsite or hybrid job passes when one of its places is inside `onsite_or_hybrid_in`. A job that doesn't say whether it's remote passes if it's in an onsite place, is dropped if it's outside both lists, and otherwise counts as unclear, unless its description says it's remote. Unclear cases follow `location.unknown` (`pass` by default), because a wrong drop is worse than one extra job to screen.
 - **Employment** types (full-time, part-time, contract, temporary, internship) are read from the board's field and the title.
+- **Titles naming several roles** (a Hacker News ad, whose roles jhh joins with " · ") are judged role by role, and the job passes if any role does, so "Engineering Manager · Senior Engineer" isn't dropped for the manager. A title naming no role (an ad whose header lists none) isn't dropped by `titles.require_any` or title-only keywords; that leaves a note, and body keywords still apply.
 - **Keywords.** A title keyword passes the job; otherwise it needs `min_body_hits_without_title_match` (default 1) different body keywords. Body keywords are counted in the description with boilerplate trimmed, so a benefits list that mentions an AI tool doesn't count.
 - **Pay floor** is yearly. Hourly pay is multiplied by 2,080 and monthly by 12. A job is dropped only when every range in the floor's currency tops out below it.
 - `jhh filters preview` and `set` (and in M4, `preview_filters` and `set_filters`) show how many open jobs pass now and would pass, how many would wait for descriptions, and examples of newly dropped and newly kept jobs.
@@ -343,11 +370,12 @@ A memory is one short statement with metadata:
   "flag":     { "title_any": ["forward deployed", "solutions", "customer"] }, // pass, but flag
   "search":   { "themuse": [                               // queries for The Muse
                   { "categories": ["Software Engineering", "Data Science"],
-                    "levels": ["Senior Level"], "locations": ["Columbus, OH"] } ] }  // the city and remote jobs
+                    "levels": ["Senior Level"], "locations": ["Columbus, OH"] } ],  // the city and remote jobs
+                "hackernews": { "months": 2 } }               // every ad in the latest "Who is hiring?" threads
 }
 ```
 
-`search` finds jobs; the other sections judge them, wherever they came from. Each Muse query matches jobs in any of its categories, at any of its levels, in any of its locations; a field left out doesn't narrow. Categories and levels must be names from The Muse's lists, and jhh says which ones it doesn't know. A query needs at least one category or location, so it can't ask for everything. A location also matches remote jobs. `pages` (1–250) optionally caps how many pages of 20 it reads per refresh; by default it reads them all, within the refresh's limit of 250 requests. There can be up to 10 queries.
+`search` finds jobs; the other sections judge them, wherever they came from. Each Muse query matches jobs in any of its categories, at any of its levels, in any of its locations; a field left out doesn't narrow. Categories and levels must be names from The Muse's lists, and jhh says which ones it doesn't know. A query needs at least one category or location, so it can't ask for everything. A location also matches remote jobs. `pages` (1–250) optionally caps how many pages of 20 it reads per refresh; by default it reads them all, within the refresh's limit of 250 requests. There can be up to 10 queries. `hackernews` reads every ad in the latest `months` (1–3, default 2) monthly "Ask HN: Who is hiring?" threads; its ads can't be narrowed on Hacker News's side, so the rest of the filters judge them all. Write `"hackernews": {}` for the default.
 
 **How the agent writes filters:**
 - `preview_filters(filters)` runs a dry run against the current jobs and returns something like "92 pass now, 87 would pass; 6 newly dropped, 1 newly kept", with examples. The prompts tell the agent to show this to you before saving.
@@ -564,7 +592,7 @@ cmd/jhh/                 # main.go: subcommand dispatch (default: stdio MCP + UI
 internal/
   core/                  # jobs, screening, profile, memories, filters, tracker, companies: the logic
   prefilter/             # stage 1 and 2 evaluation, filters schema and validation
-  sources/               # source.go (interfaces), builtin/ (the shipped sources), conformance/ (shared suite), greenhouse/, lever/, ashby/, themuse/ (search)
+  sources/               # source.go (interfaces), builtin/ (the shipped sources), conformance/ (shared suite), greenhouse/, lever/, ashby/, themuse/ and hackernews/ (search)
   untrusted/             # cleaning, injection rules, the untrusted envelope used in tool output
   dedupe/                # identity ladder, fingerprints, URL canonicalization
   normalize/             # location, pay, text; places.go (vocabulary)
@@ -584,7 +612,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 
 ### MVP
 - **Fetching:** Greenhouse, Lever and Ashby sources passing the conformance suite; per-source company config; ETag caching; two-stage detail fetching; normalization of location, pay and text, with the known quirks covered by tests; boilerplate trimming; closed-posting detection with the suspect-feed guard
-- **Search:** The Muse as the built-in search source, driven by the filters' `search` queries, within a request budget; employers found by search recorded as companies
+- **Search:** The Muse as the built-in search source, driven by the filters' `search` queries, within a request budget; employers found by search recorded as companies. (Added after the MVP: Hacker News's monthly hiring threads.)
 - **Storage rules:** descriptions kept only where needed, closed jobs nobody touched deleted
 - **Dedupe:** the identity ladder (posting ID, opening ID, canonical URL, fingerprint, reposts); `merge_jobs` and `split_job`; short job numbers
 - **The agent as a source:** `add_jobs` (supported-board URLs fetched by jhh, otherwise the agent's fields; no arbitrary page fetching)
@@ -639,7 +667,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 6. **Your profile**: let your agent interview you, or write it yourself; the standard sections; a fictional example; how the agent edits it and how to undo a change
 7. **Companies**: there's no starter list; search finds employers, and you add the ones whose boards you want read (`jhh companies add`, or your agent's `add_company`)
 8. **Privacy**: what stays on your machine (everything), where the data lives, how to back it up and delete it
-9. **Limitations**: boards only for companies jhh knows (search through The Muse finds others, applied to through The Muse's page); no Workday yet; feeds can lag or change
+9. **Limitations**: boards only for companies jhh knows (search through The Muse and Hacker News finds others, applied to as their pages say); no Workday yet; feeds can lag or change
 10. **Contributing**: link to CONTRIBUTING.md; good first issues (new companies, pay-parser cases, sources)
 11. **License**
 

@@ -88,7 +88,7 @@ type RefreshResult struct {
 	// DescriptionsCleared counts postings whose stored description stage 1
 	// made unneeded.
 	DescriptionsCleared int
-	Search              SearchSummary
+	Searches            []SearchSummary // one for each search source the filters use
 	Pruned              store.PruneOutcome
 	Duration            time.Duration
 }
@@ -158,7 +158,7 @@ func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshRe
 	// just added is recognized as covered.
 	if runErr == nil && filters != nil && len(opts.CompanyIDs) == 0 {
 		sr, err := r.search(ctx, filters, version)
-		res.Search = sr.summary
+		res.Searches = sr.summaries
 		res.NewPostings += sr.out.NewPostings
 		res.NewJobs = append(res.NewJobs, sr.out.NewJobs...)
 		res.ClosedJobs = append(res.ClosedJobs, sr.out.ClosedJobs...)
@@ -197,7 +197,7 @@ func (r *Refresher) Refresh(ctx context.Context, opts RefreshOptions) (RefreshRe
 	r.logger().Info("refresh finished", "run", res.RunID, "companies", res.Companies, "not_modified", res.NotModified,
 		"postings", res.Postings, "new_jobs", len(res.NewJobs), "closed_jobs", len(res.ClosedJobs),
 		"details", res.Details, "passed", len(res.Passed), "errors", len(res.Errors),
-		"search_requests", res.Search.Requests, "search_postings", res.Search.Postings,
+		"search_requests", res.SearchRequests(), "search_postings", res.SearchPostings(),
 		"descriptions_cleared", res.DescriptionsCleared, "jobs_pruned", res.Pruned.JobsDeleted,
 		"duration", res.Duration.Round(time.Millisecond))
 	return res, runErr

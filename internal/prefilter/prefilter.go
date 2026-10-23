@@ -109,7 +109,36 @@ func (c *Compiled) Filters() Filters { return c.f }
 
 // Evaluate judges one job. Every failing rule is reported, not just the
 // first, so the candidate can see everything a filter change would affect.
+//
+// A title naming several roles (joined with normalize.RoleSeparator, as in
+// a Hacker News ad) is judged role by role, and the job gets the best
+// result: it passes if any role does.
 func (c *Compiled) Evaluate(in Input) Result {
+	roles := strings.Split(in.Title, normalize.RoleSeparator)
+	if len(roles) < 2 {
+		return c.evaluate(in)
+	}
+	var best Result
+	for i, role := range roles {
+		in.Title = role
+		r := c.evaluate(in)
+		if i == 0 || better(r, best) {
+			best = r
+		}
+	}
+	return best
+}
+
+// better reports whether a is a better result for the job than b.
+func better(a, b Result) bool {
+	rank := map[Status]int{Drop: 0, Pending: 1, Pass: 2}
+	if rank[a.Status] != rank[b.Status] {
+		return rank[a.Status] > rank[b.Status]
+	}
+	return a.Score > b.Score
+}
+
+func (c *Compiled) evaluate(in Input) Result {
 	var drops, waits, passes []Reason
 	reason := func(rule, effect, format string, args ...any) {
 		r := Reason{Rule: rule, Effect: effect, Text: fmt.Sprintf(format, args...)}
@@ -128,8 +157,13 @@ func (c *Compiled) Evaluate(in Input) Result {
 		body = newText(normalize.TrimBoilerplate(in.Description, in.Company))
 	}
 
-	// Titles.
-	if len(c.require) > 0 && len(title.matching(c.require, true)) == 0 {
+	// Titles. A listing without a title (a Hacker News ad whose header
+	// names no role) isn't dropped for it; the keywords still apply.
+	switch {
+	case len(c.require) == 0:
+	case strings.TrimSpace(in.Title) == "":
+		reason("titles.require_any", EffectNote, "the listing names no role in its title")
+	case len(title.matching(c.require, true)) == 0:
 		reason("titles.require_any", EffectDrop, "title has none of %s", list(texts(c.require)))
 	}
 	if hit := title.matching(c.exclude, true); len(hit) > 0 {
@@ -176,6 +210,8 @@ func (c *Compiled) Evaluate(in Input) Result {
 	}
 	if len(c.titleKeys)+len(c.bodyKeys) > 0 && len(titleHits) == 0 {
 		switch {
+		case len(c.bodyKeys) == 0 && strings.TrimSpace(in.Title) == "":
+			reason("keywords", EffectNote, "the listing names no role in its title")
 		case len(c.bodyKeys) == 0:
 			reason("keywords", EffectDrop, "title has none of %s", list(texts(c.titleKeys)))
 		case body == nil:

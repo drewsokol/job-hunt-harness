@@ -16,6 +16,7 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/datadir"
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
+	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 	"github.com/drewsokol/job-hunt-harness/internal/utc"
 )
@@ -205,7 +206,11 @@ func printCandidates(ctx context.Context, st *store.Store, w io.Writer, status s
 			counts[store.StatusNew], counts[store.StatusFilteredOut])
 	}
 	for _, c := range cs {
-		fmt.Fprintf(w, "\n#%-6d %4.1f  %s: %s\n", c.ID, c.Score, oneLine(c.Company), oneLine(c.Title))
+		title := oneLine(c.Title)
+		if title == "" {
+			title = "(roles in the post)" // a Hacker News ad that names none in its header
+		}
+		fmt.Fprintf(w, "\n#%-6d %4.1f  %s: %s\n", c.ID, c.Score, oneLine(c.Company), title)
 		details := []string{where(c.Workplace, core.Places(c.Locations))}
 		if pay := payText(core.PayRanges(c.PayRanges)); pay != "" {
 			details = append(details, pay)
@@ -220,8 +225,8 @@ func printCandidates(ctx context.Context, st *store.Store, w io.Writer, status s
 		fmt.Fprintf(w, "         %s\n", strings.Join(details, " · "))
 		if c.URL != "" {
 			via := ""
-			if c.Via == "themuse" {
-				via = " (via The Muse: apply from its page)"
+			if c.Via != "" {
+				via = " (via " + sources.SearchTitle(c.Via) + ": apply from its page)"
 			}
 			fmt.Fprintf(w, "         %s%s\n", oneLine(c.URL), via)
 		}
