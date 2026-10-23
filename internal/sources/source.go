@@ -9,8 +9,8 @@
 //
 // Every source must pass the shared conformance suite in sources/conformance.
 //
-// Search sources (The Muse) implement Searcher instead: they find postings
-// across employers, and each result names its employer.
+// Search sources (The Muse, Hacker News) implement Searcher instead: they
+// find postings across employers, and each result names its employer.
 package sources
 
 import (
@@ -141,19 +141,51 @@ type SearchResult struct {
 	Pages int
 }
 
-// Searcher finds postings across employers (The Muse). Each call is one
-// request, which search APIs count against a rate limit.
+// Searcher finds postings across employers. Each call is one request,
+// which search APIs count against a rate limit. A searcher also implements
+// QuerySearcher (The Muse) or ThreadSearcher (Hacker News), depending on
+// how it finds postings.
 type Searcher interface {
 	Name() string
 	// Prefix is the short form used in posting ids ("tm" in "tm:22008828").
 	Prefix() string
+	// Lookup returns one posting, or ErrPostingNotFound once it's gone.
+	Lookup(ctx context.Context, externalID string) (Posting, error)
+}
+
+// QuerySearcher runs queries a page at a time (The Muse).
+type QuerySearcher interface {
+	Searcher
 	// Check returns what is wrong with q in this searcher's terms, such as
 	// a category it doesn't have, one problem per entry.
 	Check(q Query) []string
 	// Search returns one page of q; pages are numbered from 0.
 	Search(ctx context.Context, q Query, page int) (SearchResult, error)
-	// Lookup returns one posting, or ErrPostingNotFound once it's gone.
-	Lookup(ctx context.Context, externalID string) (Posting, error)
+}
+
+// Thread is one monthly hiring thread.
+type Thread struct {
+	ID       string
+	Title    string
+	PostedAt time.Time // UTC
+}
+
+// ThreadResult is what one thread holds.
+type ThreadResult struct {
+	Postings []Posting // each with Company set
+	// Unreadable counts posts whose employer couldn't be read, so they
+	// were left out.
+	Unreadable int
+}
+
+// ThreadSearcher reads monthly hiring threads, where each top-level post
+// is one employer's ad (Hacker News).
+type ThreadSearcher interface {
+	Searcher
+	// Threads returns the newest n hiring threads, newest first.
+	Threads(ctx context.Context, n int) ([]Thread, error)
+	// ReadThread returns the posts in one thread.
+	ReadThread(ctx context.Context, id string) (ThreadResult, error)
 }
 
 // ErrRateLimited means a search source refused a request because too many
@@ -195,3 +227,20 @@ func UnixMillis(ms int64) time.Time {
 	}
 	return time.UnixMilli(ms).UTC()
 }
+
+// searchTitles are the search sources' names for people, by Name.
+var searchTitles = map[string]string{"themuse": "The Muse", "hackernews": "Hacker News"}
+
+// SearchTitle is the name people know a search source by ("The Muse"), or
+// name itself for one it doesn't know.
+func SearchTitle(name string) string {
+	if t, ok := searchTitles[name]; ok {
+		return t
+	}
+	return name
+}
+
+// TitlesNameRoles reports whether a search source's titles can name several
+// roles joined with normalize.RoleSeparator (a Hacker News ad's do), so the
+// prefilter judges them role by role.
+func TitlesNameRoles(name string) bool { return name == "hackernews" }

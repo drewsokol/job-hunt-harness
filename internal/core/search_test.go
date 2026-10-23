@@ -100,7 +100,7 @@ func TestRefreshSearches(t *testing.T) {
 	)
 	f.setFilters(searchFilters(10))
 	res := f.refresh()
-	sum := res.Search
+	sum := muse(res)
 	if sum.Queries != 1 || sum.Requests != 2 || sum.Postings != 3 || sum.Covered != 1 || !sum.Complete() || len(res.Errors) != 0 {
 		t.Fatalf("search summary %+v, errors %v", sum, res.Errors)
 	}
@@ -139,7 +139,7 @@ func TestRefreshSearches(t *testing.T) {
 	}
 	s.postings = slices.Delete(s.postings, 1, 2)
 	res = f.refresh()
-	if len(res.ClosedJobs) != 1 || res.ClosedJobs[0] != mgr.ID || res.Search.Closed != 1 {
+	if len(res.ClosedJobs) != 1 || res.ClosedJobs[0] != mgr.ID || muse(res).Closed != 1 {
 		t.Errorf("closing: %+v", res)
 	}
 
@@ -153,15 +153,15 @@ func TestRefreshSearchOnlyClosesAfterCompleteReads(t *testing.T) {
 	)
 	f.setFilters(searchFilters(1)) // 2 pages of results, 1 read
 	res := f.refresh()
-	if res.Search.Complete() || !slices.Equal(res.Search.Incomplete, []string{"search.themuse[0]"}) || res.Search.Postings != 2 {
-		t.Fatalf("summary %+v", res.Search)
+	if muse(res).Complete() || !slices.Equal(muse(res).Incomplete, []string{"search.themuse[0]"}) || muse(res).Postings != 2 {
+		t.Fatalf("summary %+v", muse(res))
 	}
 	s.postings = []sources.Posting{
 		musePosting(3, "Other Co", "Site Engineer"),
 		musePosting(4, "Other Co", "Field Engineer"),
 		musePosting(5, "Other Co", "Test Engineer"),
 	}
-	if res = f.refresh(); len(res.ClosedJobs) != 0 || res.Search.Complete() {
+	if res = f.refresh(); len(res.ClosedJobs) != 0 || muse(res).Complete() {
 		t.Errorf("closed after an incomplete read: %+v", res)
 	}
 
@@ -169,8 +169,8 @@ func TestRefreshSearchOnlyClosesAfterCompleteReads(t *testing.T) {
 	f.setFilters(searchFilters(10))
 	s.fail = fmt.Errorf("the muse: %w", sources.ErrRateLimited)
 	res = f.refresh()
-	if res.Search.Stopped == "" || len(res.ClosedJobs) != 0 || s.searches != 3 {
-		t.Errorf("rate limited: %+v, %d searches", res.Search, s.searches)
+	if muse(res).Stopped == "" || len(res.ClosedJobs) != 0 || s.searches != 3 {
+		t.Errorf("rate limited: %+v, %d searches", muse(res), s.searches)
 	}
 	if len(res.Errors) != 1 || res.Errors[0].Company != "The Muse" {
 		t.Errorf("errors %+v", res.Errors)
@@ -185,8 +185,8 @@ func TestRefreshSearchLimitsRequests(t *testing.T) {
 	)
 	f.r.MaxSearchRequests = 1
 	f.setFilters(searchFilters(10))
-	if res := f.refresh(); res.Search.Requests != 1 || s.searches != 1 || !strings.Contains(res.Search.Stopped, "limit of 1") {
-		t.Errorf("%+v", res.Search)
+	if res := f.refresh(); muse(res).Requests != 1 || s.searches != 1 || !strings.Contains(muse(res).Stopped, "limit of 1") {
+		t.Errorf("%+v", muse(res))
 	}
 }
 
@@ -210,7 +210,7 @@ func TestRefreshSearchLooksUpPursuedJobs(t *testing.T) {
 	s.postings = nil
 	s.gone["2"] = true
 	res := f.refresh()
-	if s.lookups != 2 || res.Search.Lookups != 2 || len(res.ClosedJobs) != 1 || res.ClosedJobs[0] != jobs["Data Engineer"].ID {
+	if s.lookups != 2 || muse(res).Lookups != 2 || len(res.ClosedJobs) != 1 || res.ClosedJobs[0] != jobs["Data Engineer"].ID {
 		t.Errorf("%+v; %d lookups", res, s.lookups)
 	}
 	if j, _ := f.s.Job(ctx, jobs["Platform Engineer"].ID); !j.ClosedAt.IsZero() {
@@ -233,7 +233,7 @@ func TestRefreshSearchAttachesBoardPostingsLater(t *testing.T) {
 	}
 	f.src.set("madeup", fakePosting("77", "Platform Engineer"))
 	res := f.refresh()
-	if len(res.NewJobs) != 0 || res.Search.Covered != 1 {
+	if len(res.NewJobs) != 0 || muse(res).Covered != 1 {
 		t.Errorf("%+v", res)
 	}
 	if js := f.jobsByTitle(); len(js) != 2 || js["Platform Engineer"].ID != found.ID {
@@ -355,10 +355,20 @@ func TestRefreshSearchReadsEveryPageAndSkipsOldListings(t *testing.T) {
 	f, s := newSearchFixture(t, ps...)
 	f.setFilters(searchFilters(0)) // no pages cap
 	res := f.refresh()
-	if s.searches != 4 || !res.Search.Complete() || res.Search.Postings != 6 || res.Search.Old != 1 {
-		t.Errorf("%+v after %d searches", res.Search, s.searches)
+	if s.searches != 4 || !muse(res).Complete() || muse(res).Postings != 6 || muse(res).Old != 1 {
+		t.Errorf("%+v after %d searches", muse(res), s.searches)
 	}
 	if _, ok := f.jobsByTitle()["Engineer 7"]; ok {
 		t.Error("old listing stored")
 	}
+}
+
+// muse returns The Muse's summary from a refresh.
+func muse(res RefreshResult) SearchSummary {
+	for _, s := range res.Searches {
+		if s.Source == "themuse" {
+			return s
+		}
+	}
+	return SearchSummary{}
 }

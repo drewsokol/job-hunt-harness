@@ -15,6 +15,7 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/core"
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
+	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 	"github.com/drewsokol/job-hunt-harness/internal/utc"
 )
@@ -231,7 +232,7 @@ func (a asker) job(r store.JobRow) jobJSON {
 	ranges := core.PayRanges(r.PayRanges)
 	j := jobJSON{
 		ID: r.ID, Company: r.Company, CompanySuspect: r.CompanySuspect, Title: r.Title, Status: string(r.Status),
-		Origin: r.Origin, Workplace: r.Workplace, Pay: payText(ranges, r.PayRaw), URL: webURL(r.URL), Via: viaName(r.Via),
+		Origin: r.Origin, Workplace: r.Workplace, Pay: payText(ranges, r.PayRaw), URL: webURL(r.URL), Via: sources.SearchTitle(r.Via),
 		Posted: timeText(r.PostedAt), FirstSeen: timeText(r.FirstSeenAt), Closed: timeText(r.ClosedAt),
 		Reposted: timeText(r.RepostedAt), Applied: timeText(r.AppliedAt), AppliedUnconfirmed: r.AppliedUnconfirmed,
 		OpenFlags: r.OpenFlags, Notes: r.Notes,
@@ -340,7 +341,7 @@ func (s *server) getJob(w http.ResponseWriter, r *http.Request) {
 	out := jobDetailJSON{jobJSON: a.job(d.JobRow), Description: d.Description,
 		Postings: []postingJSON{}, Screenings: []screeningJSON{}, ContentFlag: []flagJSON{}, Events: []eventJSON{}}
 	for _, p := range d.Postings {
-		out.Postings = append(out.Postings, postingJSON{ID: p.ID, Source: viaName(p.Source), Title: p.Title, Location: p.LocationRaw,
+		out.Postings = append(out.Postings, postingJSON{ID: p.ID, Source: sources.SearchTitle(p.Source), Title: p.Title, Location: p.LocationRaw,
 			URL: webURL(p.URL), Closed: timeText(p.ClosedAt)})
 	}
 	for _, sc := range d.Screenings {
@@ -699,13 +700,6 @@ func webURL(raw string) string {
 		return ""
 	}
 	return u.String()
-}
-
-func viaName(source string) string {
-	if source == "themuse" {
-		return "The Muse"
-	}
-	return source
 }
 
 // payText shows parsed pay ranges compactly, or the posting's own words

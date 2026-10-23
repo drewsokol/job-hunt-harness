@@ -7,6 +7,7 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/ashby"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/greenhouse"
+	"github.com/drewsokol/job-hunt-harness/internal/sources/hackernews"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/lever"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/themuse"
 )
@@ -23,7 +24,7 @@ func All(client *sources.Client) map[string]sources.Source {
 // Searchers returns every built-in search source by name, sharing client.
 func Searchers(client *sources.Client) map[string]sources.Searcher {
 	m := map[string]sources.Searcher{}
-	for _, s := range []sources.Searcher{themuse.New(client)} {
+	for _, s := range []sources.Searcher{themuse.New(client), hackernews.New(client)} {
 		m[s.Name()] = s
 	}
 	return m

@@ -94,7 +94,7 @@ func GetSetupState(ctx context.Context, s *store.Store) (SetupState, error) {
 	missing(st.ProfileVersion == 0, "profile: no profile yet; interview the user, draft it, and save it with update_profile once they agree")
 	missing(st.FiltersVersion == 0, "filters: none set; draft them, run preview_filters, show the user the effect, then set_filters")
 	missing(st.FiltersVersion != 0 && st.SearchQueries == 0 && st.Counts.BoardCompanies == 0,
-		"sources: no search queries and no company boards, so refresh finds nothing; add search.themuse queries to the filters or companies with add_company")
+		"sources: no search queries and no company boards, so refresh finds nothing; add search.themuse queries or search.hackernews to the filters, or companies with add_company")
 	missing(st.Counts.LastRefreshAt.IsZero(), "refresh: jobs were never fetched; call refresh_jobs")
 	missing(st.Counts.Screenings == 0, "screening: no job has been screened yet; follow the screen_new_jobs playbook")
 	return st, nil
@@ -103,13 +103,18 @@ func GetSetupState(ctx context.Context, s *store.Store) (SetupState, error) {
 func searchQueryCount(filters json.RawMessage) int {
 	var f struct {
 		Search struct {
-			TheMuse []json.RawMessage `json:"themuse"`
+			TheMuse    []json.RawMessage `json:"themuse"`
+			HackerNews json.RawMessage   `json:"hackernews"`
 		} `json:"search"`
 	}
 	if json.Unmarshal(filters, &f) != nil {
 		return 0
 	}
-	return len(f.Search.TheMuse)
+	n := len(f.Search.TheMuse)
+	if len(f.Search.HackerNews) > 0 && string(f.Search.HackerNews) != "null" {
+		n++ // reading the hiring threads counts as one search
+	}
+	return n
 }
 
 func formatOffset(seconds int) string {

@@ -368,7 +368,7 @@ function renderBanners() {
   if (state.askApplied && !state.signedOut) {
     const v = state.askApplied;
     out.push(h("div", { class: "banner info" },
-      h("span", null, "Did you apply to ", h("b", null, v.company), ": ", v.title, "?"),
+      h("span", null, "Did you apply to ", h("b", null, v.company), ": ", titleText(v), "?"),
       h("button", { class: "btn primary", type: "button", onclick: () => { state.askApplied = null; markApplied(v); } }, "Yes, mark applied"),
       h("button", { class: "btn quiet", type: "button", onclick: () => { state.askApplied = null; render(); } }, "Not yet")));
   }
@@ -445,10 +445,16 @@ function badges(j) {
   return out;
 }
 
+// titleText is a job's title, or a stand-in for an ad that names no role
+// in its title (a Hacker News ad lists them in its text).
+function titleText(j) {
+  return j.title || "Roles in the post";
+}
+
 function titleEl(j) {
   const url = safeURL(j.url);
-  if (!url) return h("span", { class: "title" }, j.title);
-  return h("a", { class: "title", href: url, target: "_blank", rel: "noopener noreferrer", onclick: () => noteVisit(j) }, j.title);
+  if (!url) return h("span", { class: "title" }, titleText(j));
+  return h("a", { class: "title", href: url, target: "_blank", rel: "noopener noreferrer", onclick: () => noteVisit(j) }, titleText(j));
 }
 
 function metaLine(j) {
@@ -534,7 +540,7 @@ function detailsEl(j) {
     el.append(h("span", { class: "label" }, `${d.postings.length} postings`),
       h("ul", { class: "postings" }, d.postings.map((p) => {
         const url = safeURL(p.url);
-        return h("li", null, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, p.title) : p.title,
+        return h("li", null, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, titleText(p)) : titleText(p),
           p.location ? ` · ${p.location}` : "", ` · ${p.source}`, p.closed ? ` · closed ${fmtDate(p.closed)}` : "");
       })));
   }
@@ -723,7 +729,7 @@ function outreachForm() {
   const jobs = [...(state.lists.applied || []), ...(state.lists.review || [])];
   if (pre && !jobs.some((j) => j.id === pre.id)) jobs.unshift(pre);
   const jobOpts = [h("option", { value: "" }, "None"),
-    ...jobs.map((j) => h("option", { value: String(j.id), selected: pre && pre.id === j.id }, `#${j.id} ${j.company} · ${j.title}`))];
+    ...jobs.map((j) => h("option", { value: String(j.id), selected: pre && pre.id === j.id }, `#${j.id} ${j.company} · ${titleText(j)}`))];
   return h("form", { class: "panel", onsubmit: submitOutreach },
     h("h2", null, "Log outreach"),
     h("div", { class: "form-grid" },

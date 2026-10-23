@@ -2,7 +2,7 @@
 
 An MCP server that turns your AI agent into a job search assistant, with a local dashboard.
 
-jhh pulls open roles from the public job boards of the companies you care about, and searches The Muse's public jobs API for roles at companies you didn't know to list. It filters out the obvious misses with simple rules, and tracks your applications and outreach. Your own agent (Claude Code, Cursor or any MCP client) does the judgment: it interviews you, writes your profile and filters, and screens each role for fit. Everything stays on your machine, in one SQLite file.
+jhh pulls open roles from the public job boards of the companies you care about, and searches The Muse's public jobs API and Hacker News's monthly "Who is hiring?" threads for roles at companies you didn't know to list. It filters out the obvious misses with simple rules, and tracks your applications and outreach. Your own agent (Claude Code, Cursor or any MCP client) does the judgment: it interviews you, writes your profile and filters, and screens each role for fit. Everything stays on your machine, in one SQLite file.
 
 **Status: early development.** The MVP is built: jhh works from your agent and has a local dashboard. Next it gets used on a real search before more features are added. The design is in [docs/design.md](docs/design.md), and progress is tracked in [docs/roadmap.md](docs/roadmap.md).
 
@@ -56,7 +56,7 @@ JHH_DATA_DIR=./tmp-data go run ./cmd/jhh companies add "Example Co"   # find its
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh refresh            # fetch the boards you added
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh filters preview examples/filters.json   # what would these filters keep?
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh filters set examples/filters.json --rationale "trying the example"
-JHH_DATA_DIR=./tmp-data go run ./cmd/jhh refresh            # runs the filters' Muse search; fetches descriptions for jobs that passed stage 1
+JHH_DATA_DIR=./tmp-data go run ./cmd/jhh refresh            # runs the filters' searches (The Muse, Hacker News); fetches descriptions for jobs that passed stage 1
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh candidates         # the jobs that passed, best first
 JHH_DATA_DIR=./tmp-data JHH_UI_PORT=7979 go run ./cmd/jhh dashboard   # the dashboard, on a port of its own
 ```

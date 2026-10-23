@@ -105,11 +105,14 @@ func (t *tools) addManageTools(s *mcp.Server) {
 			} `json:"untrusted"`
 		}
 		type searchOut struct {
-			Queries    int      `json:"queries"`
+			Source     string   `json:"source"`
+			Queries    int      `json:"queries,omitempty"`
+			Threads    int      `json:"threads,omitempty"`
 			Requests   int      `json:"requests"`
 			Postings   int      `json:"postings"`
 			Covered    int      `json:"skipped_board_listed"`
 			Old        int      `json:"skipped_too_old"`
+			Unreadable int      `json:"skipped_unreadable,omitempty"`
 			Closed     int      `json:"closed"`
 			Incomplete []string `json:"not_read_in_full,omitempty"`
 			Stopped    string   `json:"stopped,omitempty"`
@@ -127,7 +130,7 @@ func (t *tools) addManageTools(s *mcp.Server) {
 			Deferred        int          `json:"descriptions_left_for_next_refresh"`
 			ContentFlags    int          `json:"content_flags"`
 			SuspectFeeds    int          `json:"suspect_feeds"`
-			Search          *searchOut   `json:"search,omitempty"`
+			Search          []searchOut  `json:"search,omitempty"`
 			Errors          []fetchError `json:"errors,omitempty"`
 			DurationSeconds float64      `json:"duration_seconds"`
 			Next            string       `json:"next"`
@@ -141,8 +144,9 @@ func (t *tools) addManageTools(s *mcp.Server) {
 		if !res.Filtered {
 			out.Next = "No filters are set, so nothing was judged or searched. Write filters with the user, then refresh again."
 		}
-		if sr := res.Search; sr.Queries > 0 {
-			out.Search = &searchOut{sr.Queries, sr.Requests, sr.Postings, sr.Covered, sr.Old, sr.Closed, sr.Incomplete, sr.Stopped}
+		for _, sr := range res.Searches {
+			out.Search = append(out.Search, searchOut{sr.Source, sr.Queries, sr.Threads, sr.Requests, sr.Postings, sr.Covered, sr.Old,
+				sr.Unreadable, sr.Closed, sr.Incomplete, sr.Stopped})
 		}
 		slices.SortFunc(res.Errors, func(a, b store.FetchError) int { return strings.Compare(a.Company, b.Company) })
 		for _, e := range res.Errors {

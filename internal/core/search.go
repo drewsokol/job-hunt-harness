@@ -24,16 +24,22 @@ const (
 // is most likely filled.
 const MaxSearchAge = 90 * 24 * time.Hour
 
-// SearchSummary is what the searches in the filters did.
+// SearchSummary is what one search source did in a refresh.
 type SearchSummary struct {
-	Queries  int
+	Source   string // the searcher's name: "themuse" or "hackernews"
+	Title    string // its name for people: "The Muse"
+	Queries  int    // The Muse's queries
+	Threads  int    // Hacker News threads read
 	Requests int
-	Postings int // distinct postings the queries returned, old ones left out
+	Postings int // distinct postings found, old ones left out
 	Old      int // published more than MaxSearchAge ago, so skipped
 	Covered  int // skipped because jhh reads the employer's board
+	// Unreadable counts Hacker News ads whose employer couldn't be read.
+	Unreadable int
 	// Incomplete names the queries that have more pages than they read, or
-	// whose reading failed ("search.themuse[0]"). Until every query is read
-	// in full, postings missing from the results aren't closed.
+	// whose reading failed ("search.themuse[0]", "search.hackernews"). Until
+	// everything is read in full, postings missing from the results aren't
+	// closed.
 	Incomplete []string
 	// Stopped says why searching stopped before the last query, if it did.
 	Stopped string
@@ -41,125 +47,199 @@ type SearchSummary struct {
 	Lookups int
 }
 
-// Complete reports whether every query was read in full.
+// Complete reports whether everything was read in full.
 func (s SearchSummary) Complete() bool { return len(s.Incomplete) == 0 && s.Stopped == "" }
 
 type searchResult struct {
-	summary   SearchSummary
+	summaries []SearchSummary
+	lookups   int // across every source, within MaxLookups
 	out       store.FetchOutcome
 	prefilter []store.PrefilterOutcome
 	cleared   int
 	errors    []store.FetchError
 }
 
-// searchErrorName is the name failed searches are recorded under.
-const searchErrorName = "The Muse"
+// found collects one source's results before they are stored.
+type found struct {
+	postings map[string]store.PostingInput
+	employer map[string]string // posting id → employer name
+	order    []string
+	old      map[string]bool
+	oldest   time.Time
+}
 
-// search runs the filters' queries against The Muse, stores what they found
-// at each employer jhh doesn't read a board for, and closes what the
-// queries no longer return when they were read in full.
+func newFound() *found {
+	return &found{postings: map[string]store.PostingInput{}, employer: map[string]string{}, old: map[string]bool{},
+		oldest: utc.Now().Add(-MaxSearchAge)}
+}
+
+func (f *found) add(s sources.Searcher, ps []sources.Posting) {
+	for _, p := range ps {
+		in := NormalizeFound(s, p)
+		if !p.PostedAt.IsZero() && p.PostedAt.Before(f.oldest) {
+			f.old[in.ID] = true
+			continue
+		}
+		if _, dup := f.postings[in.ID]; !dup {
+			f.postings[in.ID] = in
+			f.employer[in.ID] = p.Company
+			f.order = append(f.order, in.ID)
+		}
+	}
+}
+
+// search runs the filters' searches, stores what they found at each
+// employer jhh doesn't read a board for, and closes what a source no longer
+// returns when it was read in full.
 func (r *Refresher) search(ctx context.Context, filters *prefilter.Compiled, version int64) (searchResult, error) {
 	var sr searchResult
-	f := filters.Filters()
-	s := r.Searchers["themuse"]
-	if f.Search == nil || len(f.Search.TheMuse) == 0 || s == nil {
+	f := filters.Filters().Search
+	if f == nil {
 		return sr, nil
 	}
-	qs := f.Search.TheMuse
-	sr.summary.Queries = len(qs)
-	budget := cmpOr(r.MaxSearchRequests, DefaultMaxSearchRequests)
-
-	found := map[string]store.PostingInput{}
-	old := map[string]bool{}
-	oldest := utc.Now().Add(-MaxSearchAge)
-	var order []string
-	employer := map[string]string{} // posting id → employer name
-	failed := func(err error) {
-		sr.errors = append(sr.errors, store.FetchError{Company: searchErrorName, Error: err.Error()})
+	if s, ok := r.Searchers["themuse"].(sources.QuerySearcher); ok && len(f.TheMuse) > 0 {
+		sum, fd, err := r.searchMuse(ctx, &sr, s, f.TheMuse)
+		if err == nil {
+			err = r.storeSearch(ctx, &sr, s, &sum, fd, filters, version)
+		}
+		sr.summaries = append(sr.summaries, sum)
+		if err != nil {
+			return sr, err
+		}
 	}
+	if s, ok := r.Searchers["hackernews"].(sources.ThreadSearcher); ok && f.HackerNews != nil {
+		sum, fd, err := r.searchThreads(ctx, &sr, s, f.HackerNews.MonthsOrDefault())
+		if err == nil {
+			err = r.storeSearch(ctx, &sr, s, &sum, fd, filters, version)
+		}
+		sr.summaries = append(sr.summaries, sum)
+		if err != nil {
+			return sr, err
+		}
+	}
+	return sr, nil
+}
+
+func (r *Refresher) failed(sr *searchResult, s sources.Searcher, err error) {
+	sr.errors = append(sr.errors, store.FetchError{Company: sources.SearchTitle(s.Name()), Error: err.Error()})
+}
+
+// searchMuse reads every page of every query, within the request budget.
+func (r *Refresher) searchMuse(ctx context.Context, sr *searchResult, s sources.QuerySearcher, qs []prefilter.MuseQuery) (SearchSummary, *found, error) {
+	sum := SearchSummary{Source: s.Name(), Title: sources.SearchTitle(s.Name()), Queries: len(qs)}
+	budget := cmpOr(r.MaxSearchRequests, DefaultMaxSearchRequests)
+	fd := newFound()
 queries:
 	for i, q := range qs {
 		label := fmt.Sprintf("search.themuse[%d]", i)
 		for n := 0; q.Pages == 0 || n < q.Pages; n++ {
-			if sr.summary.Requests >= budget {
-				sr.summary.Stopped = fmt.Sprintf("reached the limit of %d search requests a refresh", budget)
+			if sum.Requests >= budget {
+				sum.Stopped = fmt.Sprintf("reached the limit of %d search requests a refresh", budget)
 				break queries
 			}
-			sr.summary.Requests++
+			sum.Requests++
 			page, err := s.Search(ctx, museQuery(q), n)
 			if err != nil {
 				if ctx.Err() != nil {
-					return sr, ctx.Err()
+					return sum, fd, ctx.Err()
 				}
-				failed(fmt.Errorf("%s: %w", label, err))
+				r.failed(sr, s, fmt.Errorf("%s: %w", label, err))
 				if errors.Is(err, sources.ErrRateLimited) {
-					sr.summary.Stopped = "The Muse's hourly request limit was reached"
+					sum.Stopped = "The Muse's hourly request limit was reached"
 					break queries
 				}
 				break // the rest of this query waits for the next refresh
 			}
-			for _, p := range page.Postings {
-				in := NormalizeFound(s, p)
-				if !p.PostedAt.IsZero() && p.PostedAt.Before(oldest) {
-					old[in.ID] = true
-					continue
-				}
-				if _, dup := found[in.ID]; !dup {
-					found[in.ID] = in
-					employer[in.ID] = p.Company
-					order = append(order, in.ID)
-				}
-			}
+			fd.add(s, page.Postings)
 			if n+1 >= page.Pages {
 				continue queries
 			}
 		}
-		sr.summary.Incomplete = append(sr.summary.Incomplete, label)
+		sum.Incomplete = append(sum.Incomplete, label)
 	}
-	sr.summary.Postings, sr.summary.Old = len(order), len(old)
+	return sum, fd, nil
+}
 
-	names := make([]string, 0, len(order))
-	for _, id := range order {
-		names = append(names, employer[id])
+// searchThreads reads the newest monthly hiring threads in full.
+func (r *Refresher) searchThreads(ctx context.Context, sr *searchResult, s sources.ThreadSearcher, months int) (SearchSummary, *found, error) {
+	const label = "search.hackernews"
+	sum := SearchSummary{Source: s.Name(), Title: sources.SearchTitle(s.Name())}
+	fd := newFound()
+	sum.Requests++
+	threads, err := s.Threads(ctx, months)
+	if err != nil {
+		if ctx.Err() != nil {
+			return sum, fd, ctx.Err()
+		}
+		r.failed(sr, s, err)
+		sum.Incomplete = append(sum.Incomplete, label)
+		return sum, fd, nil
+	}
+	for _, t := range threads {
+		sum.Requests++
+		res, err := s.ReadThread(ctx, t.ID)
+		if err != nil {
+			if ctx.Err() != nil {
+				return sum, fd, ctx.Err()
+			}
+			r.failed(sr, s, err)
+			sum.Incomplete = append(sum.Incomplete, label)
+			return sum, fd, nil
+		}
+		sum.Threads++
+		sum.Unreadable += res.Unreadable
+		fd.add(s, res.Postings)
+	}
+	return sum, fd, nil
+}
+
+// storeSearch stores one source's results under their employers, then
+// closes what the source no longer returns if it was read in full.
+func (r *Refresher) storeSearch(ctx context.Context, sr *searchResult, s sources.Searcher, sum *SearchSummary, fd *found,
+	filters *prefilter.Compiled, version int64) error {
+	sum.Postings, sum.Old = len(fd.order), len(fd.old)
+	names := make([]string, 0, len(fd.order))
+	for _, id := range fd.order {
+		names = append(names, fd.employer[id])
 	}
 	employers, err := r.Store.Employers(ctx, r.By, "search", names)
 	if err != nil {
-		return sr, err
+		return err
 	}
 	byCompany := map[int64][]store.PostingInput{}
 	var companies []int64
 	seen := map[string]bool{}
-	for _, id := range order {
-		e, ok := employers[employer[id]]
+	for _, id := range fd.order {
+		e, ok := employers[fd.employer[id]]
 		if !ok {
 			continue // a name with nothing to match on
 		}
 		if e.Covered {
-			sr.summary.Covered++
+			sum.Covered++
 			continue
 		}
 		seen[id] = true
 		if _, ok := byCompany[e.CompanyID]; !ok {
 			companies = append(companies, e.CompanyID)
 		}
-		byCompany[e.CompanyID] = append(byCompany[e.CompanyID], found[id])
+		byCompany[e.CompanyID] = append(byCompany[e.CompanyID], fd.postings[id])
 	}
 	for _, id := range companies {
-		if err := r.storeFound(ctx, &sr, id, s.Name(), byCompany[id], filters, version); err != nil {
-			return sr, err
+		if err := r.storeFound(ctx, sr, id, s.Name(), byCompany[id], filters, version); err != nil {
+			return err
 		}
 	}
 
-	if !sr.summary.Complete() {
-		return sr, nil
+	if !sum.Complete() {
+		return nil
 	}
 	missing, err := r.Store.CloseSearchMissing(ctx, r.By, s.Name(), seen)
 	if err != nil {
-		return sr, err
+		return err
 	}
 	sr.out.ClosedJobs = append(sr.out.ClosedJobs, missing.ClosedJobs...)
-	sr.summary.Closed += len(missing.ClosedJobs)
-	return sr, r.lookup(ctx, &sr, s, missing.Check)
+	sum.Closed += len(missing.ClosedJobs)
+	return r.lookup(ctx, sr, sum, s, missing.Check)
 }
 
 // storeFound stores one employer's search results the way a board listing
@@ -191,17 +271,18 @@ func (r *Refresher) storeFound(ctx context.Context, sr *searchResult, companyID 
 	return judge()
 }
 
-// lookup asks the source about pursued postings no query returned, and
+// lookup asks the source about pursued postings it no longer returned, and
 // closes the ones it says are gone.
-func (r *Refresher) lookup(ctx context.Context, sr *searchResult, s sources.Searcher, refs []store.DetailRef) error {
+func (r *Refresher) lookup(ctx context.Context, sr *searchResult, sum *SearchSummary, s sources.Searcher, refs []store.DetailRef) error {
 	limit := cmpOr(r.MaxLookups, DefaultMaxLookups)
 	var gone []string
 refs:
 	for _, ref := range refs {
-		if sr.summary.Lookups >= limit {
+		if sr.lookups >= limit {
 			break
 		}
-		sr.summary.Lookups++
+		sr.lookups++
+		sum.Lookups++
 		_, err := s.Lookup(ctx, ref.ExternalID)
 		switch {
 		case err == nil:
@@ -210,7 +291,7 @@ refs:
 		case ctx.Err() != nil:
 			return ctx.Err()
 		default:
-			sr.errors = append(sr.errors, store.FetchError{Company: searchErrorName, Error: err.Error()})
+			r.failed(sr, s, err)
 			if errors.Is(err, sources.ErrRateLimited) {
 				break refs
 			}
@@ -221,7 +302,7 @@ refs:
 	}
 	closed, err := r.Store.ClosePostings(ctx, r.By, gone)
 	sr.out.ClosedJobs = append(sr.out.ClosedJobs, closed...)
-	sr.summary.Closed += len(closed)
+	sum.Closed += len(closed)
 	return err
 }
 
@@ -232,4 +313,22 @@ func merge(dst *store.FetchOutcome, src store.FetchOutcome) {
 	dst.ClosedJobs = append(dst.ClosedJobs, src.ClosedJobs...)
 	dst.RepostedJobs = append(dst.RepostedJobs, src.RepostedJobs...)
 	dst.Flags += src.Flags
+}
+
+// SearchRequests is how many requests every search source made.
+func (r RefreshResult) SearchRequests() int {
+	n := 0
+	for _, s := range r.Searches {
+		n += s.Requests
+	}
+	return n
+}
+
+// SearchPostings is how many postings every search source found.
+func (r RefreshResult) SearchPostings() int {
+	n := 0
+	for _, s := range r.Searches {
+		n += s.Postings
+	}
+	return n
 }

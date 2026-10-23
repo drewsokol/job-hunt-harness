@@ -75,7 +75,7 @@ func refresh(ctx context.Context, args []string, stdout io.Writer, stderr *os.Fi
 func printRefresh(w io.Writer, res core.RefreshResult) {
 	fmt.Fprintf(w, "Refreshed %d companies in %s (%d unchanged since the last refresh).\n",
 		res.Companies, res.Duration.Round(100*time.Millisecond), res.NotModified)
-	if res.Companies == 0 && res.Search.Queries == 0 {
+	if res.Companies == 0 && len(res.Searches) == 0 {
 		fmt.Fprintln(w, "  jhh has no companies and no searches yet. Add a company with jhh companies add <name>,")
 		fmt.Fprintln(w, "  or set filters with a search (see examples/filters.json).")
 	}
@@ -93,15 +93,23 @@ func printRefresh(w io.Writer, res core.RefreshResult) {
 	} else {
 		fmt.Fprintln(w, "  No filters are set, so jobs weren't judged, Greenhouse descriptions weren't fetched and nothing was searched.")
 	}
-	if s := res.Search; s.Queries > 0 {
-		line("The Muse", fmt.Sprintf("%d queries, %d requests, %d postings (%d skipped: jhh reads the employer's board), %d too old, %d closed",
-			s.Queries, s.Requests, s.Postings, s.Covered, s.Old, s.Closed))
+	for _, s := range res.Searches {
+		read := fmt.Sprintf("%d queries", s.Queries)
+		if s.Queries == 0 { // a source that reads threads, not queries
+			read = fmt.Sprintf("%d threads", s.Threads)
+		}
+		summary := fmt.Sprintf("%s, %d requests, %d postings (%d skipped: jhh reads the employer's board), %d too old, %d closed",
+			read, s.Requests, s.Postings, s.Covered, s.Old, s.Closed)
+		if s.Unreadable > 0 {
+			summary += fmt.Sprintf(", %d ads without a readable employer", s.Unreadable)
+		}
+		line(s.Title, summary)
 		if s.Stopped != "" {
 			fmt.Fprintf(w, "    Searching stopped early: %s. The rest waits for the next refresh.\n", s.Stopped)
 		}
 		if len(s.Incomplete) > 0 {
-			fmt.Fprintf(w, "    Not read in full: %s. Narrow them or raise their pages cap; until every query is read in full, jobs The Muse no longer lists aren't closed.\n",
-				strings.Join(s.Incomplete, ", "))
+			fmt.Fprintf(w, "    Not read in full: %s. Until everything is read in full, jobs %s no longer lists aren't closed.\n",
+				strings.Join(s.Incomplete, ", "), s.Title)
 		}
 	}
 	if p := res.Pruned; res.DescriptionsCleared+p.JobsDeleted+p.CompaniesDeleted+p.DescriptionsCleared > 0 {

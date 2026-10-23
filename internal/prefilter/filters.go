@@ -90,6 +90,31 @@ type Flag struct {
 // Search holds each search source's queries.
 type Search struct {
 	TheMuse []MuseQuery `json:"themuse,omitempty"`
+	// HackerNews, when present, reads the monthly "Who is hiring?" threads.
+	HackerNews *HackerNews `json:"hackernews,omitempty"`
+}
+
+// HackerNews says how many of the latest monthly "Who is hiring?" threads
+// a refresh reads. Ads aren't searched on Hacker News's side: every ad in
+// those threads is judged by the rest of the filters.
+type HackerNews struct {
+	// Months is 1 to MaxHackerNewsMonths; 0 means DefaultHackerNewsMonths.
+	Months int `json:"months,omitempty"`
+}
+
+// Hacker News thread limits. Two months by default, so the days after a
+// new thread opens, when it holds few ads, still see last month's.
+const (
+	DefaultHackerNewsMonths = 2
+	MaxHackerNewsMonths     = 3
+)
+
+// MonthsOrDefault is how many threads to read.
+func (h HackerNews) MonthsOrDefault() int {
+	if h.Months == 0 {
+		return DefaultHackerNewsMonths
+	}
+	return h.Months
 }
 
 // MuseQuery is one search of The Muse. A job matches when it is in any of
@@ -251,8 +276,8 @@ func (f Filters) Validate() error {
 	}
 	if s := f.Search; s != nil {
 		switch n := len(s.TheMuse); {
-		case n == 0:
-			add("search: add at least one themuse query, or leave search out")
+		case n == 0 && s.HackerNews == nil:
+			add("search: add themuse queries, hackernews or both, or leave search out")
 		case n > maxQueries:
 			add("search.themuse: %d queries is too many; the limit is %d", n, maxQueries)
 		}
@@ -277,6 +302,9 @@ func (f Filters) Validate() error {
 			if q.Pages < 0 || q.Pages > MaxSearchPages {
 				add("%s.pages: must be between 1 and %d", field, MaxSearchPages)
 			}
+		}
+		if h := s.HackerNews; h != nil && (h.Months < 0 || h.Months > MaxHackerNewsMonths) {
+			add("search.hackernews.months: must be between 1 and %d", MaxHackerNewsMonths)
 		}
 	}
 	if len(p) > 0 {

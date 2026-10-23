@@ -45,7 +45,7 @@ Show the user the full text. Save it with `update_profile` only after they agree
 
 Filters are cheap rules that run before you screen anything. They should drop what is clearly wrong and keep anything plausible: you screen what passes, and a job the filters drop is never seen. When unsure, let it through.
 
-Call `get_context` to see the current filters, if any. Draft new ones from the profile: title words to require and exclude, levels, where remote and on-site work is fine, employment types to exclude, keywords, the pay floor, title words to flag, and a search of The Muse for the user's field and area. Then:
+Call `get_context` to see the current filters, if any. Draft new ones from the profile: title words to require and exclude, levels, where remote and on-site work is fine, employment types to exclude, keywords, the pay floor, title words to flag, and where to search beyond company boards: The Muse for the user's field and area, and Hacker News's monthly "Who is hiring?" threads (`"search": {"hackernews": {}}`), which suit startups and tech roles. Then:
 
 1. Call `preview_filters` and show the user the counts and the examples it returns.
 2. If it drops jobs that look right, loosen the rule and preview again.

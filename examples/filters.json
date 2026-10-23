@@ -20,6 +20,7 @@
   "search": {
     "themuse": [
       { "categories": ["Software Engineering", "Data Science"], "levels": ["Senior Level"], "locations": ["Columbus, OH"] }
-    ]
+    ],
+    "hackernews": { "months": 2 }
   }
 }

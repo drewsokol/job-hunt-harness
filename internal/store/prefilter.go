@@ -102,6 +102,9 @@ type PrefilterJob struct {
 	Reasons          json.RawMessage
 	Score            float64
 	FiltersVersion   int64
+	// Via names the search source the job came through ("hackernews") when it
+	// has no posting from a board.
+	Via string
 }
 
 // jobDescription is a job's description: its own for jobs from agents and
@@ -109,6 +112,13 @@ type PrefilterJob struct {
 const jobDescription = `coalesce(j.description, (
 	SELECT p.description FROM postings p WHERE p.job_id = j.id AND p.description IS NOT NULL
 	ORDER BY p.closed_at IS NOT NULL, p.first_seen_at DESC, p.id DESC LIMIT 1), '')`
+
+// jobVia is the search source a job came through when it has no posting
+// from a board, or ”. The first posting made the job and its title, so its
+// source decides.
+const jobVia = `CASE WHEN EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0) THEN ''
+		            ELSE coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id AND p.search = 1
+		                           ORDER BY p.first_seen_at, p.id LIMIT 1), '') END`
 
 // PrefilterJobs returns every job of the company, or of every company when
 // companyID is 0. A feed or search job's description is known once any of
@@ -120,7 +130,7 @@ func (s *Store) PrefilterJobs(ctx context.Context, companyID int64) ([]Prefilter
 		       coalesce(j.employment_type, ''), `+jobDescription+`,
 		       j.origin NOT IN ('feed', 'search') OR EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.detail_fetched_at IS NOT NULL),
 		       j.closed_at IS NOT NULL, j.status, coalesce(j.prefilter_status, ''), j.prefilter_reasons,
-		       coalesce(j.prefilter_score, 0), coalesce(j.filters_version, 0)
+		       coalesce(j.prefilter_score, 0), coalesce(j.filters_version, 0), `+jobVia+`
 		FROM jobs j JOIN companies c ON c.id = j.company_id
 		WHERE ? = 0 OR j.company_id = ?
 		ORDER BY j.id`, companyID, companyID)
@@ -136,7 +146,7 @@ func (s *Store) PrefilterJobs(ctx context.Context, companyID int64) ([]Prefilter
 		)
 		if err := rows.Scan(&j.ID, &j.CompanyID, &j.Company, &j.Title, &j.Workplace, &locs, &pay,
 			&j.EmploymentType, &j.Description, &j.DescriptionKnown,
-			&j.Closed, &status, &j.PrefilterStatus, &reason, &j.Score, &j.FiltersVersion); err != nil {
+			&j.Closed, &status, &j.PrefilterStatus, &reason, &j.Score, &j.FiltersVersion, &j.Via); err != nil {
 			return nil, err
 		}
 		j.Locations, j.PayRanges, j.Status, j.Reasons = json.RawMessage(locs), json.RawMessage(pay), JobStatus(status), json.RawMessage(reason)
@@ -274,9 +284,7 @@ func (s *Store) Candidates(ctx context.Context, status JobStatus, limit int) ([]
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT j.id, c.name, j.title, j.workplace, j.locations, j.pay_ranges, coalesce(j.pay_raw, ''), coalesce(j.url, ''),
-		       coalesce(j.prefilter_score, 0), j.prefilter_reasons, j.first_seen_at,
-		       CASE WHEN EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0) THEN ''
-		            ELSE coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id AND p.search = 1 LIMIT 1), '') END
+		       coalesce(j.prefilter_score, 0), j.prefilter_reasons, j.first_seen_at, `+jobVia+`
 		FROM jobs j JOIN companies c ON c.id = j.company_id
 		WHERE j.status = ? AND j.closed_at IS NULL AND j.hidden_at IS NULL
 		ORDER BY j.prefilter_score DESC, j.first_seen_at DESC, j.id DESC
