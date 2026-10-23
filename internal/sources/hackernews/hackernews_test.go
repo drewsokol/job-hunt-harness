@@ -175,6 +175,14 @@ func TestParseAd(t *testing.T) {
 			ad{Company: "Exampleco", Title: "Staff Engineer", Location: "Remote (US)", Pay: "Pay for the Staff Engineer role is 200k-240k"}, adOK},
 		{"Exampleco | Senior Engineer | Remote (US) | " + strings.Repeat("We build made-up product software for made-up shops. ", 4),
 			ad{Company: "Exampleco", Title: "Senior Engineer", Location: "Remote (US)"}, adOK},
+		// Level words alone describe the company, not roles; a 401(k) is a
+		// benefit, not pay; and "!" can be part of a name.
+		{"Exampleco | Series A, 20 staff | Remote (US)",
+			ad{Company: "Exampleco", Location: "Remote (US)"}, adOK},
+		{"Exampleco | Senior Engineer | Remote (US), 401k match",
+			ad{Company: "Exampleco", Title: "Senior Engineer", Location: "Remote (US), 401k match"}, adOK},
+		{"Exampleco! | Senior Engineer | Remote (US)",
+			ad{Company: "Exampleco!", Title: "Senior Engineer", Location: "Remote (US)"}, adOK},
 		// A note that isn't a place isn't taken as one.
 		{"Exampleco (Series B) | ONSITE | Columbus, OH",
 			ad{Company: "Exampleco", Location: "ONSITE | Columbus, OH"}, adOK},

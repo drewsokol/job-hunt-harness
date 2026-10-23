@@ -95,7 +95,7 @@ func printRefresh(w io.Writer, res core.RefreshResult) {
 	}
 	for _, s := range res.Searches {
 		read := fmt.Sprintf("%d queries", s.Queries)
-		if s.Source == "hackernews" {
+		if s.Queries == 0 { // a source that reads threads, not queries
 			read = fmt.Sprintf("%d threads", s.Threads)
 		}
 		summary := fmt.Sprintf("%s, %d requests, %d postings (%d skipped: jhh reads the employer's board), %d too old, %d closed",

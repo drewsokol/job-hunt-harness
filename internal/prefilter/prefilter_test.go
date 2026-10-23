@@ -62,6 +62,7 @@ func job(mods ...func(*Input)) Input {
 }
 
 func titled(s string) func(*Input) { return func(in *Input) { in.Title = s } }
+func roles(s string) func(*Input)  { return func(in *Input) { in.Title, in.SeveralRoles = s, true } }
 func at(workplace string, places ...string) func(*Input) {
 	return func(in *Input) {
 		in.Workplace, in.Places = workplace, nil
@@ -102,8 +103,10 @@ func TestEvaluate(t *testing.T) {
 		{name: "contracts are a subject", in: job(titled("Senior AI Engineer, Contracts Platform")), want: Pass},
 
 		// Titles naming several roles (Hacker News ads) pass when one does.
-		{name: "one of several roles fits", in: job(titled("Engineering Manager · Senior AI Engineer")), want: Pass},
-		{name: "none of several roles fits", in: job(titled("Product Designer · Senior Sales Engineer")), want: Drop, wantRules: []string{"titles.exclude_any"}},
+		{name: "one of several roles fits", in: job(roles("Engineering Manager · Senior AI Engineer")), want: Pass},
+		{name: "a board title is never split", in: job(titled("Senior AI Engineer · Sales Platform")), want: Drop, wantRules: []string{"titles.exclude_any"}},
+		{name: "a flag on another role is kept", in: job(roles("Senior AI Engineer · Senior Solutions Engineer, AI")), want: Pass, wantRules: []string{"flag.title_any"}},
+		{name: "none of several roles fits", in: job(roles("Product Designer · Senior Sales Engineer")), want: Drop, wantRules: []string{"titles.exclude_any"}},
 		{name: "no title", in: job(titled("")), want: Pass, wantRules: []string{"titles.require_any", "level_unknown"}, wantInText: "names no role"},
 		{name: "no title or keywords", in: job(titled(""), described("Made-up work.")), want: Drop, wantRules: []string{"keywords", "titles.require_any", "level_unknown"}},
 

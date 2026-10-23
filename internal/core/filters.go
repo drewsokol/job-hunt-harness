@@ -81,6 +81,7 @@ func prefilterInput(j store.PrefilterJob) prefilter.Input {
 	in := prefilter.Input{
 		Company: j.Company, Title: j.Title, Workplace: j.Workplace, EmploymentType: j.EmploymentType,
 		Description: j.Description, DescriptionKnown: j.DescriptionKnown,
+		SeveralRoles: sources.TitlesNameRoles(j.Via),
 	}
 	// Both columns are written by jhh from these types; a row that doesn't
 	// decode is judged without it.

@@ -239,3 +239,8 @@ func SearchTitle(name string) string {
 	}
 	return name
 }
+
+// TitlesNameRoles reports whether a search source's titles can name several
+// roles joined with normalize.RoleSeparator (a Hacker News ad's do), so the
+// prefilter judges them role by role.
+func TitlesNameRoles(name string) bool { return name == "hackernews" }

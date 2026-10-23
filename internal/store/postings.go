@@ -9,6 +9,10 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/drewsokol/job-hunt-harness/internal/dedupe"
+	"github.com/drewsokol/job-hunt-harness/internal/normalize"
+	"github.com/drewsokol/job-hunt-harness/internal/sources"
 )
 
 // PostingInput is one posting as refresh read it, already normalized. Text
@@ -457,7 +461,9 @@ func (a *applier) match(companyID int64, p PostingInput) (int64, string, error) 
 			return id, "url", err
 		}
 	}
-	if p.Fingerprint != "" && p.TitleKey != "" {
+	// A search ad may have no title (a Hacker News ad naming no role); its
+	// text alone still finds the same ad posted again.
+	if p.Fingerprint != "" && (p.TitleKey != "" || p.Search) {
 		// An open job first; otherwise the most recently closed one, which
 		// makes this posting a repost if it closed recently enough.
 		var (
@@ -490,16 +496,49 @@ func (a *applier) match(companyID int64, p PostingInput) (int64, string, error) 
 		// A board posting of a job that search found first: the same title
 		// at the same company, on an open job with only search postings.
 		// The board's copy joins that job, so nothing tracked is lost.
-		id, err := one(`
-			SELECT j.id FROM jobs j
-			WHERE j.company_id = ? AND j.title_key = ? AND j.origin = 'search' AND j.closed_at IS NULL
-			  AND NOT EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0)
-			ORDER BY j.id LIMIT 1`, companyID, p.TitleKey)
+		id, err := a.searchCopy(companyID, p.TitleKey)
 		if err != nil || id != 0 {
 			return id, "search_copy", err
 		}
 	}
 	return 0, "", nil
+}
+
+// searchCopy finds the open search job at the company whose title has key,
+// or, for a source whose titles name several roles (a Hacker News ad), one
+// of whose roles has it.
+func (a *applier) searchCopy(companyID int64, key string) (int64, error) {
+	rows, err := a.tx.QueryContext(a.ctx, `
+		SELECT j.id, j.title, j.title_key,
+		       coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id LIMIT 1), '')
+		FROM jobs j
+		WHERE j.company_id = ? AND j.origin = 'search' AND j.closed_at IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0)
+		ORDER BY j.id`, companyID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id                      int64
+			title, titleKey, source string
+		)
+		if err := rows.Scan(&id, &title, &titleKey, &source); err != nil {
+			return 0, err
+		}
+		if titleKey == key {
+			return id, nil
+		}
+		if sources.TitlesNameRoles(source) {
+			for _, role := range strings.Split(title, normalize.RoleSeparator) {
+				if dedupe.TitleKey(role) == key {
+					return id, nil
+				}
+			}
+		}
+	}
+	return 0, rows.Err()
 }
 
 // closeMissing closes the company's open postings from source that the

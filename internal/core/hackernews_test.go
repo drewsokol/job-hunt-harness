@@ -59,7 +59,7 @@ func TestRefreshHackerNews(t *testing.T) {
 		threads: []sources.Thread{{ID: "901"}, {ID: "801"}},
 		ads: map[string][]sources.Posting{
 			"901": {
-				hnAd("911", "Made-Up Labs", "Product Designer · Platform Engineer"),
+				hnAd("911", "Made-Up Labs", "Engineering Manager · Platform Engineer"),
 				hnAd("912", "Fictional Freight", ""), // names no role
 				hnAd("913", "Sample Co", "Office Manager"),
 				hnAd("914", "Exampleco", "Backend Engineer"), // jhh reads Exampleco's board
@@ -69,7 +69,7 @@ func TestRefreshHackerNews(t *testing.T) {
 		gone: map[string]bool{},
 	}
 	f.r.Searchers = map[string]sources.Searcher{"hackernews": hn}
-	f.setFilters(`{"schema_version": 1, "titles": {"require_any": ["engineer"]}, "search": {"hackernews": {"months": 1}}}`)
+	f.setFilters(`{"schema_version": 1, "titles": {"require_any": ["engineer"], "exclude_any": ["manager"]}, "search": {"hackernews": {"months": 1}}}`)
 
 	res := f.refresh()
 	if len(res.Searches) != 1 {
@@ -86,7 +86,7 @@ func TestRefreshHackerNews(t *testing.T) {
 	}
 	// One fitting role is enough; an ad naming no role isn't dropped for it.
 	for title, want := range map[string]string{
-		"Product Designer · Platform Engineer": "pass", "": "pass", "Office Manager": "drop",
+		"Engineering Manager · Platform Engineer": "pass", "": "pass", "Office Manager": "drop",
 	} {
 		if got := jobs[title].PrefilterStatus; got != want {
 			t.Errorf("%q: prefilter %q, want %q", title, got, want)
@@ -113,5 +113,73 @@ func TestRefreshHackerNews(t *testing.T) {
 	res = f.refresh()
 	if res.Searches[0].Complete() || len(res.ClosedJobs) != 0 || len(res.Errors) != 1 || res.Errors[0].Company != "Hacker News" {
 		t.Errorf("failed read: %+v, closed %v, errors %v", res.Searches[0], res.ClosedJobs, res.Errors)
+	}
+}
+
+func TestHackerNewsDedupe(t *testing.T) {
+	f := newRefreshFixture(t, "exampleco")
+	hn := &fakeThreads{
+		threads: []sources.Thread{{ID: "901"}, {ID: "801"}},
+		ads: map[string][]sources.Posting{
+			// The same ads, posted two months running.
+			"901": {hnAd("911", "Fictional Freight", ""), hnAd("912", "Made-Up Labs", "Engineering Manager · Platform Engineer")},
+			"801": {hnAd("811", "Fictional Freight", ""), hnAd("812", "Made-Up Labs", "Engineering Manager · Platform Engineer")},
+		},
+		gone: map[string]bool{},
+	}
+	f.r.Searchers = map[string]sources.Searcher{"hackernews": hn}
+	f.setFilters(`{"schema_version": 1, "titles": {"require_any": ["engineer"]}, "search": {"hackernews": {}}}`)
+	f.refresh()
+	if all, _ := f.s.PrefilterJobs(context.Background(), 0); len(all) != 2 {
+		t.Fatalf("%d jobs, want one for each ad, even the one naming no role", len(all))
+	}
+	jobs := f.jobsByTitle()
+	found := jobs["Engineering Manager · Platform Engineer"]
+
+	// The employer's board is added: its posting for one of the ad's roles
+	// joins the job the ad made.
+	if _, err := f.s.AddCompany(context.Background(), store.ActorUser, store.NewCompany{
+		Name: "Made-Up Labs", Source: "fake", BoardKey: "fake:madeup", SourceConfig: []byte(`{"slug":"madeup"}`), Origin: "user",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.src.set("madeup", fakePosting("77", "Platform Engineer"))
+	if res := f.refresh(); len(res.NewJobs) != 0 {
+		t.Errorf("new jobs %v; the board's posting should join the ad's job", res.NewJobs)
+	}
+	if js := f.jobsByTitle(); len(js) != 2 || js["Engineering Manager · Platform Engineer"].ID != found.ID {
+		t.Errorf("jobs %+v", js)
+	}
+}
+
+func TestLookupLimitIsSharedBySources(t *testing.T) {
+	f, muse := newSearchFixture(t, musePosting(1, "Made-Up Labs", "Platform Engineer"))
+	hn := &fakeThreads{
+		threads: []sources.Thread{{ID: "901"}},
+		ads:     map[string][]sources.Posting{"901": {hnAd("911", "Fictional Freight", "Data Engineer")}},
+		gone:    map[string]bool{},
+	}
+	f.r.Searchers["hackernews"] = hn
+	f.r.MaxLookups = 1
+	f.setFilters(`{"schema_version": 1, "titles": {"require_any": ["engineer"]}, "keywords": {"body_any": ["software"]},
+		"search": {"themuse": [{"categories": ["Software Engineering"]}], "hackernews": {"months": 1}}}`)
+	f.refresh()
+	jobs := f.jobsByTitle()
+	ctx := context.Background()
+	for _, title := range []string{"Platform Engineer", "Data Engineer"} {
+		if err := f.s.SetJobStatus(ctx, store.ActorUser, jobs[title].ID, store.StatusReview); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Both pursued jobs drop out of their source; one lookup in all.
+	muse.postings, hn.ads["901"] = nil, nil
+	res := f.refresh()
+	n := 0
+	for _, s := range res.Searches {
+		n += s.Lookups
+	}
+	if n != 1 {
+		t.Errorf("%d lookups across sources, want the limit of 1: %+v", n, res.Searches)
 	}
 }

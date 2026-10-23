@@ -36,18 +36,22 @@ var (
 	dashSeparator = regexp.MustCompile(`\s+[–—]\s+`)
 	webAddress    = regexp.MustCompile(`(?i)\bhttps?://[^\s()\[\]]+|\bwww\.[^\s()\[\]]+`)
 	trailingParen = regexp.MustCompile(`\s*[(\[]([^()\[\]]*)[)\]]\s*$`)
-	// money is a figure that can only be pay: a currency sign or "k".
+	// money is a figure that can only be pay: a currency sign or "k". A
+	// 401(k) retirement plan is a benefit, not pay (see hasMoney).
 	money       = regexp.MustCompile(`(?i)[$€£¥]\s*\d|\b\d+(?:[.,]\d+)?\s*k\b`)
+	plan401k    = regexp.MustCompile(`(?i)\b401\s*\(?k\)?`)
 	payWords    = regexp.MustCompile(`(?i)\b(?:salary|equity|compensation|usd|eur|gbp|cad)\b`)
 	employment  = regexp.MustCompile(`(?i)^(?:full[- ]?time|part[- ]?time|contract(?:or)?s?|freelance|internships?|interns?|perm(?:anent)?|fte|temporary|employment|or|and|[\s/,&+-])+$`)
 	filledWords = regexp.MustCompile(`(?i)\b(?:closed now|now closed|no longer hiring|(?:positions?|roles?|jobs?) (?:(?:has|have) been |(?:is|are) )?(?:closed|filled))\b|[\[(]\s*(?:closed|filled)\s*[\])]`)
-	// roleWords mark a part of the header that names roles.
-	roleWords     = regexp.MustCompile(`(?i)\b(?:engineers?|engineering|developers?|devs?|swes?|sres?|programmers?|scientists?|researchers?|designers?|architects?|analysts?|managers?|leads?|directors?|head of|vp|cto|founding|interns?|recruiters?|marketing|sales|account executives?|devops|mlops|product|pms?|roles|positions|openings|specialists?|consultants?|writers?|administrators?|technicians?|technologists?|mts|member of technical staff|coordinators?|strategists?|staff|principal|senior|junior|sr|jr)\b`)
+	// roleWords mark a part of the header that names roles. Level words
+	// ("senior", "staff") aren't among them: alone they also describe the
+	// company ("20 staff").
+	roleWords     = regexp.MustCompile(`(?i)\b(?:engineers?|engineering|eng|engrs?|developers?|devs?|swes?|sres?|programmers?|scientists?|researchers?|designers?|architects?|analysts?|managers?|leads?|directors?|head of|vp|cto|ceo|coo|cfo|chief|president|interns?|recruiters?|marketing|marketers?|sales|account executives?|devops|mlops|pms?|roles|positions|openings|specialists?|consultants?|writers?|administrators?|technicians?|technologists?|mts|member of technical staff|coordinators?|strategists?)\b`)
 	parenthetical = regexp.MustCompile(`\([^()]*\)`)
 	leadingJoin   = regexp.MustCompile(`(?i)^(?:and|or)\s+`)
 	// notEmployer marks a first part that names a role, a request or a
 	// question instead of the employer ("Senior Backend Engineer | Remote").
-	notEmployer = regexp.MustCompile(`(?i)\b(?:engineers?|developers?|designers?|scientists?|co-?founders?|hiring|looking for)\b|[?!]`)
+	notEmployer = regexp.MustCompile(`(?i)\b(?:engineers?|developers?|designers?|scientists?|co-?founders?|hiring|looking for)\b|\?`)
 )
 
 // adState says whether a header could be read.
@@ -88,7 +92,7 @@ func parseAd(html string) (ad, adState) {
 			}
 		case isRoles(p):
 			roles = append(roles, splitRoles(p)...)
-		case money.MatchString(p):
+		case hasMoney(p):
 			pay = append(pay, p)
 		case isPlace(p):
 			places = append(places, p)
@@ -196,5 +200,8 @@ func hasLetterOrDigit(s string) bool {
 // pay outside them is about pay, even when it names a role ("$200k for the
 // Staff Engineer role").
 func isRoles(s string) bool {
-	return roleWords.MatchString(s) && len(s) <= maxRolesLen && !money.MatchString(parenthetical.ReplaceAllString(s, ""))
+	return roleWords.MatchString(s) && len(s) <= maxRolesLen && !hasMoney(parenthetical.ReplaceAllString(s, ""))
 }
+
+// hasMoney reports whether s states pay.
+func hasMoney(s string) bool { return money.MatchString(plan401k.ReplaceAllString(s, "")) }

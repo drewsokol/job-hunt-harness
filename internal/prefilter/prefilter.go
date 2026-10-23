@@ -59,6 +59,10 @@ type Input struct {
 	// DescriptionKnown is false while a board that lists jobs without
 	// descriptions (Greenhouse) hasn't had the description fetched.
 	DescriptionKnown bool
+	// SeveralRoles says the title may name several roles joined with
+	// normalize.RoleSeparator, as a Hacker News ad's does. Other titles are
+	// never split.
+	SeveralRoles bool
 }
 
 // Compiled is a validated filter, ready to evaluate jobs.
@@ -110,32 +114,54 @@ func (c *Compiled) Filters() Filters { return c.f }
 // Evaluate judges one job. Every failing rule is reported, not just the
 // first, so the candidate can see everything a filter change would affect.
 //
-// A title naming several roles (joined with normalize.RoleSeparator, as in
-// a Hacker News ad) is judged role by role, and the job gets the best
-// result: it passes if any role does.
+// A title naming several roles (Input.SeveralRoles) is judged role by role,
+// and the job gets the best result: it passes if any role does. Flags from
+// every role are kept, so a flagged role isn't hidden by a better one.
 func (c *Compiled) Evaluate(in Input) Result {
-	roles := strings.Split(in.Title, normalize.RoleSeparator)
+	var roles []string
+	if in.SeveralRoles {
+		roles = strings.Split(in.Title, normalize.RoleSeparator)
+	}
 	if len(roles) < 2 {
 		return c.evaluate(in)
 	}
-	var best Result
+	results := make([]Result, len(roles))
+	best := 0
 	for i, role := range roles {
 		in.Title = role
-		r := c.evaluate(in)
-		if i == 0 || better(r, best) {
-			best = r
+		results[i] = c.evaluate(in)
+		if better(results[i], results[best]) {
+			best = i
 		}
 	}
-	return best
+	out := results[best]
+	out.Reasons = slices.Clone(out.Reasons)
+	for i, r := range results {
+		for _, reason := range r.Reasons {
+			if i != best && reason.Effect == EffectFlag && !slices.Contains(out.Reasons, reason) {
+				out.Reasons = append(out.Reasons, reason)
+			}
+		}
+	}
+	return out
 }
 
 // better reports whether a is a better result for the job than b.
 func better(a, b Result) bool {
-	rank := map[Status]int{Drop: 0, Pending: 1, Pass: 2}
-	if rank[a.Status] != rank[b.Status] {
-		return rank[a.Status] > rank[b.Status]
+	if ra, rb := statusRank(a.Status), statusRank(b.Status); ra != rb {
+		return ra > rb
 	}
 	return a.Score > b.Score
+}
+
+func statusRank(s Status) int {
+	switch s {
+	case Pass:
+		return 2
+	case Pending:
+		return 1
+	}
+	return 0
 }
 
 func (c *Compiled) evaluate(in Input) Result {

@@ -52,6 +52,7 @@ func (s SearchSummary) Complete() bool { return len(s.Incomplete) == 0 && s.Stop
 
 type searchResult struct {
 	summaries []SearchSummary
+	lookups   int // across every source, within MaxLookups
 	out       store.FetchOutcome
 	prefilter []store.PrefilterOutcome
 	cleared   int
@@ -277,9 +278,10 @@ func (r *Refresher) lookup(ctx context.Context, sr *searchResult, sum *SearchSum
 	var gone []string
 refs:
 	for _, ref := range refs {
-		if sum.Lookups >= limit {
+		if sr.lookups >= limit {
 			break
 		}
+		sr.lookups++
 		sum.Lookups++
 		_, err := s.Lookup(ctx, ref.ExternalID)
 		switch {
