@@ -71,6 +71,7 @@ func TestParseLocation(t *testing.T) {
 		{name: "longer name isn't the place in it", raw: "Remote - New England", wantWorkplace: Remote, wantPlaces: []Place{{City: "New England"}}},
 		{name: "longer name of three words", raw: "Remote - New South Wales", wantWorkplace: Remote, wantPlaces: []Place{{City: "New South Wales"}}},
 		{name: "region name isn't the country in it", raw: "Remote - Central America", wantWorkplace: Remote, wantPlaces: []Place{{City: "Central America"}}},
+		{name: "places ruled out aren't places", raw: "Remote, not available in California", wantWorkplace: Remote, wantPlaces: []Place{{City: "not available California"}}},
 		{name: "phrase naming two places", raw: "Remote (US & Canada)", wantWorkplace: Remote, wantPlaces: []Place{country("US"), country("CA")}},
 		{name: "phrase naming two places in words", raw: "Remote - United States and Canada", wantWorkplace: Remote, wantPlaces: []Place{country("US"), country("CA")}},
 

@@ -99,6 +99,14 @@ func ParseFreeformLocation(raw, title, workplaceHint, countryHint string) Locati
 	return parseLocation(raw, title, workplaceHint, countryHint, freeform)
 }
 
+// ParseStatedLocation is ParseLocation for text that may not be about a
+// location at all, such as one part of a Hacker News ad's header: a known
+// place inside a longer phrase isn't searched for, so "Making US healthcare
+// cheaper" names no place.
+func ParseStatedLocation(raw string) Location {
+	return parseLocation(raw, "", "", "", entry)
+}
+
 func parseLocation(raw, title, workplaceHint, countryHint string, mode placeMode) Location {
 	var loc Location
 	var remote, hybrid, onsite bool
@@ -260,9 +268,13 @@ func parsePlaces(seg string, mode placeMode) []Place {
 // three words that are places jhh knows, longest runs first, none sharing a
 // word, in the order the phrase names them. A run that the word before it
 // makes part of a longer name ("New England", "Central America") doesn't
-// count, and "us" counts only in capitals ("work with us" isn't the US).
+// count, and "us" counts only in capitals ("work with us" isn't the US). A
+// phrase that rules places out ("not available in California") names none.
 func placesInWords(s string) []Place {
 	words := strings.Fields(s)
+	if slices.ContainsFunc(words, func(w string) bool { return exclusionWords[strings.ToLower(strings.Trim(w, edgeJunk))] }) {
+		return nil
+	}
 	used := make([]bool, len(words))
 	type found struct {
 		at int
@@ -302,6 +314,11 @@ func placesInWords(s string) []Place {
 var nameJoiners = map[string]bool{
 	"new": true, "north": true, "south": true, "east": true, "west": true, "central": true,
 	"northern": true, "southern": true, "eastern": true, "western": true, "latin": true,
+}
+
+// exclusionWords say a phrase names places the job is not in.
+var exclusionWords = map[string]bool{
+	"not": true, "except": true, "excluding": true, "excludes": true, "outside": true, "no": true,
 }
 
 // slashedPlaces splits "US/Canada" into its places when every piece is one
