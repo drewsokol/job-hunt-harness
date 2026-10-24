@@ -11,6 +11,7 @@ Services that need an account and key, such as Adzuna, were on the roadmap with 
 ## Decision
 
 - **The filters say what you're looking for; source settings say where to look.** Each source has a settings row: on or off, plus JSON settings the source checks (The Muse's queries, Hacker News's `months`, Adzuna's countries). The filters lose their `search` section, and a migration moves existing ones over without changing what runs.
+- **Sources that need no setup are on by default.** One that needs setup (The Muse's queries, Adzuna's key) is off until it has it, and setting it up turns it on.
 - **Off pauses.** A paused source keeps its settings and its jobs; nothing from it is refreshed or closed until it's back on.
 - **Search sources have switches; board sources don't.** Boards are already turned on and off per company.
 - **The dashboard and the agent both change sources.** `list_sources` and `set_source` are MCP tools, and the Sources screen uses the same core functions. Every change is recorded with who made it, as for the filters.
