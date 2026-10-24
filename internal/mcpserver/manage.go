@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -74,6 +75,46 @@ func parseFilters(raw map[string]any) (prefilter.Filters, error) {
 		return f, &core.InputError{Problems: []string{"filters: " + strings.TrimPrefix(err.Error(), "invalid filters JSON: ")}}
 	}
 	return f, err
+}
+
+// sourceOut is one source as list_sources and set_source return it.
+type sourceOut struct {
+	Name             string          `json:"name"`
+	Title            string          `json:"title"`
+	Kind             string          `json:"kind"`
+	Status           string          `json:"status,omitempty"`
+	Setup            string          `json:"needs,omitempty"`
+	Settings         json.RawMessage `json:"settings,omitempty"`
+	Companies        *int            `json:"companies,omitempty"`
+	EnabledCompanies *int            `json:"companies_read,omitempty"`
+	LastRun          string          `json:"last_run,omitempty"`
+	LastPostings     *int            `json:"last_run_postings,omitempty"`
+	Untrusted        *struct {
+		LastError string `json:"last_error"` // may quote the service's reply
+	} `json:"untrusted,omitempty"`
+	ChangedBy string `json:"changed_by,omitempty"`
+	ChangedAt string `json:"changed_at,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+func newSourceOut(info core.SourceInfo) sourceOut {
+	o := sourceOut{Name: info.Name, Title: info.Title, Kind: info.Kind, Status: info.Status, Setup: info.Setup, Settings: info.Settings}
+	if info.Kind == core.KindBoard {
+		o.Companies, o.EnabledCompanies = &info.Companies, &info.EnabledCompanies
+		return o
+	}
+	if !info.LastRunAt.IsZero() {
+		o.LastRun, o.LastPostings = timeOrEmpty(info.LastRunAt), &info.LastPostings
+	}
+	if info.LastError != "" {
+		o.Untrusted = &struct {
+			LastError string `json:"last_error"`
+		}{info.LastError}
+	}
+	if info.UpdatedBy != store.ActorSystem && info.UpdatedBy != "" {
+		o.ChangedBy, o.ChangedAt, o.Reason = string(info.UpdatedBy), timeOrEmpty(info.UpdatedAt), info.Reason
+	}
+	return o
 }
 
 func (t *tools) addManageTools(s *mcp.Server) {
@@ -192,6 +233,42 @@ func (t *tools) addManageTools(s *mcp.Server) {
 			FilteredOut int        `json:"moved_to_filtered_out"`
 			Waiting     int        `json:"waiting_for_description"`
 		}{version, preview(p), len(o.Passed), len(o.FilteredOut), len(o.Waiting)}, nil
+	})
+
+	add(t, s, "list_sources", reads, func(ctx context.Context, _ call, _ noInput) (any, error) {
+		ss, err := core.ListSources(ctx, t.Store, slices.Collect(maps.Keys(t.Sources)))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]sourceOut, 0, len(ss))
+		for _, info := range ss {
+			out = append(out, newSourceOut(info))
+		}
+		return struct {
+			Sources []sourceOut `json:"sources"`
+		}{out}, nil
+	})
+
+	type setSourceIn struct {
+		Name     string         `json:"name" jsonschema:"the search source: hackernews or themuse"`
+		Enabled  *bool          `json:"enabled,omitempty" jsonschema:"true to turn it on, false to pause it; leave out to keep it as it is"`
+		Settings map[string]any `json:"settings,omitempty" jsonschema:"the source's whole settings object, replacing the current one; leave out to keep them"`
+		Reason   string         `json:"reason,omitempty" jsonschema:"one sentence: why, shown to the user"`
+	}
+	add(t, s, "set_source", writes, func(ctx context.Context, c call, in setSourceIn) (any, error) {
+		u := core.SourceUpdate{Enabled: in.Enabled, Reason: in.Reason}
+		if in.Settings != nil {
+			b, err := json.Marshal(in.Settings)
+			if err != nil {
+				return nil, &core.InputError{Problems: []string{"settings: " + err.Error()}}
+			}
+			u.Settings = b
+		}
+		info, err := core.SetSource(ctx, t.Store, c.by, in.Name, u)
+		if err != nil {
+			return nil, err
+		}
+		return newSourceOut(info), nil
 	})
 
 	type companiesIn struct {

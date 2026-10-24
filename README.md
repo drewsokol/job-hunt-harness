@@ -56,12 +56,14 @@ JHH_DATA_DIR=./tmp-data go run ./cmd/jhh companies add "Example Co"   # find its
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh refresh            # fetch the boards you added
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh filters preview examples/filters.json   # what would these filters keep?
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh filters set examples/filters.json --rationale "trying the example"
-JHH_DATA_DIR=./tmp-data go run ./cmd/jhh refresh            # runs the filters' searches (The Muse, Hacker News); fetches descriptions for jobs that passed stage 1
+JHH_DATA_DIR=./tmp-data go run ./cmd/jhh sources            # where jhh searches: Hacker News is on from the start
+JHH_DATA_DIR=./tmp-data go run ./cmd/jhh sources set themuse examples/themuse.json   # give The Muse a query
+JHH_DATA_DIR=./tmp-data go run ./cmd/jhh refresh            # runs the search sources that are on; fetches descriptions for jobs that passed stage 1
 JHH_DATA_DIR=./tmp-data go run ./cmd/jhh candidates         # the jobs that passed, best first
 JHH_DATA_DIR=./tmp-data JHH_UI_PORT=7979 go run ./cmd/jhh dashboard   # the dashboard, on a port of its own
 ```
 
-jhh ships no list of companies: yours starts empty and grows from what search finds and what you add. Normally your agent writes the filters through MCP; the `filters` command is for checking them by hand. `examples/` holds made-up examples.
+jhh ships no list of companies: yours starts empty and grows from what search finds and what you add. Normally your agent writes the filters and sets up the sources through MCP; the `filters` and `sources` commands are for checking them by hand. `examples/` holds made-up examples.
 
 Tests never touch the network: each source is tested against made-up fixtures by the shared conformance suite in `internal/sources/conformance`.
 

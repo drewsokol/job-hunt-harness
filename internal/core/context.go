@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/store"
@@ -54,7 +53,7 @@ type SetupState struct {
 	ProfileVersion int64  // 0 when there is none
 	ResumeVersion  int64
 	FiltersVersion int64
-	SearchQueries  int
+	SearchesOn     int // search sources that are on
 	Counts         store.SetupCounts
 	// Missing lists the next steps, in order, in words the agent can pass on.
 	Missing []string
@@ -79,9 +78,12 @@ func GetSetupState(ctx context.Context, s *store.Store) (SetupState, error) {
 		return st, err
 	} else if ok {
 		st.FiltersVersion = f.Version
-		st.SearchQueries = searchQueryCount(f.Filters)
 	}
-	var err error
+	ss, err := ListSources(ctx, s, nil)
+	if err != nil {
+		return st, err
+	}
+	st.SearchesOn = SearchesOn(ss)
 	if st.Counts, err = s.SetupCounts(ctx); err != nil {
 		return st, err
 	}
@@ -93,28 +95,11 @@ func GetSetupState(ctx context.Context, s *store.Store) (SetupState, error) {
 	missing(st.ResumeVersion == 0, "resume: no resume text yet; ask whether there's one you can read, then call set_resume_text")
 	missing(st.ProfileVersion == 0, "profile: no profile yet; interview the user, draft it, and save it with update_profile once they agree")
 	missing(st.FiltersVersion == 0, "filters: none set; draft them, run preview_filters, show the user the effect, then set_filters")
-	missing(st.FiltersVersion != 0 && st.SearchQueries == 0 && st.Counts.BoardCompanies == 0,
-		"sources: no search queries and no company boards, so refresh finds nothing; add search.themuse queries or search.hackernews to the filters, or companies with add_company")
+	missing(st.FiltersVersion != 0 && st.SearchesOn == 0 && st.Counts.BoardCompanies == 0,
+		"sources: no search source is on and no company boards are read, so refresh finds nothing; turn one on with set_source (list_sources shows them), or add companies with add_company")
 	missing(st.Counts.LastRefreshAt.IsZero(), "refresh: jobs were never fetched; call refresh_jobs")
 	missing(st.Counts.Screenings == 0, "screening: no job has been screened yet; follow the screen_new_jobs playbook")
 	return st, nil
-}
-
-func searchQueryCount(filters json.RawMessage) int {
-	var f struct {
-		Search struct {
-			TheMuse    []json.RawMessage `json:"themuse"`
-			HackerNews json.RawMessage   `json:"hackernews"`
-		} `json:"search"`
-	}
-	if json.Unmarshal(filters, &f) != nil {
-		return 0
-	}
-	n := len(f.Search.TheMuse)
-	if len(f.Search.HackerNews) > 0 && string(f.Search.HackerNews) != "null" {
-		n++ // reading the hiring threads counts as one search
-	}
-	return n
 }
 
 func formatOffset(seconds int) string {

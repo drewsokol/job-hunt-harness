@@ -195,7 +195,10 @@ type WhatsNewReport struct {
 	ChangedApplications []store.JobRow // closed or reposted
 	OpenFlags           int
 	Suspect             []store.Company
-	LastRefreshAt       time.Time
+	// PausedSearches are the search sources someone turned off, so their
+	// jobs aren't being refreshed.
+	PausedSearches []string
+	LastRefreshAt  time.Time
 }
 
 // WhatsNew reports what changed since then, or since the last call when
@@ -233,5 +236,10 @@ func WhatsNew(ctx context.Context, s *store.Store, by store.Actor, since string)
 	if r.Suspect, err = s.SuspectCompanies(ctx); err != nil {
 		return r, err
 	}
+	ss, err := ListSources(ctx, s, nil)
+	if err != nil {
+		return r, err
+	}
+	r.PausedSearches = PausedSearches(ss)
 	return r, s.SetSetting(ctx, by, whatsNewSetting, utc.Format(r.Now))
 }

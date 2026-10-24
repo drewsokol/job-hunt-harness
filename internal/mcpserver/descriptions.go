@@ -5,7 +5,7 @@ package mcpserver
 // are worded as carefully as the UI, and kept short, because every client
 // sends them with each request.
 var descriptions = map[string]string{
-	"get_setup_state": `What exists and what is still missing: profile, resume, filters, search queries, companies, memories, jobs, screenings, and the next setup steps in order. Also the current UTC time and this machine's time zone, for converting the user's local times. Start here when the user asks to initialize or set up jhh.`,
+	"get_setup_state": `What exists and what is still missing: profile, resume, filters, search sources that are on, companies, memories, jobs, screenings, and the next setup steps in order. Also the current UTC time and this machine's time zone, for converting the user's local times. Start here when the user asks to initialize or set up jhh.`,
 
 	"get_playbook": `The step-by-step instructions for a workflow, for clients that don't offer MCP prompts. initialize: the setup interview, from resume to first screened jobs; run it when the user asks to initialize or set up jhh. screen_new_jobs: how to rate jobs against the profile.`,
 
@@ -53,11 +53,15 @@ var descriptions = map[string]string{
 
 	"open_dashboard": `Open jhh's dashboard, where the user reviews jobs, tracks applications and outreach, and sees the profile, memories and filters you set up. Makes sure the dashboard is running, opens it in the browser (unless open_browser is false), and returns the link. Call it when the user asks to see their dashboard or jobs.`,
 
-	"refresh_jobs": `Fetch new jobs now: every enabled company's board and every search in the filters, then judge them with the filters. Takes from seconds to a few minutes. companies narrows it to some companies, by name or board key, and skips searching. Returns counts; the jobs are in list_candidates.`,
+	"refresh_jobs": `Fetch new jobs now: every enabled company's board and every search source that is on (see list_sources), then judge them with the filters. Takes from seconds to a few minutes. companies narrows it to some companies, by name or board key, and skips searching. Returns counts; the jobs are in list_candidates.`,
 
 	"preview_filters": `Show what a filters change would do to the jobs already stored, without saving it: how many pass now and would pass, and examples of jobs newly dropped and newly kept with the reasons. drops_tracked counts dropped jobs the user is already reviewing or applying to, which usually means a filter is wrong. Call it before set_filters and show the user the result.`,
 
-	"set_filters": `Replace the active filters with a new version and judge every stored job with them; nothing is fetched. Send the whole filters object (see get_context for the current one) and a one-sentence rationale. Show the user the change and the preview_filters result, and save only after they agree. Returns the version and its effect. The search section says where refresh looks beyond company boards: "themuse" holds queries for The Muse, and "hackernews": {"months": 2} reads every ad in the latest monthly "Ask HN: Who is hiring?" threads (1 to 3 months; the rest of the filters judge them).`,
+	"set_filters": `Replace the active filters with a new version and judge every stored job with them; nothing is fetched. Send the whole filters object (see get_context for the current one) and a one-sentence rationale. Show the user the change and the preview_filters result, and save only after they agree. Returns the version and its effect. The filters only judge jobs; where jhh looks for them is set per source with set_source.`,
+
+	"list_sources": `Where jhh looks for jobs, and whether each source is on. Search sources find jobs across employers: hackernews (every ad in the latest monthly "Ask HN: Who is hiring?" threads) and themuse (The Muse's jobs API, searched by its own categories). Each has a status (on, off, or needs setup, with what it needs), its settings, its last run and who last changed it. Board sources (Greenhouse, Lever, Ashby) read the boards of the companies added, with how many companies use each; they are turned on and off per company.`,
+
+	"set_source": `Turn a search source on or off, or replace its settings. Turning one off pauses it: its settings and jobs stay, and nothing from it is refreshed or closed until it's back on. settings replace the whole settings object. hackernews: {"months": 2} reads the latest 1 to 3 monthly threads (default 2). themuse: {"queries": [{"categories": [...], "levels": [...], "locations": [...], "pages": n}]}: up to 10 queries, each with categories, locations or both, using names from The Muse's lists (a location also returns every remote job; pages optionally caps the pages of 20 read). A source with what it needs is on unless someone turned it off. Ask the user before turning a source off or changing what it searches. Keys for services that need one are entered only in jhh's dashboard, never here.`,
 
 	"list_companies": `The companies jhh knows: those whose job boards it reads (with the board, whether reading is enabled, open postings and whether the last fetch failed) and those search found. A company search found has its name inside "untrusted", since it comes from a listing.`,
 

@@ -22,7 +22,7 @@ const FLAG_KIND = {
   hidden_text: "Text hidden from human readers",
   unclear: "Text addressed to an AI",
 };
-const TABS = [["review", "To review"], ["applied", "Applied"], ["outreach", "Outreach"], ["archive", "Archive"], ["profile", "Profile"]];
+const TABS = [["review", "To review"], ["applied", "Applied"], ["outreach", "Outreach"], ["archive", "Archive"], ["sources", "Sources"], ["profile", "Profile"]];
 const ARCHIVE = [["archive", "Skipped and closed"], ["screened_out", "Screened out"], ["filtered_out", "Filtered out"]];
 const EVENTS = {
   job_added: "Found", posting_linked: "Another posting joined this job", screened: "Rated", applied_at_set: "Applied date set",
@@ -35,7 +35,7 @@ const EVENTS = {
 const state = {
   signedOut: false, error: "", loaded: false,
   tab: "review", sub: "archive", fit: "all",
-  info: null, lists: {}, outreach: null, profile: null,
+  info: null, lists: {}, outreach: null, profile: null, sources: null,
   details: new Map(), open: new Set(),
   selected: 0, picked: new Set(),
   form: null, formError: "", outreachFor: null,
@@ -150,6 +150,7 @@ async function load() {
     const work = listsFor(state.tab).map(loadList);
     if (state.tab === "outreach") work.push(api("GET", "/api/outreach").then((d) => { state.outreach = d; }));
     if (state.tab === "profile") work.push(api("GET", "/api/profile").then((d) => { state.profile = d; }));
+    if (state.tab === "sources") work.push(api("GET", "/api/sources").then((d) => { state.sources = d.sources; }));
     for (const id of state.open) work.push(loadDetail(id));
     await Promise.all(work);
     state.loaded = true;
@@ -316,7 +317,7 @@ function render() {
     view.replaceChildren(state.error ? empty("jhh isn't answering", state.error) : empty("Loading", "Your jobs, applications and outreach will appear here."));
     return;
   }
-  const views = { review: viewReview, applied: viewApplied, outreach: viewOutreach, archive: viewArchive, profile: viewProfile };
+  const views = { review: viewReview, applied: viewApplied, outreach: viewOutreach, archive: viewArchive, sources: viewSources, profile: viewProfile };
   view.replaceChildren(...[].concat(views[state.tab]()));
   const sel = document.querySelector(".row.selected");
   if (sel && state.scrollToSelected) {
@@ -387,7 +388,7 @@ function renderTabs() {
   const c = state.info ? state.info.counts : null;
   const counts = c && {
     review: c.review, applied: c.applied, outreach: state.info.outreach,
-    archive: c.archive + c.screened_out + c.filtered_out, profile: "",
+    archive: c.archive + c.screened_out + c.filtered_out, sources: "", profile: "",
   };
   $("#tabs").replaceChildren(...TABS.map(([k, label]) =>
     h("button", { class: "tab", role: "tab", type: "button", "aria-selected": String(state.tab === k), onclick: () => switchTab(k) },
@@ -441,6 +442,9 @@ function badges(j) {
   if (j.closed) out.push(pill("st-idle", "Posting closed", `Closed ${fmtDate(j.closed)}`));
   if (j.reposted) out.push(pill("st-warn", "Reposted", `Posted again ${fmtDate(j.reposted)}`));
   if (j.company_suspect) out.push(pill("st-warn", "Suspect feed", "This company's last fetch looked wrong, so jhh isn't closing its jobs."));
+  if (j.via && !j.closed && state.info && (state.info.paused_sources || []).includes(j.via)) {
+    out.push(pill("st-idle", "Source paused", `${j.via} is turned off, so this job isn't being refreshed. Turn it back on under Sources.`));
+  }
   if (j.applied && j.status === "applied") out.push(h("span", { class: "mono hint" }, `${daysSince(j.applied)}d ago`));
   return out;
 }
@@ -873,6 +877,74 @@ function viewProfile() {
         h("pre", { class: "code" }, JSON.stringify(p.filters.filters, null, 2))]
       : h("p", { class: "hint" }, "No filters yet. Your agent drafts them with you during setup."));
   return [intro, profile, memories, filters];
+}
+
+/* ---------- sources ---------- */
+
+const SOURCE_STATUS = { on: ["st-ok", "On"], off: ["st-idle", "Off"], "needs setup": ["st-warn", "Needs setup"] };
+
+// setSource changes a search source; back undoes it.
+async function setSource(src, patch, msg, back) {
+  try {
+    await api("PATCH", `/api/sources/${encodeURIComponent(src.name)}`, patch);
+    toast(msg, back && (() => api("PATCH", `/api/sources/${encodeURIComponent(src.name)}`, back)));
+  } catch (e) { toast(e.message); }
+  reload();
+}
+
+// museQueries shows The Muse's queries as text.
+function museQueries(settings) {
+  const qs = (settings && settings.queries) || [];
+  if (!qs.length) return h("p", { class: "hint" }, "No queries yet. Ask your agent, for example: \"search The Muse for software engineering jobs in Columbus, OH\".");
+  return h("ul", { class: "memories" }, qs.map((q) => h("li", null,
+    h("span", null, [
+      q.categories && q.categories.length ? `Categories: ${q.categories.join(", ")}` : "",
+      q.levels && q.levels.length ? `Levels: ${q.levels.join(", ")}` : "",
+      q.locations && q.locations.length ? `Locations: ${q.locations.join(", ")}` : "",
+      q.pages ? `At most ${plural(q.pages, "page", "pages")}` : "",
+    ].filter(Boolean).join(" · ")))));
+}
+
+function searchSource(src) {
+  const [cls, label] = SOURCE_STATUS[src.status] || ["st-idle", src.status];
+  const on = src.status !== "off";
+  // A source that needs setup turns on once it's set up; until then there's nothing to switch.
+  const toggle = src.status === "needs setup" ? null : h("button", { class: "btn", type: "button",
+    onclick: () => setSource(src, { enabled: !on }, on ? `Paused ${src.title}. Its jobs stay; nothing from it is refreshed until it's back on.` : `Turned ${src.title} on. It runs on the next refresh.`,
+      { enabled: on }) }, on ? "Turn off" : "Turn on");
+  let settings = null;
+  if (src.name === "hackernews") {
+    const months = (src.settings && src.settings.months) || 2;
+    settings = h("label", { class: "inline" }, "Threads to read",
+      h("select", { class: "compact", "aria-label": "How many monthly threads to read",
+        onchange: (e) => setSource(src, { settings: { months: Number(e.target.value) } }, "Saved. The next refresh reads that many threads.", { settings: { months } }) },
+        [1, 2, 3].map((n) => h("option", { value: String(n), selected: n === months }, n === 1 ? "The latest month" : `The latest ${n} months`))));
+  } else if (src.name === "themuse") {
+    settings = museQueries(src.settings);
+  }
+  const last = src.last_run
+    ? h("p", { class: "hint" }, `Last ran ${fmtDate(src.last_run)}: ${plural(src.last_postings, "posting", "postings")} found.`)
+    : h("p", { class: "hint" }, "Hasn't run yet.");
+  return h("section", { class: "panel" },
+    h("div", { class: "row-head" }, h("h2", null, src.title), pill(cls, label), h("span", { class: "grow" }), toggle),
+    src.setup ? h("p", { class: "reason" }, `Needs ${src.setup.replace(/^needs /, "")}.`) : null,
+    settings, last,
+    src.last_error ? h("p", { class: "reason" }, `Last error: ${src.last_error}`) : null,
+    src.by ? h("p", { class: "hint" }, `Last changed by ${who(src.by)} on ${fmtDate(src.at)}${src.reason ? `: ${src.reason}` : ""}`) : null);
+}
+
+function viewSources() {
+  const ss = state.sources;
+  if (!ss) return empty("Loading", "");
+  const intro = h("div", { class: "banner info" },
+    "Where jhh looks for jobs. Your filters judge what every source finds. Turning a source off pauses it: its jobs stay, and nothing from it is refreshed or closed until it's back on.");
+  const search = ss.filter((s) => s.kind === "search").map(searchSource);
+  const boards = ss.filter((s) => s.kind === "board");
+  const boardPanel = h("section", { class: "panel" }, h("h2", null, "Company boards"),
+    h("p", { class: "hint" }, "jhh reads the Greenhouse, Lever and Ashby boards of the companies you add. Boards are turned on and off for each company: ask your agent, or use jhh companies."),
+    h("ul", { class: "memories" }, boards.map((b) => h("li", null, h("span", null, b.title),
+      h("span", { class: "meta" }, b.companies ? `${plural(b.companies, "company", "companies")}, ${b.enabled_companies} read` : "no companies")))));
+  return [intro, ...search, boardPanel];
 }
 
 /* ---------- keyboard ---------- */

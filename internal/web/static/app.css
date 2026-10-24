@@ -78,6 +78,7 @@ kbd { font: 11px var(--font-mono); border: 1px solid var(--line); border-bottom-
 .row.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .row-main { min-width: 0; display: grid; gap: 4px; }
 .row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.grow { flex: 1; }
 .num { font: 12px var(--font-mono); color: var(--muted); }
 .company { font-weight: 600; }
 .title { color: var(--fg); text-decoration: none; overflow-wrap: anywhere; }

@@ -216,7 +216,7 @@ func TestDoctorReportsDatabase(t *testing.T) {
 	code := doctor(context.Background(), outW)
 	outW.Close()
 	<-done
-	if code != 0 || !strings.Contains(out.String(), "schema v2, integrity ok") {
+	if code != 0 || !strings.Contains(out.String(), "schema v3, integrity ok") {
 		t.Errorf("doctor exit %d, output:\n%s", code, out.String())
 	}
 }
@@ -256,6 +256,12 @@ func TestCommands(t *testing.T) {
 		{args: []string{"filters", "set", "../../examples/filters.json", "--rationale", "test"}, code: 0, inStdout: "Saved filters version 1."},
 		{args: []string{"filters"}, code: 0, inStdout: "Filters version 1, set by user"},
 		{args: []string{"candidates"}, code: 0, inStdout: "0 open jobs are unscreened."},
+		{args: []string{"sources"}, code: 0, inStdout: "themuse      needs setup"},
+		{args: []string{"sources", "off", "hackernews"}, code: 0, inStdout: "hackernews   off"},
+		{args: []string{"sources", "set", "themuse", "../../examples/themuse.json"}, code: 0, inStdout: `themuse      on           {"queries":[{"categories":["Software Engineering","Data Science"]`},
+		{args: []string{"sources", "on", "greenhouse"}, code: 1, inStderr: "set_company_enabled"},
+		{args: []string{"sources", "frobnicate"}, code: 2, inStderr: "usage:"},
+		{args: []string{"sources"}, code: 0, inStdout: "greenhouse   board        0 companies"},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {

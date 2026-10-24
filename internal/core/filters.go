@@ -9,7 +9,6 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
-	"github.com/drewsokol/job-hunt-harness/internal/sources/themuse"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 )
 
@@ -137,9 +136,6 @@ func PreviewFilters(ctx context.Context, s *store.Store, f prefilter.Filters) (F
 // stage 1 makes unneeded.
 func preview(ctx context.Context, s *store.Store, f prefilter.Filters) (FilterPreview, []store.PrefilterDecision, []int64, error) {
 	var p FilterPreview
-	if err := checkSearch(f); err != nil {
-		return p, nil, nil, err
-	}
 	c, err := prefilter.Compile(f)
 	if err != nil {
 		return p, nil, nil, err
@@ -188,28 +184,6 @@ func preview(ctx context.Context, s *store.Store, f prefilter.Filters) (FilterPr
 		}
 	}
 	return p, ds, unneeded, nil
-}
-
-// checkSearch checks the search queries in a search source's own terms
-// (category and level names), which the filters package doesn't know.
-func checkSearch(f prefilter.Filters) error {
-	if f.Search == nil {
-		return nil
-	}
-	var problems []string
-	for i, q := range f.Search.TheMuse {
-		for _, p := range themuse.Check(museQuery(q)) {
-			problems = append(problems, fmt.Sprintf("search.themuse[%d].%s", i, p))
-		}
-	}
-	if len(problems) > 0 {
-		return &prefilter.ValidationError{Problems: problems}
-	}
-	return nil
-}
-
-func museQuery(q prefilter.MuseQuery) sources.Query {
-	return sources.Query{Categories: q.Categories, Levels: q.Levels, Locations: q.Locations}
 }
 
 // tracked reports whether the candidate has acted on a job in this status.

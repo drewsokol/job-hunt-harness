@@ -77,7 +77,7 @@ func (t *tools) addProfileTools(s *mcp.Server) {
 			ProfileVersion int64    `json:"profile_version"`
 			ResumeVersion  int64    `json:"resume_version"`
 			FiltersVersion int64    `json:"filters_version"`
-			SearchQueries  int      `json:"search_queries"`
+			SearchesOn     int      `json:"search_sources_on"`
 			Companies      int      `json:"companies"`
 			BoardCompanies int      `json:"companies_with_boards"`
 			Memories       int      `json:"memories"`
@@ -88,7 +88,7 @@ func (t *tools) addProfileTools(s *mcp.Server) {
 			Missing        []string `json:"next_steps"`
 		}{
 			timeOrEmpty(st.Now), st.TimeZone, st.UTCOffset, st.ProfileVersion, st.ResumeVersion, st.FiltersVersion,
-			st.SearchQueries, c.Companies, c.BoardCompanies, c.Memories, c.Inferred, c.Jobs, c.Screenings,
+			st.SearchesOn, c.Companies, c.BoardCompanies, c.Memories, c.Inferred, c.Jobs, c.Screenings,
 			timeOrEmpty(c.LastRefreshAt), orEmpty(st.Missing),
 		}, nil
 	})

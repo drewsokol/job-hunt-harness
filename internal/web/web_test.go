@@ -503,6 +503,40 @@ func TestProfilePage(t *testing.T) {
 	}
 }
 
+func TestSourcesPage(t *testing.T) {
+	f := newFixture(t)
+	var list struct {
+		Sources []sourceJSON `json:"sources"`
+	}
+	f.ok("GET", "/api/sources", nil, &list)
+	if len(list.Sources) != 2 || list.Sources[0].Name != "hackernews" || list.Sources[0].Status != core.SourceOn ||
+		list.Sources[1].Status != core.SourceNeedsSetup {
+		t.Fatalf("sources %+v", list.Sources)
+	}
+
+	var src sourceJSON
+	f.ok("PATCH", "/api/sources/hackernews", map[string]any{"enabled": false}, &src)
+	if src.Status != core.SourceOff || src.By != "user" {
+		t.Errorf("after turning it off: %+v", src)
+	}
+	f.ok("PATCH", "/api/sources/hackernews", map[string]any{"settings": map[string]any{"months": 3}}, &src)
+	if string(src.Settings) != `{"months":3}` || src.Status != core.SourceOff {
+		t.Errorf("after changing months: %+v", src)
+	}
+	var st stateJSON
+	f.ok("GET", "/api/state", nil, &st)
+	if len(st.Paused) != 1 || st.Paused[0] != "Hacker News" {
+		t.Errorf("paused sources %v", st.Paused)
+	}
+
+	if code := f.do("PATCH", "/api/sources/hackernews", map[string]any{"settings": map[string]any{"months": 0.5}}, nil); code != http.StatusBadRequest {
+		t.Errorf("bad settings: status %d", code)
+	}
+	if code := f.do("PATCH", "/api/sources/hackernews", map[string]any{"key": "secret"}, nil); code != http.StatusBadRequest {
+		t.Errorf("a field the endpoint doesn't take: status %d", code)
+	}
+}
+
 func TestLiveUpdates(t *testing.T) {
 	f := newFixture(t)
 	req, _ := http.NewRequest("GET", f.base+"/api/events", nil)

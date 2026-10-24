@@ -45,11 +45,13 @@ Show the user the full text. Save it with `update_profile` only after they agree
 
 Filters are cheap rules that run before you screen anything. They should drop what is clearly wrong and keep anything plausible: you screen what passes, and a job the filters drop is never seen. When unsure, let it through.
 
-Call `get_context` to see the current filters, if any. Draft new ones from the profile: title words to require and exclude, levels, where remote and on-site work is fine, employment types to exclude, keywords, the pay floor, title words to flag, and where to search beyond company boards: The Muse for the user's field and area, and Hacker News's monthly "Who is hiring?" threads (`"search": {"hackernews": {}}`), which suit startups and tech roles. Then:
+Call `get_context` to see the current filters, if any. Draft new ones from the profile: title words to require and exclude, levels, where remote and on-site work is fine, employment types to exclude, keywords, the pay floor and title words to flag. Then:
 
 1. Call `preview_filters` and show the user the counts and the examples it returns.
 2. If it drops jobs that look right, loosen the rule and preview again.
 3. Save with `set_filters` and a one-sentence rationale, after the user agrees.
+
+Then decide where jhh searches beyond company boards. Call `list_sources`. Hacker News's monthly "Who is hiring?" threads are on from the start and suit startups and tech roles; ask whether the user wants them, and turn them off with `set_source` if not. The Muse needs queries in its own categories, levels and locations: suggest one or two for the user's field and area, and save them with `set_source` once the user agrees. The filters judge whatever every source finds.
 
 ## 6. Companies
 
