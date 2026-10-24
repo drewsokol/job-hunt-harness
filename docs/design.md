@@ -142,7 +142,7 @@ What The Muse's API offers, checked on 2026-10-19:
 - **Listings stay up long after they're filled.** In that query, 232 of 779 jobs were published more than 90 days earlier, some in 2024.
 
 How jhh uses it:
-- **Queries live in the filters**, under `search.themuse` (section 3), so they are versioned with the rest of what the agent writes, with a rationale.
+- **Queries live in The Muse's source settings** (see "Turning sources on and off"), which the agent sets with `set_source` and every change to which is recorded with its author. Until that lands they live in the filters, under `search.themuse`.
 - **Every page of every query is read on each refresh**, within 250 requests per refresh in all, half the hourly limit. A query can cap its own `pages`, but by default it reads them all: the results aren't in date order, so there's no way to ask only for new jobs, and reading every page is what lets jhh see new jobs and notice jobs that are gone. The Columbus query above takes 39 requests. A 403 means the hourly limit was reached: searching stops and the rest waits for the next refresh.
 - **Old listings are skipped.** A result published more than 90 days ago isn't stored, so stale listings never reach the agent. Board postings have no such rule: a board lists only what's open.
 - **Closing.** When every query was read in full, a Muse posting that none of them returned is closed, like a posting missing from a board. If a query has more pages than its cap, or searching stopped early, nothing is closed, and refresh says which query to narrow. Postings of jobs you are pursuing (`review` onward) are not closed just for missing from the queries: jhh looks each one up (`Lookup`, at most 25 a refresh) and closes it only when The Muse says it's gone. So changing your queries never marks a job you applied to as closed.
@@ -156,12 +156,41 @@ How jhh uses it:
 - **Ads are free text.** By convention the first line is a header such as `Exampleco | Senior Engineer | Remote (US) | $150k-$180k | Full-time`; about 9 in 10 ads follow it, in any order after the employer, and some use dashes instead of bars. A deleted ad disappears from the thread, and its own item returns 404 or no text.
 
 How jhh uses it:
-- **Turned on in the filters** with `"search": {"hackernews": {"months": 2}}` (1–3 months, default 2, so the days after a thread opens still see last month's ads). There's nothing to search on Hacker News's side: every ad in those threads goes through the rest of the filters.
+- **Turned on in its source settings**, whose one setting is `months` (1–3, default 2, so the days after a thread opens still see last month's ads). Until that lands it's turned on in the filters with `"search": {"hackernews": {"months": 2}}`. There's nothing to search on Hacker News's side: every ad in those threads goes through the rest of the filters.
 - **One ad is one job.** The header's first part is the employer, with web addresses and notes in parentheses removed ("Exampleco (YC W25)" is Exampleco). The other parts are sorted by what they say: roles (a short part with a role word such as "engineer" or "designer", and any pay in parentheses; level words such as "staff" alone don't count, since "20 staff" describes the company), places and workplace (a part jhh's location parser reads as remote, hybrid, onsite or a known country or region), pay (but not a figure about funding or revenue, such as "$250k seed raised"; pay stated in the ad's text is then read from there), and employment type. The header is free text, so only places jhh recognizes count: "Remote (async)" or "Remote (some overlap with PST)" is remote with no place, never a city named "async". Several roles become one title joined with " · ", which the prefilter judges role by role. A header that names no role leaves the title empty; the dashboard shows "Roles in the post", and the prefilter doesn't drop it for its title.
 - **Ads jhh can't read are left out and counted:** a first line without separators, an employer part that's a sentence, a question or a role ("Senior Engineer | Remote"). In October 2026 that was 29 of 266 comments, mostly replies and remarks rather than ads; a few prose ads were among them, which the agent can still add with `add_jobs`. An ad whose header says it's closed or filled is treated as gone.
 - **The link is the ad's page on Hacker News**, which says how to apply (an email address or a careers page). The agent mentions it when screening, and offers `add_company` when the ad links to a Greenhouse, Lever or Ashby board.
 - **Closing** follows the shared rules: when every thread was read, an ad missing from them is closed, so last month's ads close once their thread falls out of `months`. Pursued ads are looked up and closed only when deleted or marked filled.
 - **Dedupe:** Hacker News allows one ad per company in each thread, so an employer's new ad continues its earlier one when they share a role, or when either names no role; the job takes the newest ad's roles. An ad for entirely different roles is a job of its own. (Text alone can't decide this: descriptions are only kept for jobs that pass stage 1.) When the employer's board is added later, a board posting joins the ad's job if its title matches one of the ad's roles, and the job takes the board's title: the board has confirmed which opening it is, so the ad's other roles no longer count for or against it.
+
+### Turning sources on and off (planned)
+
+Added after the MVP; see [decision 0007](decisions/0007-source-settings.md). **The filters say what you're looking for; the source settings say where to look.** Until now a search source ran only when the filters named it (`search.themuse`, `search.hackernews`), so whether Hacker News was read was part of what the agent wrote into the filters. That moves to a settings row per source, which you can change in the dashboard and the agent can change through MCP.
+
+- **Every source jhh ships is listed**, with its status: `on`, `off`, or `needs setup` (it can't run yet: The Muse with no query, Adzuna with no key). Each also shows when it last ran, what that run found, and its last error.
+- **Off pauses a source; it doesn't forget it.** Its settings and its jobs stay. Jobs from a paused source are neither refreshed nor closed, since nothing was read, and the dashboard marks them "source paused". Turning it back on resumes where it left off.
+- **Search sources** (The Muse, Hacker News, Adzuna) have a switch each. **Board sources** (Greenhouse, Lever, Ashby) are listed with their company counts but have no switch of their own: boards are already turned on and off per company (`set_company_enabled`), and switching off every Greenhouse company at once is more surprise than help.
+- **Settings are per source**, kept as JSON and checked by the source, like a company's `source_config`. Each source asks only for what the filters can't tell it:
+  - **Hacker News:** `months` (1–3, default 2).
+  - **The Muse:** its queries (categories, levels, locations, pages), as described above. It searches by its own fixed category list, so the filters can't stand in for them.
+  - **Adzuna:** the countries to search and optional keywords; by default the countries come from the filters' location section and the keywords from `titles.require_any`.
+- **A source that needs no setup is on by default**, so a new install searches Hacker News from the first refresh. A source that needs setup is off until it's set up, and setting it up turns it on: The Muse when it gets its first query, Adzuna when its key is saved. A new source added to jhh later follows the same rule. Nothing about which sources run is part of the filters any more.
+- **Who changed what is recorded**, like every other change: each change to a source's status or settings writes an event with its actor (`user` or `agent:<name>`) and an optional reason, and the Sources screen shows the latest.
+- **Moving existing setups over:** a migration copies the active filters' `search` section into the source settings (a Muse query turns The Muse on; `hackernews` turns Hacker News on, and its absence turns it off, so nothing changes for existing users), then saves a new filter version without `search`, written by `system`. Afterwards `set_filters` rejects `search` with an error that names `set_source`, so an agent working from old instructions learns the new place.
+
+**Keys.** Some services need an account and key (Adzuna's is free for personal job search). jhh keeps a key on your machine and out of the agent's hands:
+- **A key is entered only in the dashboard**, on the source's settings, never through MCP. It never passes through the agent's context or a chat transcript.
+- **It's never sent back out.** The API and the page show only "key saved" with Replace and Remove; no tool returns it, and logs never contain it.
+- **It lives in its own file**, `keys.json` in the data directory, readable only by your OS user, not in the SQLite file, so copying or exporting the database doesn't copy the key. Exports and backups leave it out.
+- jhh sends a key only to the service it belongs to, over HTTPS.
+
+**Adzuna** (planned, after the switches). What its API offers, from its documentation and terms, checked on 2026-10-24 (to be checked against live results when it's built):
+- **Personal job search is a permitted use.** Each user registers their own free key, which matches how jhh calls every API for its own user; resale and lead generation are not allowed, and one person may hold only one account. Usage limits are shown in the account, not published, so jhh keeps a per-refresh request budget like The Muse's and stops on a rate-limit reply.
+- **A keyword search** (`what`, `what_exclude`, `where`, salary, full-time and permanent filters), one country per request path (`/jobs/<country>/search/<page>`). Results give an id, title, company, location, a link to the ad on Adzuna (`redirect_url`), a creation time, contract type and time, and salary.
+- **Only a snippet of the description.** So the body-keyword rule can't judge an Adzuna job on its text: a job without a title keyword passes as unclear instead of being dropped for too few body keywords, and the agent screens it from the page.
+- **Some salaries are predicted** (`salary_is_predicted`). jhh never guesses pay, so predicted figures are ignored and only posted ones are read.
+- **Attribution:** each listing must be labelled "Adzuna", linked to Adzuna's site. The dashboard shows "via Adzuna" as that link, the way it shows "via The Muse".
+- **If the key is removed**, jhh deletes the Adzuna jobs nobody acted on, since the terms ask for Adzuna's data to be removed when access ends. Jobs you are pursuing (`review` onward) keep your own notes and status, with the Adzuna text dropped.
 
 ### What each board's API allows (tested against live feeds, 2026-10-18)
 
@@ -243,7 +272,7 @@ Grouping is a link between rows, not a merge, so **merge** and **split** are ava
 - Each company's results are committed in their own transaction, so a refresh that gets interrupted (for example, the agent session ends) leaves consistent data behind. The UI shows "posting closed" on roles you are reviewing or have applied to, which is useful and new.
 - Runs the prefilter on the jobs of every company it fetched (judging is cheap; only changed decisions are written). Setting new filters re-judges every stored job at once and fetches nothing.
 - Records a `fetch_run` row: counts, how long it took, and errors by company.
-- After the boards, runs the filters' search queries (see "Search sources"), within the request budget.
+- After the boards, runs the search sources that are on (see "Search sources"), within the request budget.
 - Ends with the storage rules below.
 - Runs only when asked (from the UI button or the `refresh_jobs` tool). There is no scheduler in v1.
 
@@ -367,15 +396,11 @@ A memory is one short statement with metadata:
                 "body_any":  ["llm", "agentic", "mcp", "rag", "evals"],
                 "min_body_hits_without_title_match": 4 },
   "pay_floor": { "amount": 0, "currency": "USD" },         // drop only if a parsed max is below the floor
-  "flag":     { "title_any": ["forward deployed", "solutions", "customer"] }, // pass, but flag
-  "search":   { "themuse": [                               // queries for The Muse
-                  { "categories": ["Software Engineering", "Data Science"],
-                    "levels": ["Senior Level"], "locations": ["Columbus, OH"] } ],  // the city and remote jobs
-                "hackernews": { "months": 2 } }               // every ad in the latest "Who is hiring?" threads
+  "flag":     { "title_any": ["forward deployed", "solutions", "customer"] }  // pass, but flag
 }
 ```
 
-`search` finds jobs; the other sections judge them, wherever they came from. Each Muse query matches jobs in any of its categories, at any of its levels, in any of its locations; a field left out doesn't narrow. Categories and levels must be names from The Muse's lists, and jhh says which ones it doesn't know. A query needs at least one category or location, so it can't ask for everything. A location also matches remote jobs. `pages` (1–250) optionally caps how many pages of 20 it reads per refresh; by default it reads them all, within the refresh's limit of 250 requests. There can be up to 10 queries. `hackernews` reads every ad in the latest `months` (1–3, default 2) monthly "Ask HN: Who is hiring?" threads; its ads can't be narrowed on Hacker News's side, so the rest of the filters judge them all. Write `"hackernews": {}` for the default.
+The filters judge jobs, wherever they came from; which sources look for jobs is set per source (see "Turning sources on and off"). Until that lands, the filters also have a `search` section, which the source settings replace: `search` finds jobs and the other sections judge them. Each Muse query matches jobs in any of its categories, at any of its levels, in any of its locations; a field left out doesn't narrow. Categories and levels must be names from The Muse's lists, and jhh says which ones it doesn't know. A query needs at least one category or location, so it can't ask for everything. A location also matches remote jobs. `pages` (1–250) optionally caps how many pages of 20 it reads per refresh; by default it reads them all, within the refresh's limit of 250 requests. There can be up to 10 queries. `hackernews` reads every ad in the latest `months` (1–3, default 2) monthly "Ask HN: Who is hiring?" threads; its ads can't be narrowed on Hacker News's side, so the rest of the filters judge them all. Write `"hackernews": {}` for the default.
 
 **How the agent writes filters:**
 - `preview_filters(filters)` runs a dry run against the current jobs and returns something like "92 pass now, 87 would pass; 6 newly dropped, 1 newly kept", with examples. The prompts tell the agent to show this to you before saving.
@@ -429,6 +454,8 @@ memories       id, kind, content, basis(user_said|inferred), evidence, evidence_
                -- CHECK: a memory with evidence_job_id must be 'inferred'
 memories_fts   FTS5 index over memories.content (after the MVP)
 settings       key, value                                       -- ask_percentile=0.85, port, etc.
+sources        name PK, enabled, settings_json, last_run_at, last_run_ok, last_error,
+               updated_at, updated_by                           -- planned; keys live in keys.json, never here
 fetch_runs     id, started_at, finished_at, companies, postings, new_jobs, passed, errors_json
 content_flags  id, posting_id, detector(rule:<name>|agent:<name>), kind(canary|hostile|hidden_text|unclear),
                excerpt, status(open|kept|hidden), created_at, reviewed_at
@@ -494,6 +521,7 @@ Tool outputs are compact JSON written with the agent's context window in mind. D
 | `preview_filters(filters)` | Dry run: counts and examples of what would be newly dropped or newly kept. |
 | `set_filters(filters, rationale, confirm=false)` | Saves a new filter version and re-runs the prefilter. Subject to the guardrail in section 3. |
 | `get_filter_history()` | Past versions, with their rationale and effect. |
+| `list_sources()` / `set_source(name, enabled?, settings?, reason?)` | Every source with its status (`on`, `off`, `needs setup`), settings, last run and last error; and turning a search source on or off or changing its settings. Settings are checked by the source, and changes are recorded with the agent's name. Keys can't be set or read here (see "Turning sources on and off"). Planned after the MVP. |
 | `list_companies(query?)` / `add_company(name, where?)` / `set_company_enabled(company_id, enabled)` | `add_company` takes what `jhh companies add` takes: a board slug, `source:slug` or a link to one of the company's postings, or nothing to guess slugs from the name. It probes every source, adds the company when exactly one board matches, and otherwise returns the boards it found. |
 
 There are deliberately no delete tools in v1. Deleting is done in the UI, so an agent that goes wrong can't destroy data.
@@ -535,6 +563,7 @@ It is built with static HTML, CSS and vanilla JS, ported from the original perso
 | **Profile** | Markdown editor and resume paste box. Version history with author, summary, diff and Restore. A banner when the latest change came from an agent. |
 | **Memories** | Everything the agent has learned, grouped by kind. Inferred ones are marked, with Confirm and Archive. You can edit them inline, add your own, delete permanently, and see which agent wrote each one and when. |
 | **Filters** | The active filters as a readable form, with the agent's rationale. The version history shows each version's effect, with Restore. Manual edits are allowed and are saved as a new version written by "user". |
+| **Sources** (planned) | Every source with its status, last run and last error; on/off switches for search sources; each source's settings (The Muse's queries, Hacker News's months, Adzuna's countries and key). A key is typed in here and only shown as "key saved" afterwards. |
 | **Companies** | List with ATS, slug, open postings, last fetch result; add (with probe results), enable/disable, remove; "Refresh now" with progress. |
 | **Settings / Connect** | Copy-paste MCP setup for Claude Code, Cursor, Claude Desktop and generic clients; data directory location; ask percentile; export/backup. |
 
@@ -583,6 +612,7 @@ The summary strip from the reference (to review, applications, applied in the la
 - **Logs contain IDs and counts only**: never profile, resume, memory or description text.
 - Before running a migration, jhh automatically copies the database to `backups/` and keeps the last five copies.
 - Exports carry a warning that they contain personal data.
+- **Keys for services** (planned) live in `keys.json` in the data directory, readable only by your OS user. They are entered only in the dashboard, never returned by the API or any tool, never logged, and left out of exports and backups.
 - Encrypting the database is out of scope; OS disk encryption covers it.
 
 ### Proposed layout
