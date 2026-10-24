@@ -129,7 +129,7 @@ type ThreadSearcher interface {
 
 Both kinds share what happens after: results older than 90 days are skipped, employers jhh reads a board for are skipped, the rest are stored under companies found by search, and a source read in full closes what it no longer returns (looking up pursued jobs first).
 
-**The Muse is the built-in search source.** Its public jobs API (themuse.com/developers/api/v2) needs no account or key, so it works the moment jhh is installed. jhh is a personal tool: each user's copy calls the API for that user, the way they could call it themselves, and nothing is hosted or resold. Services that need an account and key, such as Adzuna, can be connected later (see the roadmap).
+**The Muse is the built-in search source.** Its public jobs API (themuse.com/developers/api/v2) needs no account or key, so it works the moment jhh is installed. jhh is a personal tool: each user's copy calls the API for that user, the way they could call it themselves, and nothing is hosted or resold. Every search source jhh ships works this way, with no account, key or payment ([decision 0008](decisions/0008-free-sources-only.md)).
 
 What The Muse's API offers, checked on 2026-10-19:
 - **Filters, not keywords.** A search is any combination of `category`, `level` and `location`, each with several values allowed. There is no text search, so the queries stay coarse and the prefilter does the rest. One category alone can be 90,000 jobs; "Software Engineering", "Senior Level", "Flexible / Remote" was 515.
@@ -165,33 +165,20 @@ How jhh uses it:
 
 ### Turning sources on and off
 
-Added after the MVP; see [decision 0007](decisions/0007-source-settings.md). **The filters say what you're looking for; the source settings say where to look.** Before, a search source ran only when the filters named it (`search.themuse`, `search.hackernews`), so whether Hacker News was read was part of what the agent wrote into the filters. Now each source has a settings row, which you change on the dashboard's Sources tab (or with `jhh sources`) and the agent changes with `list_sources` and `set_source`. Keys and Adzuna, below, are still planned.
+Added after the MVP; see [decision 0007](decisions/0007-source-settings.md). **The filters say what you're looking for; the source settings say where to look.** Before, a search source ran only when the filters named it (`search.themuse`, `search.hackernews`), so whether Hacker News was read was part of what the agent wrote into the filters. Now each source has a settings row, which you change on the dashboard's Sources tab (or with `jhh sources`) and the agent changes with `list_sources` and `set_source`.
 
-- **Every source jhh ships is listed**, with its status: `on`, `off`, or `needs setup` (it can't run yet: The Muse with no query, Adzuna with no key). Each also shows when it last ran, what that run found, and its last error.
+- **Every source jhh ships is listed**, with its status: `on`, `off`, or `needs setup` (it can't run yet: The Muse with no query). Each also shows when it last ran, what that run found, and its last error.
 - **Off pauses a source; it doesn't forget it.** Its settings and its jobs stay. Jobs from a paused source are neither refreshed nor closed, since nothing was read, and the dashboard marks them "source paused". Turning it back on resumes where it left off.
-- **Search sources** (The Muse, Hacker News, Adzuna) have a switch each. **Board sources** (Greenhouse, Lever, Ashby) are listed with their company counts but have no switch of their own: boards are already turned on and off per company (`set_company_enabled`), and switching off every Greenhouse company at once is more surprise than help.
+- **Search sources** (The Muse, Hacker News) have a switch each. **Board sources** (Greenhouse, Lever, Ashby) are listed with their company counts but have no switch of their own: boards are already turned on and off per company (`set_company_enabled`), and switching off every Greenhouse company at once is more surprise than help.
 - **Settings are per source**, kept as JSON and checked by the source, like a company's `source_config`. Each source asks only for what the filters can't tell it:
   - **Hacker News:** `months` (1–3, default 2).
   - **The Muse:** `queries`, up to 10. Each matches jobs in any of its categories, at any of its levels, in any of its locations; a field left out doesn't narrow, and a query needs at least one category or location, so it can't ask for everything. Categories and levels must be names from The Muse's lists, and jhh says which ones it doesn't know. A location also matches remote jobs. `pages` (1–250) optionally caps how many pages of 20 a query reads per refresh; by default it reads them all, within the refresh's limit of 250 requests. The Muse searches by its own fixed category list, so the filters can't stand in for these.
-  - **Adzuna:** the countries to search and optional keywords; by default the countries come from the filters' location section and the keywords from `titles.require_any`.
-- **A source that needs no setup is on by default**, so a new install searches Hacker News from the first refresh. A source that needs setup is off until it's set up, and setting it up turns it on: The Muse when it gets its first query, Adzuna when its key is saved. A new source added to jhh later follows the same rule. Nothing about which sources run is part of the filters any more.
+- **A source that needs no setup is on by default**, so a new install searches Hacker News from the first refresh. A source that needs setup is off until it's set up, and setting it up turns it on: The Muse when it gets its first query. A new source added to jhh later follows the same rule. Nothing about which sources run is part of the filters any more.
 - **Who changed what is recorded**, like every other change: each change to a source's status or settings writes an event with its actor (`user` or `agent:<name>`) and an optional reason, and the Sources tab and `list_sources` show the latest. A source's last error can quote the service's reply, so `list_sources` returns it inside `untrusted`.
 - **On the dashboard**, each search source has its switch and its last run; Hacker News's months can be changed there, and The Muse's queries are shown as text, with the phrase to ask the agent for a change, since picking categories is judgment.
 - **Moving existing setups over:** migration 0003 copies the active filters' `search` section into the source settings (a Muse query turns The Muse on; `hackernews` turns Hacker News on, and its absence turns it off, so nothing changes for existing users), then saves a new filter version without `search`, written by `system`. Afterwards `set_filters` rejects `search` with an error that names `set_source`, so an agent working from old instructions learns the new place.
 
-**Keys** (planned). Some services need an account and key (Adzuna's is free for personal job search). jhh keeps a key on your machine and out of the agent's hands:
-- **A key is entered only in the dashboard**, on the source's settings, never through MCP. It never passes through the agent's context or a chat transcript.
-- **It's never sent back out.** The API and the page show only "key saved" with Replace and Remove; no tool returns it, and logs never contain it.
-- **It lives in its own file**, `keys.json` in the data directory, readable only by your OS user, not in the SQLite file, so copying or exporting the database doesn't copy the key. Exports and backups leave it out.
-- jhh sends a key only to the service it belongs to, over HTTPS.
-
-**Adzuna** (planned, after the switches). What its API offers, from its documentation and terms, checked on 2026-10-24 (to be checked against live results when it's built):
-- **Personal job search is a permitted use.** Each user registers their own free key, which matches how jhh calls every API for its own user; resale and lead generation are not allowed, and one person may hold only one account. Usage limits are shown in the account, not published, so jhh keeps a per-refresh request budget like The Muse's and stops on a rate-limit reply.
-- **A keyword search** (`what`, `what_exclude`, `where`, salary, full-time and permanent filters), one country per request path (`/jobs/<country>/search/<page>`). Results give an id, title, company, location, a link to the ad on Adzuna (`redirect_url`), a creation time, contract type and time, and salary.
-- **Only a snippet of the description.** So the body-keyword rule can't judge an Adzuna job on its text: a job without a title keyword passes as unclear instead of being dropped for too few body keywords, and the agent screens it from the page.
-- **Some salaries are predicted** (`salary_is_predicted`). jhh never guesses pay, so predicted figures are ignored and only posted ones are read.
-- **Attribution:** each listing must be labelled "Adzuna", linked to Adzuna's site. The dashboard shows "via Adzuna" as that link, the way it shows "via The Muse".
-- **If the key is removed**, jhh deletes the Adzuna jobs nobody acted on, since the terms ask for Adzuna's data to be removed when access ends. Jobs you are pursuing (`review` onward) keep your own notes and status, with the Adzuna text dropped.
+**Sources that need an account** aren't built. Adzuna was planned, with its key entered only in the dashboard, until signing up showed its "free" key is 25 test calls, with real use at £8 a month; see [decision 0008](decisions/0008-free-sources-only.md).
 
 ### What each board's API allows (tested against live feeds, 2026-10-18)
 
@@ -456,7 +443,7 @@ memories       id, kind, content, basis(user_said|inferred), evidence, evidence_
 memories_fts   FTS5 index over memories.content (after the MVP)
 settings       key, value                                       -- ask_percentile=0.85, port, etc.
 sources        name PK, enabled (NULL until someone chooses), settings, reason, last_run_at, last_postings,
-               last_error, updated_at, updated_by               -- a source with no row has its defaults; keys never go here
+               last_error, updated_at, updated_by               -- a source with no row has its defaults
 fetch_runs     id, started_at, finished_at, companies, postings, new_jobs, passed, errors_json
 content_flags  id, posting_id, detector(rule:<name>|agent:<name>), kind(canary|hostile|hidden_text|unclear),
                excerpt, status(open|kept|hidden), created_at, reviewed_at
@@ -522,7 +509,7 @@ Tool outputs are compact JSON written with the agent's context window in mind. D
 | `preview_filters(filters)` | Dry run: counts and examples of what would be newly dropped or newly kept. |
 | `set_filters(filters, rationale, confirm=false)` | Saves a new filter version and re-runs the prefilter. Subject to the guardrail in section 3. |
 | `get_filter_history()` | Past versions, with their rationale and effect. |
-| `list_sources()` / `set_source(name, enabled?, settings?, reason?)` | Every source with its status (`on`, `off`, `needs setup`), settings, last run and last error; and turning a search source on or off or changing its settings. Settings are checked by the source, and changes are recorded with the agent's name. Keys can't be set or read here (see "Turning sources on and off"). |
+| `list_sources()` / `set_source(name, enabled?, settings?, reason?)` | Every source with its status (`on`, `off`, `needs setup`), settings, last run and last error; and turning a search source on or off or changing its settings. Settings are checked by the source, and changes are recorded with the agent's name. |
 | `list_companies(query?)` / `add_company(name, where?)` / `set_company_enabled(company_id, enabled)` | `add_company` takes what `jhh companies add` takes: a board slug, `source:slug` or a link to one of the company's postings, or nothing to guess slugs from the name. It probes every source, adds the company when exactly one board matches, and otherwise returns the boards it found. |
 
 There are deliberately no delete tools in v1. Deleting is done in the UI, so an agent that goes wrong can't destroy data.
@@ -564,7 +551,7 @@ It is built with static HTML, CSS and vanilla JS, ported from the original perso
 | **Profile** | Markdown editor and resume paste box. Version history with author, summary, diff and Restore. A banner when the latest change came from an agent. |
 | **Memories** | Everything the agent has learned, grouped by kind. Inferred ones are marked, with Confirm and Archive. You can edit them inline, add your own, delete permanently, and see which agent wrote each one and when. |
 | **Filters** | The active filters as a readable form, with the agent's rationale. The version history shows each version's effect, with Restore. Manual edits are allowed and are saved as a new version written by "user". |
-| **Sources** | Every source with its status, last run and last error; on/off switches for search sources; each source's settings (Hacker News's months; The Muse's queries, shown as text). Jobs from a paused source say "Source paused". Planned: Adzuna's countries and key, where a key is typed in and only shown as "key saved" afterwards. |
+| **Sources** | Every source with its status, last run and last error; on/off switches for search sources; each source's settings (Hacker News's months; The Muse's queries, shown as text). Jobs from a paused source say "Source paused". |
 | **Companies** | List with ATS, slug, open postings, last fetch result; add (with probe results), enable/disable, remove; "Refresh now" with progress. |
 | **Settings / Connect** | Copy-paste MCP setup for Claude Code, Cursor, Claude Desktop and generic clients; data directory location; ask percentile; export/backup. |
 
@@ -613,7 +600,6 @@ The summary strip from the reference (to review, applications, applied in the la
 - **Logs contain IDs and counts only**: never profile, resume, memory or description text.
 - Before running a migration, jhh automatically copies the database to `backups/` and keeps the last five copies.
 - Exports carry a warning that they contain personal data.
-- **Keys for services** (planned) live in `keys.json` in the data directory, readable only by your OS user. They are entered only in the dashboard, never returned by the API or any tool, never logged, and left out of exports and backups.
 - Encrypting the database is out of scope; OS disk encryption covers it.
 
 ### Proposed layout

@@ -18,7 +18,6 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 
 - [x] Hacker News's monthly "Who is hiring?" threads as a search source (`search.hackernews` in the filters)
 - [x] Sources screen and tools: turn each search source on and off and change its settings from the dashboard or through MCP (`list_sources`, `set_source`), moving `search` out of the filters
-- [ ] Adzuna as a search source, with its free key entered in the dashboard and kept on the user's machine
 
 ## Next (M6–M8)
 
@@ -59,3 +58,4 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 
 - "Screen now" with the user's own API key in the UI (it would put an AI inside the window)
 - LinkedIn scraping, auto-apply, any hosted service or telemetry
+- Sources that cost money or need a paid plan, such as Adzuna, whose "free" key is 25 test calls ([decision 0008](decisions/0008-free-sources-only.md))

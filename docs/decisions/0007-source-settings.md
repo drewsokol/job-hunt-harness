@@ -1,6 +1,6 @@
 # 0007: Sources are set up per source, not in the filters
 
-Status: Accepted, 2026-10-24
+Status: Accepted, 2026-10-24. The keys part (and Adzuna) is superseded by [0008](0008-free-sources-only.md): nothing that needs a key is built.
 
 ## Context
 
