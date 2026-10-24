@@ -71,6 +71,8 @@ func TestParseLocation(t *testing.T) {
 		{name: "longer name isn't the place in it", raw: "Remote - New England", wantWorkplace: Remote, wantPlaces: []Place{{City: "New England"}}},
 		{name: "longer name of three words", raw: "Remote - New South Wales", wantWorkplace: Remote, wantPlaces: []Place{{City: "New South Wales"}}},
 		{name: "region name isn't the country in it", raw: "Remote - Central America", wantWorkplace: Remote, wantPlaces: []Place{{City: "Central America"}}},
+		{name: "phrase naming two places", raw: "Remote (US & Canada)", wantWorkplace: Remote, wantPlaces: []Place{country("US"), country("CA")}},
+		{name: "phrase naming two places in words", raw: "Remote - United States and Canada", wantWorkplace: Remote, wantPlaces: []Place{country("US"), country("CA")}},
 
 		// Titles
 		{
@@ -113,6 +115,8 @@ func TestParseFreeformLocation(t *testing.T) {
 		{"REMOTE (US/Canada)", Remote, []Place{{Country: "US"}, {Country: "CA"}}},
 		{"Onsite | Columbus, OH", Onsite, []Place{{City: "Columbus", Region: "OH", Country: "US"}}},
 		{"DE Frankfurt a.M., ONSITE/HYBRID PREFERRED", Hybrid, []Place{{City: "Frankfurt", Country: "DE"}}},
+		{"Remote (US & Canada)", Remote, []Place{{Country: "US"}, {Country: "CA"}}},
+		{"Remote (work with us from anywhere in Europe)", Remote, []Place{{Region: "Europe"}}},
 		{"Springfield", Unknown, nil},
 	}
 	for _, tt := range tests {

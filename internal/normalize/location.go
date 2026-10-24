@@ -183,8 +183,8 @@ func parsePlaces(seg string, mode placeMode) []Place {
 			return []Place{p}
 		}
 		if mode.searchesPhrases() {
-			if p, ok := placeInWords(parts[0]); ok {
-				return []Place{p}
+			if ps := placesInWords(parts[0]); len(ps) > 0 {
+				return dropCovered(ps)
 			}
 		}
 		if !mode.keepsUnknown() || !looksLikeName(parts[0]) {
@@ -243,9 +243,7 @@ func parsePlaces(seg string, mode placeMode) []Place {
 		if kp, ok := knownPlace(part); ok {
 			known = append(known, kp)
 		} else if mode.searchesPhrases() {
-			if kp, ok := placeInWords(part); ok {
-				known = append(known, kp)
-			}
+			known = append(known, placesInWords(part)...)
 		}
 	}
 	if len(known) > 0 {
@@ -257,24 +255,46 @@ func parsePlaces(seg string, mode placeMode) []Place {
 	return []Place{{City: strings.Join(parts, ", ")}}
 }
 
-// placeInWords finds a place named inside a longer phrase ("DE Frankfurt
-// a.M.", "Greater Boston Area"): the longest run of up to three words that
-// is a place jhh knows, the first one when runs tie. A run that the word
-// before it makes part of a longer name ("New England", "Central America")
-// doesn't count.
-func placeInWords(s string) (Place, bool) {
+// placesInWords finds the places named inside a longer phrase ("DE
+// Frankfurt a.M.", "Greater Boston Area", "US & Canada"): runs of up to
+// three words that are places jhh knows, longest runs first, none sharing a
+// word, in the order the phrase names them. A run that the word before it
+// makes part of a longer name ("New England", "Central America") doesn't
+// count, and "us" counts only in capitals ("work with us" isn't the US).
+func placesInWords(s string) []Place {
 	words := strings.Fields(s)
+	used := make([]bool, len(words))
+	type found struct {
+		at int
+		p  Place
+	}
+	var out []found
 	for n := min(3, len(words)-1); n >= 1; n-- {
 		for i := 0; i+n <= len(words); i++ {
+			if slices.Contains(used[i:i+n], true) {
+				continue
+			}
 			if i > 0 && nameJoiners[strings.ToLower(strings.Trim(words[i-1], edgeJunk))] {
 				continue
 			}
-			if p, ok := knownPlace(strings.Trim(strings.Join(words[i:i+n], " "), edgeJunk)); ok {
-				return p, true
+			run := strings.Trim(strings.Join(words[i:i+n], " "), edgeJunk)
+			if strings.EqualFold(run, "us") && run != "US" {
+				continue
+			}
+			if p, ok := knownPlace(run); ok {
+				out = append(out, found{i, p})
+				for j := i; j < i+n; j++ {
+					used[j] = true
+				}
 			}
 		}
 	}
-	return Place{}, false
+	slices.SortFunc(out, func(a, b found) int { return cmp.Compare(a.at, b.at) })
+	var ps []Place
+	for _, f := range out {
+		ps = append(ps, f.p)
+	}
+	return ps
 }
 
 // nameJoiners are words that start a longer place name around a known one:
