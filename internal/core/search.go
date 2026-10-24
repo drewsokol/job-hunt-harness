@@ -37,7 +37,7 @@ type SearchSummary struct {
 	// Unreadable counts Hacker News ads whose employer couldn't be read.
 	Unreadable int
 	// Incomplete names the queries that have more pages than they read, or
-	// whose reading failed ("search.themuse[0]", "search.hackernews"). Until
+	// whose reading failed ("themuse.queries[0]", "hackernews"). Until
 	// everything is read in full, postings missing from the results aren't
 	// closed.
 	Incomplete []string
@@ -88,32 +88,40 @@ func (f *found) add(s sources.Searcher, ps []sources.Posting) {
 	}
 }
 
-// search runs the filters' searches, stores what they found at each
-// employer jhh doesn't read a board for, and closes what a source no longer
-// returns when it was read in full.
+// search runs every search source that is on, stores what they found at
+// each employer jhh doesn't read a board for, and closes what a source no
+// longer returns when it was read in full. A source that is off isn't
+// read, so nothing of it is closed either.
 func (r *Refresher) search(ctx context.Context, filters *prefilter.Compiled, version int64) (searchResult, error) {
 	var sr searchResult
-	f := filters.Filters().Search
-	if f == nil {
-		return sr, nil
+	plan, err := plannedSearches(ctx, r.Store)
+	if err != nil {
+		return sr, err
 	}
-	if s, ok := r.Searchers["themuse"].(sources.QuerySearcher); ok && len(f.TheMuse) > 0 {
-		sum, fd, err := r.searchMuse(ctx, &sr, s, f.TheMuse)
+	run := func(s sources.Searcher, read func() (SearchSummary, *found, error)) error {
+		errs := len(sr.errors)
+		sum, fd, err := read()
 		if err == nil {
 			err = r.storeSearch(ctx, &sr, s, &sum, fd, filters, version)
 		}
 		sr.summaries = append(sr.summaries, sum)
 		if err != nil {
+			return err
+		}
+		last := store.SourceRun{At: utc.Now(), Postings: sum.Postings}
+		if len(sr.errors) > errs {
+			last.Error = sr.errors[errs].Error
+		}
+		return r.Store.RecordSourceRun(ctx, s.Name(), last)
+	}
+	if s, ok := r.Searchers["themuse"].(sources.QuerySearcher); ok && plan.muse != nil {
+		if err := run(s, func() (SearchSummary, *found, error) { return r.searchMuse(ctx, &sr, s, plan.muse.Queries) }); err != nil {
 			return sr, err
 		}
 	}
-	if s, ok := r.Searchers["hackernews"].(sources.ThreadSearcher); ok && f.HackerNews != nil {
-		sum, fd, err := r.searchThreads(ctx, &sr, s, f.HackerNews.MonthsOrDefault())
-		if err == nil {
-			err = r.storeSearch(ctx, &sr, s, &sum, fd, filters, version)
-		}
-		sr.summaries = append(sr.summaries, sum)
-		if err != nil {
+	if s, ok := r.Searchers["hackernews"].(sources.ThreadSearcher); ok && plan.hackerNews != nil {
+		months := plan.hackerNews.Months
+		if err := run(s, func() (SearchSummary, *found, error) { return r.searchThreads(ctx, &sr, s, months) }); err != nil {
 			return sr, err
 		}
 	}
@@ -125,13 +133,13 @@ func (r *Refresher) failed(sr *searchResult, s sources.Searcher, err error) {
 }
 
 // searchMuse reads every page of every query, within the request budget.
-func (r *Refresher) searchMuse(ctx context.Context, sr *searchResult, s sources.QuerySearcher, qs []prefilter.MuseQuery) (SearchSummary, *found, error) {
+func (r *Refresher) searchMuse(ctx context.Context, sr *searchResult, s sources.QuerySearcher, qs []MuseQuery) (SearchSummary, *found, error) {
 	sum := SearchSummary{Source: s.Name(), Title: sources.SearchTitle(s.Name()), Queries: len(qs)}
 	budget := cmpOr(r.MaxSearchRequests, DefaultMaxSearchRequests)
 	fd := newFound()
 queries:
 	for i, q := range qs {
-		label := fmt.Sprintf("search.themuse[%d]", i)
+		label := fmt.Sprintf("themuse.queries[%d]", i)
 		for n := 0; q.Pages == 0 || n < q.Pages; n++ {
 			if sum.Requests >= budget {
 				sum.Stopped = fmt.Sprintf("reached the limit of %d search requests a refresh", budget)
@@ -162,7 +170,7 @@ queries:
 
 // searchThreads reads the newest monthly hiring threads in full.
 func (r *Refresher) searchThreads(ctx context.Context, sr *searchResult, s sources.ThreadSearcher, months int) (SearchSummary, *found, error) {
-	const label = "search.hackernews"
+	const label = "hackernews"
 	sum := SearchSummary{Source: s.Name(), Title: sources.SearchTitle(s.Name())}
 	fd := newFound()
 	sum.Requests++

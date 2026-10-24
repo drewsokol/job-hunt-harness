@@ -76,8 +76,8 @@ func printRefresh(w io.Writer, res core.RefreshResult) {
 	fmt.Fprintf(w, "Refreshed %d companies in %s (%d unchanged since the last refresh).\n",
 		res.Companies, res.Duration.Round(100*time.Millisecond), res.NotModified)
 	if res.Companies == 0 && len(res.Searches) == 0 {
-		fmt.Fprintln(w, "  jhh has no companies and no searches yet. Add a company with jhh companies add <name>,")
-		fmt.Fprintln(w, "  or set filters with a search (see examples/filters.json).")
+		fmt.Fprintln(w, "  jhh has no companies and no search source ran. Add a company with jhh companies add <name>,")
+		fmt.Fprintln(w, "  or turn a search source on (jhh sources); searching also needs filters (see examples/filters.json).")
 	}
 	line := func(label string, v any) { fmt.Fprintf(w, "  %-16s %v\n", label, v) }
 	line("postings listed", res.Postings)

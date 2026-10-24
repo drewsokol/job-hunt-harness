@@ -1,6 +1,6 @@
 # 0007: Sources are set up per source, not in the filters
 
-Status: Proposed, 2026-10-24
+Status: Accepted, 2026-10-24
 
 ## Context
 

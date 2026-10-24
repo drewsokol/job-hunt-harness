@@ -16,11 +16,5 @@
     "min_body_hits_without_title_match": 3
   },
   "pay_floor": { "amount": 150000, "currency": "USD" },
-  "flag": { "title_any": ["forward deployed", "solutions", "customer", "field"] },
-  "search": {
-    "themuse": [
-      { "categories": ["Software Engineering", "Data Science"], "levels": ["Senior Level"], "locations": ["Columbus, OH"] }
-    ],
-    "hackernews": { "months": 2 }
-  }
+  "flag": { "title_any": ["forward deployed", "solutions", "customer", "field"] }
 }

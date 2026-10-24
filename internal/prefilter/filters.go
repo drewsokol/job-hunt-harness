@@ -42,9 +42,9 @@ type Filters struct {
 	Keywords          *Keywords `json:"keywords,omitempty"`
 	PayFloor          *PayFloor `json:"pay_floor,omitempty"`
 	Flag              *Flag     `json:"flag,omitempty"`
-	// Search holds the queries search sources run. It finds jobs; the rest
-	// of the filters judge them, wherever they came from.
-	Search *Search `json:"search,omitempty"`
+	// Search was where the filters named the search sources. Which sources
+	// jhh searches is now set per source, so it is only read to say so.
+	Search json.RawMessage `json:"search,omitempty"`
 }
 
 // Titles are words and phrases matched against the job title.
@@ -86,59 +86,6 @@ type PayFloor struct {
 type Flag struct {
 	TitleAny []string `json:"title_any,omitempty"`
 }
-
-// Search holds each search source's queries.
-type Search struct {
-	TheMuse []MuseQuery `json:"themuse,omitempty"`
-	// HackerNews, when present, reads the monthly "Who is hiring?" threads.
-	HackerNews *HackerNews `json:"hackernews,omitempty"`
-}
-
-// HackerNews says how many of the latest monthly "Who is hiring?" threads
-// a refresh reads. Ads aren't searched on Hacker News's side: every ad in
-// those threads is judged by the rest of the filters.
-type HackerNews struct {
-	// Months is 1 to MaxHackerNewsMonths; 0 means DefaultHackerNewsMonths.
-	Months int `json:"months,omitempty"`
-}
-
-// Hacker News thread limits. Two months by default, so the days after a
-// new thread opens, when it holds few ads, still see last month's.
-const (
-	DefaultHackerNewsMonths = 2
-	MaxHackerNewsMonths     = 3
-)
-
-// MonthsOrDefault is how many threads to read.
-func (h HackerNews) MonthsOrDefault() int {
-	if h.Months == 0 {
-		return DefaultHackerNewsMonths
-	}
-	return h.Months
-}
-
-// MuseQuery is one search of The Muse. A job matches when it is in any of
-// the categories, at any of the levels and in any of the locations; a field
-// left out doesn't narrow. Category and level names are checked against The
-// Muse's lists when the filters are saved. A location also matches every
-// remote job ("Flexible / Remote"). Pages optionally caps how many pages of
-// 20 a refresh reads; by default it reads them all, within the refresh's
-// request limit.
-type MuseQuery struct {
-	Categories []string `json:"categories,omitempty"`
-	Levels     []string `json:"levels,omitempty"`
-	Locations  []string `json:"locations,omitempty"`
-	Pages      int      `json:"pages,omitempty"`
-}
-
-// Search limits. MaxSearchPages matches the default request limit of a
-// refresh (core.DefaultMaxSearchRequests).
-const (
-	MaxSearchPages   = 250
-	maxQueries       = 10
-	maxQueryValues   = 20
-	maxQueryValueLen = 100
-)
 
 // Policies for unclear cases.
 const (
@@ -274,38 +221,8 @@ func (f Filters) Validate() error {
 	if fl := f.Flag; fl != nil {
 		terms("flag.title_any", fl.TitleAny)
 	}
-	if s := f.Search; s != nil {
-		switch n := len(s.TheMuse); {
-		case n == 0 && s.HackerNews == nil:
-			add("search: add themuse queries, hackernews or both, or leave search out")
-		case n > maxQueries:
-			add("search.themuse: %d queries is too many; the limit is %d", n, maxQueries)
-		}
-		for i, q := range s.TheMuse {
-			field := fmt.Sprintf("search.themuse[%d]", i)
-			if len(q.Categories) == 0 && len(q.Locations) == 0 {
-				add("%s: set categories, locations or both, so the query doesn't ask for every job", field)
-			}
-			for _, list := range []struct {
-				name   string
-				values []string
-			}{{"categories", q.Categories}, {"levels", q.Levels}, {"locations", q.Locations}} {
-				if len(list.values) > maxQueryValues {
-					add("%s.%s: more than %d values", field, list.name, maxQueryValues)
-				}
-				for j, v := range list.values {
-					if strings.TrimSpace(v) == "" || len(v) > maxQueryValueLen {
-						add("%s.%s[%d]: must be 1 to %d characters", field, list.name, j, maxQueryValueLen)
-					}
-				}
-			}
-			if q.Pages < 0 || q.Pages > MaxSearchPages {
-				add("%s.pages: must be between 1 and %d", field, MaxSearchPages)
-			}
-		}
-		if h := s.HackerNews; h != nil && (h.Months < 0 || h.Months > MaxHackerNewsMonths) {
-			add("search.hackernews.months: must be between 1 and %d", MaxHackerNewsMonths)
-		}
+	if f.Search != nil {
+		add("search: which sources jhh searches is no longer part of the filters; leave search out, and turn sources on or off and set The Muse's queries with set_source (list_sources shows them) or jhh sources")
 	}
 	if len(p) > 0 {
 		return &ValidationError{Problems: p}

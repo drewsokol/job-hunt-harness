@@ -21,10 +21,7 @@ const exampleFilters = `{
   "keywords": {"title_any": ["ai", "agent", "llm"], "body_any": ["llm", "agentic", "mcp", "rag", "evals"],
                "min_body_hits_without_title_match": 2},
   "pay_floor": {"amount": 150000, "currency": "USD"},
-  "flag": {"title_any": ["forward deployed", "solutions", "customer"]},
-  "search": {"themuse": [{"categories": ["Software Engineering"], "levels": ["Senior Level"],
-                          "locations": ["Flexible / Remote", "Columbus, OH"], "pages": 10}],
-             "hackernews": {}}
+  "flag": {"title_any": ["forward deployed", "solutions", "customer"]}
 }`
 
 func compile(t *testing.T, doc string) *Compiled {
@@ -273,11 +270,9 @@ func TestParseRejects(t *testing.T) {
 		{`{"schema_version": 1, "keywords": {"body_any": ["llm"], "min_body_hits_without_title_match": 3}}`, "more than the 1 body_any terms"},
 		{`{"schema_version": 1, "keywords": {"title_any": ["--"]}}`, `keywords.title_any[0]: "--" has no letters`},
 		{`{"schema_version": 1, "pay_floor": {"amount": 100000, "currency": "usd"}}`, `pay_floor.currency: "usd"`},
-		{`{"schema_version": 1, "search": {}}`, "search: add themuse queries, hackernews or both"},
-		{`{"schema_version": 1, "search": {"themuse": [{"levels": ["Senior Level"]}]}}`, "search.themuse[0]: set categories, locations or both"},
-		{`{"schema_version": 1, "search": {"themuse": [{"locations": ["Flexible / Remote"], "pages": 251}]}}`, "search.themuse[0].pages: must be between 1 and 250"},
-		{`{"schema_version": 1, "search": {"themuse": [{"categories": [" "]}]}}`, "search.themuse[0].categories[0]: must be 1 to 100 characters"},
-		{`{"schema_version": 1, "search": {"hackernews": {"months": 4}}}`, "search.hackernews.months: must be between 1 and 3"},
+		// Sources are set per source now; the error names the tool to use.
+		{`{"schema_version": 1, "search": {"hackernews": {}}}`, "search: which sources jhh searches is no longer part of the filters"},
+		{`{"schema_version": 1, "search": {}}`, "with set_source"},
 	}
 	for _, tt := range tests {
 		_, err := Parse([]byte(tt.doc))
@@ -310,18 +305,5 @@ func TestWords(t *testing.T) {
 	title := newText("Engineer, Ahead of the curve")
 	if title.has(newTerm("head of"), true) {
 		t.Error("'head of' matched inside 'ahead of'")
-	}
-}
-
-func TestHackerNewsSearch(t *testing.T) {
-	f, err := Parse([]byte(`{"schema_version": 1, "search": {"hackernews": {}}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h := f.Search.HackerNews; h == nil || h.MonthsOrDefault() != DefaultHackerNewsMonths {
-		t.Errorf("hackernews %+v", h)
-	}
-	if got := string(f.JSON()); !strings.Contains(got, `"hackernews":{}`) {
-		t.Errorf("an empty hackernews section must survive saving: %s", got)
 	}
 }

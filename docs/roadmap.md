@@ -17,7 +17,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 ## Since the MVP
 
 - [x] Hacker News's monthly "Who is hiring?" threads as a search source (`search.hackernews` in the filters)
-- [ ] Sources screen and tools: turn each search source on and off and change its settings from the dashboard or through MCP (`list_sources`, `set_source`), moving `search` out of the filters
+- [x] Sources screen and tools: turn each search source on and off and change its settings from the dashboard or through MCP (`list_sources`, `set_source`), moving `search` out of the filters
 - [ ] Adzuna as a search source, with its free key entered in the dashboard and kept on the user's machine
 
 ## Next (M6–M8)

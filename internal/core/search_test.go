@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -12,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 )
@@ -153,7 +153,7 @@ func TestRefreshSearchOnlyClosesAfterCompleteReads(t *testing.T) {
 	)
 	f.setFilters(searchFilters(1)) // 2 pages of results, 1 read
 	res := f.refresh()
-	if muse(res).Complete() || !slices.Equal(muse(res).Incomplete, []string{"search.themuse[0]"}) || muse(res).Postings != 2 {
+	if muse(res).Complete() || !slices.Equal(muse(res).Incomplete, []string{"themuse.queries[0]"}) || muse(res).Postings != 2 {
 		t.Fatalf("summary %+v", muse(res))
 	}
 	s.postings = []sources.Posting{
@@ -354,20 +354,17 @@ func TestNormalizeFound(t *testing.T) {
 	}
 }
 
-func TestSetFiltersChecksMuseNames(t *testing.T) {
+func TestSetSourceChecksMuseNames(t *testing.T) {
 	f := newRefreshFixture(t)
-	fl, err := prefilter.Parse([]byte(`{"schema_version": 1, "search": {"themuse": [{"categories": ["software engineering", "Robotics"]}]}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, _, err = SetFilters(context.Background(), f.s, store.ActorUser, fl, "test")
-	var ve *prefilter.ValidationError
-	if !errors.As(err, &ve) || len(ve.Problems) != 2 || !strings.Contains(ve.Problems[0], `search.themuse[0].categories[0]: "software engineering"`) ||
-		!strings.Contains(ve.Problems[0], `did you mean "Software Engineering"?`) {
+	_, err := SetSource(context.Background(), f.s, store.ActorUser, "themuse",
+		SourceUpdate{Settings: json.RawMessage(`{"queries": [{"categories": ["software engineering", "Robotics"]}]}`)})
+	var in *InputError
+	if !errors.As(err, &in) || len(in.Problems) != 2 || !strings.Contains(in.Problems[0], `settings.queries[0].categories[0]: "software engineering"`) ||
+		!strings.Contains(in.Problems[0], `did you mean "Software Engineering"?`) {
 		t.Errorf("%v", err)
 	}
-	if _, ok, _ := f.s.ActiveFilters(context.Background()); ok {
-		t.Error("invalid filters were saved")
+	if rows, _ := f.s.SourceRows(context.Background()); len(rows) != 0 {
+		t.Errorf("invalid settings were saved: %+v", rows)
 	}
 }
 

@@ -12,4 +12,4 @@ Add a new numbered file for each decision. Don't rewrite old records: when a dec
 | [0004](0004-utc-everywhere.md) | Store and exchange all times in UTC | Accepted |
 | [0005](0005-untrusted-content.md) | Label listing content as untrusted; flag prompt injection for review | Accepted |
 | [0006](0006-agent-as-source.md) | The agent can add jobs (`add_jobs`) | Accepted |
-| [0007](0007-source-settings.md) | Sources are turned on and set up per source, not in the filters; keys are entered only in the dashboard | Proposed |
+| [0007](0007-source-settings.md) | Sources are turned on and set up per source, not in the filters; keys are entered only in the dashboard | Accepted |

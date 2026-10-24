@@ -53,6 +53,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	api("POST /api/outreach", s.logOutreach)
 	api("PATCH /api/outreach/{id}", s.updateOutreach)
 	api("GET /api/profile", s.profile)
+	api("GET /api/sources", s.listSources)
+	api("PATCH /api/sources/{name}", s.setSource)
 }
 
 type errorJSON struct {
@@ -115,6 +117,9 @@ type stateJSON struct {
 	Counts   map[string]int `json:"counts"`
 	Setup    setupJSON      `json:"setup"`
 	Outreach int            `json:"outreach"`
+	// Paused are the search sources turned off, by their names for people
+	// (a job's via), so their jobs can say so.
+	Paused []string `json:"paused_sources"`
 }
 
 type summaryJSON struct {
@@ -174,7 +179,83 @@ func (s *server) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.Setup.Companies = c.BoardCompanies
+	ss, err := core.ListSources(ctx, s.Store, nil)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	out.Paused = append([]string{}, core.PausedSearches(ss)...)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// sourceJSON is one source on the Sources tab. LastError may quote the
+// service's reply.
+type sourceJSON struct {
+	Name             string          `json:"name"`
+	Title            string          `json:"title"`
+	Kind             string          `json:"kind"`
+	Status           string          `json:"status,omitempty"`
+	Setup            string          `json:"setup,omitempty"`
+	Settings         json.RawMessage `json:"settings,omitempty"`
+	Companies        int             `json:"companies"`
+	EnabledCompanies int             `json:"enabled_companies"`
+	LastRun          string          `json:"last_run,omitempty"`
+	LastPostings     int             `json:"last_postings"`
+	LastError        string          `json:"last_error,omitempty"`
+	By               string          `json:"by,omitempty"`
+	At               string          `json:"at,omitempty"`
+	Reason           string          `json:"reason,omitempty"`
+}
+
+func newSourceJSON(info core.SourceInfo) sourceJSON {
+	o := sourceJSON{Name: info.Name, Title: info.Title, Kind: info.Kind, Status: info.Status, Setup: info.Setup, Settings: info.Settings,
+		Companies: info.Companies, EnabledCompanies: info.EnabledCompanies, LastRun: timeText(info.LastRunAt),
+		LastPostings: info.LastPostings, LastError: info.LastError}
+	if info.UpdatedBy != store.ActorSystem && info.UpdatedBy != "" {
+		o.By, o.At, o.Reason = string(info.UpdatedBy), timeText(info.UpdatedAt), info.Reason
+	}
+	return o
+}
+
+func (s *server) boardNames() []string {
+	names := make([]string, 0, len(s.Sources))
+	for name := range s.Sources {
+		names = append(names, name)
+	}
+	return names
+}
+
+func (s *server) listSources(w http.ResponseWriter, r *http.Request) {
+	ss, err := core.ListSources(r.Context(), s.Store, s.boardNames())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	out := make([]sourceJSON, 0, len(ss))
+	for _, info := range ss {
+		out = append(out, newSourceJSON(info))
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Sources []sourceJSON `json:"sources"`
+	}{out})
+}
+
+// setSource turns a search source on or off, or replaces its settings.
+func (s *server) setSource(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Enabled  *bool           `json:"enabled"`
+		Settings json.RawMessage `json:"settings"`
+	}
+	if err := decode(r, &in); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	info, err := core.SetSource(r.Context(), s.Store, by, r.PathValue("name"), core.SourceUpdate{Enabled: in.Enabled, Settings: in.Settings})
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, newSourceJSON(info))
 }
 
 // jobJSON is a job as the page shows it. Company, title, places, pay, URL
