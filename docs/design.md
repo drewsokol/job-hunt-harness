@@ -119,6 +119,15 @@ type QuerySearcher interface {
     Search(ctx context.Context, q Query, page int) (SearchResult, error) // one page, one request
 }
 
+// TextQuery is one Himalayas search: free text, optionally narrowed.
+type TextQuery struct {
+    Q                string   // required; matched against titles and descriptions
+    Country          string   // one country, optional
+    Seniority        []string // Himalayas's names, optional
+    EmploymentTypes  []string // Himalayas's names, optional
+    ExcludeWorldwide bool     // leave out jobs open anywhere
+}
+
 // RecentSearcher runs text searches newest first, a page at a time (Himalayas).
 type RecentSearcher interface {
     Searcher
@@ -182,16 +191,17 @@ How jhh uses it:
 How jhh will use it:
 - **Queries live in Himalayas's source settings**, like The Muse's, set by the agent with `set_source`: `{"queries": [{"q": "platform engineer", "country": "US", "seniority": ["Senior"], "employment_types": ["Full Time"], "exclude_worldwide": false}]}`, up to 10, each needing `q`. Seniority and employment types must be Himalayas's names, which jhh checks. The filters can't stand in for a query: `q` is matched against descriptions too, so a title word like "engineer" alone would hit the 5,000 cap. With no query, Himalayas needs setup.
 - **Each refresh reads only what changed since the last.** Each query keeps a stopping point in jhh's own state for the source, apart from its settings. A refresh reads the query's pages newest first until a page's oldest job is older than the stopping point, then sets the new stopping point to the newest `pubDate` it saw, minus one hour. The stopping point comes from what Himalayas returned, not from jhh's clock, and the hour reaches back past the edge cache, so a job updated just before a cached page was built is still read next time; dedupe absorbs the overlap. A query with no stopping point (its first read, or after its query changes) reads back one day.
-- **Requests are shared out.** Himalayas gets 50 requests a refresh in all without a key and 250 with one, one a second either way, divided evenly among its queries, with what one query doesn't use passed on to the next. When a query's share runs out before its stopping point, the oldest job it reached becomes the new stopping point anyway: the next refresh carries on from the present instead of starting the same read over, and refresh reports the gap (that query, and the hours between the oldest job read and the old stopping point) so the agent can narrow it. A query is reported as too broad only when one refresh's new jobs don't fit its share; falling behind once, for example after a few days without a refresh, costs that one gap and nothing after.
+- **Requests are shared out.** Himalayas gets 50 requests a refresh in all without a key and 250 with one, one a second either way, divided evenly among its queries, with what one query doesn't use passed on to the next. When a query's share runs out before its stopping point, its new stopping point is set as after a complete read, from the newest `pubDate` it saw, minus one hour, so the next refresh reads only what arrived since. The jobs between the oldest one it read and the old stopping point are skipped for good, and refresh reports that gap (the query and those hours) so the agent can narrow it. A query is reported as too broad only when one refresh's new jobs don't fit its share (it ran out although its previous read was complete); falling behind once, for example after a few days without a refresh, costs that one gap and nothing after.
 - **Closing.** A search that reads only what changed can't tell a closed job from a quiet one, so:
   - a posting closes when its `expiryDate` passes (stored with the posting). This needs no request, so it happens on every refresh, even while Himalayas is paused: the terms ask that expired jobs be removed. Closing is that removal: a closed job leaves the lists the agent screens and the dashboard's open views, and untouched closed jobs are deleted by the usual retention;
-  - postings of jobs you are pursuing (`review` onward) are checked one by one, least recently seen first, within the refresh's 25 lookups, and close on 410 or 404;
+  - postings of jobs you are pursuing (`review` onward) are checked one by one, least recently seen first, within the refresh's 25 lookups (one limit shared by every search source, as now), and close on 410 or 404;
   - other jobs that close before they expire stay open in jhh until then. Screening may meet one; its link shows that it's closed.
 - **Places:** every job is remote. Its `locationRestrictions` are the places, so "United States, Canada" is remote in the US or Canada, and an empty list is remote anywhere, which the filters' `remote_in` and `location.unknown` judge as usual.
 - **Pay** is read from the structured fields only when the currency is given: annual as yearly, monthly and hourly as they are. Weekly and fortnightly pay is left out, since turning it into a year would guess how many weeks are worked; missing figures are left out too.
 - **The link** is `applicationLink`, unchanged. The dashboard shows "via Himalayas", and the job's link is its page on Himalayas.
 - **Board postings win**, as for every search source, and its results go through the same storing, dedupe and prefilter as The Muse's.
-- **The key is optional** and follows the rules in "Keys" below. With one saved, every request sends it; a 429 stops Himalayas for that refresh, waiting no longer than its `Retry-After` allows within the refresh. A 401 means Himalayas no longer accepts the key: that refresh carries on without it, within the keyless budget, and the Sources tab and `list_sources` say the key was refused, so a revoked key never stops the search.
+- **A 429 stops Himalayas for the rest of the refresh**, with or without a key (the client's one short retry aside). The query that hit it, and any query not reached, keep their old stopping points, so the next refresh reads their windows again in full: a rate limit isn't the query's fault, so it never causes a gap.
+- **The key is optional** and follows the rules in "Keys" below. With one saved, every request sends it. A 401 means Himalayas no longer accepts the key: that refresh carries on without it, within the keyless budget, and the Sources tab and `list_sources` say the key was refused, so a revoked key never stops the search.
 
 ### Turning sources on and off
 
