@@ -189,7 +189,7 @@ func splitRoles(part string) []string {
 // remote. A name jhh can't place in a country or region ("Series B") isn't
 // taken as a place.
 func isPlace(s string) bool {
-	loc := normalize.ParseLocation(s, "", "", "")
+	loc := normalize.ParseStatedLocation(s)
 	return loc.Workplace != normalize.Unknown ||
 		slices.ContainsFunc(loc.Places, func(p normalize.Place) bool { return p.Country != "" || p.Region != "" })
 }

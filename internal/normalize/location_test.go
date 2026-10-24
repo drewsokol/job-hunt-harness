@@ -65,6 +65,15 @@ func TestParseLocation(t *testing.T) {
 		{name: "anywhere in the world", raw: "REMOTE ALMOST ANYWHERE IN THE WORLD", wantWorkplace: Remote, wantPlaces: []Place{{Region: Worldwide}}},
 		{name: "anywhere alone is not worldwide", raw: "Remote anywhere in the US", wantWorkplace: Remote, wantPlaces: []Place{country("US")}},
 		{name: "but", raw: "Remote but Austin based only", wantWorkplace: Remote, wantPlaces: []Place{us("Austin", "TX")}},
+		{name: "place inside a phrase", raw: "DE Frankfurt a.M., ONSITE/HYBRID PREFERRED", wantWorkplace: Hybrid, wantPlaces: []Place{{City: "Frankfurt", Country: "DE"}}},
+		{name: "greater area", raw: "Greater Boston Area", wantWorkplace: Unknown, wantPlaces: []Place{us("Boston", "MA")}},
+		{name: "title parts are exact", title: "Robotics Engineer - Boston Dynamics team", wantWorkplace: Unknown},
+		{name: "longer name isn't the place in it", raw: "Remote - New England", wantWorkplace: Remote, wantPlaces: []Place{{City: "New England"}}},
+		{name: "longer name of three words", raw: "Remote - New South Wales", wantWorkplace: Remote, wantPlaces: []Place{{City: "New South Wales"}}},
+		{name: "region name isn't the country in it", raw: "Remote - Central America", wantWorkplace: Remote, wantPlaces: []Place{{City: "Central America"}}},
+		{name: "places ruled out aren't places", raw: "Remote, not available in California", wantWorkplace: Remote, wantPlaces: []Place{{City: "not available California"}}},
+		{name: "phrase naming two places", raw: "Remote (US & Canada)", wantWorkplace: Remote, wantPlaces: []Place{country("US"), country("CA")}},
+		{name: "phrase naming two places in words", raw: "Remote - United States and Canada", wantWorkplace: Remote, wantPlaces: []Place{country("US"), country("CA")}},
 
 		// Titles
 		{
@@ -106,6 +115,9 @@ func TestParseFreeformLocation(t *testing.T) {
 		{"Remote but Austin based only", Remote, []Place{{City: "Austin", Region: "TX", Country: "US"}}},
 		{"REMOTE (US/Canada)", Remote, []Place{{Country: "US"}, {Country: "CA"}}},
 		{"Onsite | Columbus, OH", Onsite, []Place{{City: "Columbus", Region: "OH", Country: "US"}}},
+		{"DE Frankfurt a.M., ONSITE/HYBRID PREFERRED", Hybrid, []Place{{City: "Frankfurt", Country: "DE"}}},
+		{"Remote (US & Canada)", Remote, []Place{{Country: "US"}, {Country: "CA"}}},
+		{"Remote (work with us from anywhere in Europe)", Remote, []Place{{Region: "Europe"}}},
 		{"Springfield", Unknown, nil},
 	}
 	for _, tt := range tests {

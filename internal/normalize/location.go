@@ -61,18 +61,53 @@ var (
 // title. With no hint and no workplace words, the workplace is unknown: a
 // city alone doesn't say whether remote work is possible.
 func ParseLocation(raw, title, workplaceHint, countryHint string) Location {
-	return parseLocation(raw, title, workplaceHint, countryHint, false)
+	return parseLocation(raw, title, workplaceHint, countryHint, lenient)
 }
+
+// placeMode says how parsePlaces treats words it doesn't recognize.
+type placeMode int
+
+const (
+	// lenient reads a location field: a known place inside a longer phrase
+	// is found ("DE Frankfurt a.M."), and other text is kept as a city.
+	lenient placeMode = iota
+	// freeform reads location text a person wrote freely: known places are
+	// found inside phrases, and other words are ignored.
+	freeform
+	// entry reads a place a person wrote on purpose, such as a filter
+	// entry: other text is kept as a city, but a phrase isn't searched for
+	// places, so free text stays an error for the agent to rewrite.
+	entry
+	// exact reads text that may not be a location at all, such as a title
+	// part: only a part that is a known place counts ("Boston Dynamics"
+	// isn't Boston).
+	exact
+)
+
+// searchesPhrases reports whether m looks for a known place inside a
+// longer phrase.
+func (m placeMode) searchesPhrases() bool { return m == lenient || m == freeform }
+
+// keepsUnknown reports whether m keeps text it can't place as a city.
+func (m placeMode) keepsUnknown() bool { return m == lenient || m == entry }
 
 // ParseFreeformLocation is ParseLocation for location text a person wrote
 // freely, such as a Hacker News ad's header ("Remote (some overlap with
 // PST)"): only places jhh recognizes count, and other words are ignored
 // instead of kept as a city.
 func ParseFreeformLocation(raw, title, workplaceHint, countryHint string) Location {
-	return parseLocation(raw, title, workplaceHint, countryHint, true)
+	return parseLocation(raw, title, workplaceHint, countryHint, freeform)
 }
 
-func parseLocation(raw, title, workplaceHint, countryHint string, strict bool) Location {
+// ParseStatedLocation is ParseLocation for text that may not be about a
+// location at all, such as one part of a Hacker News ad's header: a known
+// place inside a longer phrase isn't searched for, so "Making US healthcare
+// cheaper" names no place.
+func ParseStatedLocation(raw string) Location {
+	return parseLocation(raw, "", "", "", entry)
+}
+
+func parseLocation(raw, title, workplaceHint, countryHint string, mode placeMode) Location {
 	var loc Location
 	var remote, hybrid, onsite bool
 	add := func(p Place) {
@@ -80,22 +115,22 @@ func parseLocation(raw, title, workplaceHint, countryHint string, strict bool) L
 			loc.Places = append(loc.Places, p)
 		}
 	}
-	scan := func(seg string, strict bool) {
+	scan := func(seg string, mode placeMode) {
 		remote = remote || remoteWords.MatchString(seg)
 		hybrid = hybrid || hybridWords.MatchString(seg)
 		onsite = onsite || onsiteWords.MatchString(seg)
-		for _, p := range parsePlaces(seg, strict) {
+		for _, p := range parsePlaces(seg, mode) {
 			add(p)
 		}
 	}
 	for _, seg := range segmentSep.Split(raw, -1) {
-		scan(seg, strict)
+		scan(seg, mode)
 	}
 	// The first title part is the role itself; only trailing parts can be
 	// locations, and only recognized places count.
 	if parts := titleSep.Split(title, -1); len(parts) > 1 {
 		for _, seg := range parts[1:] {
-			scan(seg, true)
+			scan(seg, exact)
 		}
 	}
 
@@ -132,9 +167,9 @@ func parseLocation(raw, title, workplaceHint, countryHint string, strict bool) L
 	return loc
 }
 
-// parsePlaces reads the places in one segment. In strict mode only
-// recognized places are returned.
-func parsePlaces(seg string, strict bool) []Place {
+// parsePlaces reads the places in one segment; mode says what happens to
+// words it doesn't recognize.
+func parsePlaces(seg string, mode placeMode) []Place {
 	seg = worldWords.ReplaceAllString(seg, " worldwide ")
 	seg = remoteWords.ReplaceAllString(seg, " ")
 	seg = hybridWords.ReplaceAllString(seg, " ")
@@ -155,7 +190,12 @@ func parsePlaces(seg string, strict bool) []Place {
 		if p, ok := knownPlace(parts[0]); ok {
 			return []Place{p}
 		}
-		if strict || !looksLikeName(parts[0]) {
+		if mode.searchesPhrases() {
+			if ps := placesInWords(parts[0]); len(ps) > 0 {
+				return dropCovered(ps)
+			}
+		}
+		if !mode.keepsUnknown() || !looksLikeName(parts[0]) {
 			return nil
 		}
 		return []Place{{City: parts[0]}}
@@ -210,15 +250,75 @@ func parsePlaces(seg string, strict bool) []Place {
 	for _, part := range parts {
 		if kp, ok := knownPlace(part); ok {
 			known = append(known, kp)
+		} else if mode.searchesPhrases() {
+			known = append(known, placesInWords(part)...)
 		}
 	}
 	if len(known) > 0 {
 		return dropCovered(known)
 	}
-	if strict || !looksLikeName(strings.Join(parts, " ")) {
+	if !mode.keepsUnknown() || !looksLikeName(strings.Join(parts, " ")) {
 		return nil
 	}
 	return []Place{{City: strings.Join(parts, ", ")}}
+}
+
+// placesInWords finds the places named inside a longer phrase ("DE
+// Frankfurt a.M.", "Greater Boston Area", "US & Canada"): runs of up to
+// three words that are places jhh knows, longest runs first, none sharing a
+// word, in the order the phrase names them. A run that the word before it
+// makes part of a longer name ("New England", "Central America") doesn't
+// count, and "us" counts only in capitals ("work with us" isn't the US). A
+// phrase that rules places out ("not available in California") names none.
+func placesInWords(s string) []Place {
+	words := strings.Fields(s)
+	if slices.ContainsFunc(words, func(w string) bool { return exclusionWords[strings.ToLower(strings.Trim(w, edgeJunk))] }) {
+		return nil
+	}
+	used := make([]bool, len(words))
+	type found struct {
+		at int
+		p  Place
+	}
+	var out []found
+	for n := min(3, len(words)-1); n >= 1; n-- {
+		for i := 0; i+n <= len(words); i++ {
+			if slices.Contains(used[i:i+n], true) {
+				continue
+			}
+			if i > 0 && nameJoiners[strings.ToLower(strings.Trim(words[i-1], edgeJunk))] {
+				continue
+			}
+			run := strings.Trim(strings.Join(words[i:i+n], " "), edgeJunk)
+			if strings.EqualFold(run, "us") && run != "US" {
+				continue
+			}
+			if p, ok := knownPlace(run); ok {
+				out = append(out, found{i, p})
+				for j := i; j < i+n; j++ {
+					used[j] = true
+				}
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b found) int { return cmp.Compare(a.at, b.at) })
+	var ps []Place
+	for _, f := range out {
+		ps = append(ps, f.p)
+	}
+	return ps
+}
+
+// nameJoiners are words that start a longer place name around a known one:
+// "New England" isn't England, and "Central America" isn't the US.
+var nameJoiners = map[string]bool{
+	"new": true, "north": true, "south": true, "east": true, "west": true, "central": true,
+	"northern": true, "southern": true, "eastern": true, "western": true, "latin": true,
+}
+
+// exclusionWords say a phrase names places the job is not in.
+var exclusionWords = map[string]bool{
+	"not": true, "except": true, "excluding": true, "excludes": true, "outside": true, "no": true,
 }
 
 // slashedPlaces splits "US/Canada" into its places when every piece is one
@@ -346,9 +446,9 @@ func looksLikeName(s string) bool {
 func IsLocationText(s string) bool {
 	if remoteWords.MatchString(s) || hybridWords.MatchString(s) || onsiteWords.MatchString(s) {
 		rest := strings.Trim(onsiteWords.ReplaceAllString(hybridWords.ReplaceAllString(remoteWords.ReplaceAllString(s, ""), ""), ""), edgeJunk)
-		return rest == "" || len(parsePlaces(rest, true)) > 0
+		return rest == "" || len(parsePlaces(rest, exact)) > 0
 	}
-	return len(parsePlaces(s, true)) > 0
+	return len(parsePlaces(s, exact)) > 0
 }
 
 var (

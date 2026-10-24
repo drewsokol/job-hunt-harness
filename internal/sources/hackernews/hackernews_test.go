@@ -194,6 +194,9 @@ func TestParseAd(t *testing.T) {
 		// A note that isn't a place isn't taken as one.
 		{"Exampleco (Series B) | ONSITE | Columbus, OH",
 			ad{Company: "Exampleco", Location: "ONSITE | Columbus, OH"}, adOK},
+		// Nor is a blurb that mentions one.
+		{"Exampleco | Senior Engineer | Making US paperwork faster | Full-time",
+			ad{Company: "Exampleco", Title: "Senior Engineer", Employment: "Full-time"}, adOK},
 		{"Exampleco | Data Engineer | Columbus, OH | positions filled", ad{}, adFilled},
 		{"Exampleco | Data Engineer [closed]", ad{}, adFilled},
 		{"We're hiring engineers at a made-up company, come say hi!", ad{}, adUnreadable},

@@ -315,12 +315,13 @@ func (c *Compiled) location(in Input, body *text, reason func(rule, effect, form
 			unclear("remote in %s; can't tell if that's within remote_in", summary(places))
 		}
 	case normalize.Hybrid, normalize.Onsite:
-		if len(places) == 0 {
-			unclear("%s, but it doesn't say where", in.Workplace)
-			return
-		}
+		// With nowhere to go in, an office job is out wherever it is.
 		if len(c.onsiteIn) == 0 {
 			reason("location", EffectDrop, "%s, and onsite_or_hybrid_in is empty", in.Workplace)
+			return
+		}
+		if len(places) == 0 {
+			unclear("%s, but it doesn't say where", in.Workplace)
 			return
 		}
 		switch best(places, c.onsiteIn, within) {
