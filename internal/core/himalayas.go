@@ -281,8 +281,9 @@ queries:
 // source is on, pursued postings are looked up instead, and closed only
 // when the source says they're gone; a lookup that finds one records its
 // new expiry date. While it's off, nothing is looked up, and pursued
-// postings close at their stored expiry like the rest.
-func (r *Refresher) closeRecent(ctx context.Context, sr *searchResult, sum *SearchSummary, s sources.Searcher, on bool, since time.Time) error {
+// postings close at their stored expiry like the rest. A lookup the source
+// refuses the key for is tried again without it, and refused is called.
+func (r *Refresher) closeRecent(ctx context.Context, sr *searchResult, sum *SearchSummary, s sources.Searcher, on bool, since time.Time, refused func()) error {
 	closed, err := r.Store.CloseExpired(ctx, r.By, s.Name(), !on)
 	sr.out.ClosedJobs = append(sr.out.ClosedJobs, closed...)
 	if sum != nil {
@@ -297,13 +298,21 @@ func (r *Refresher) closeRecent(ctx context.Context, sr *searchResult, sum *Sear
 		return err
 	}
 	var gone []string
-	for _, ref := range refs {
+	for i := 0; i < len(refs); i++ {
+		ref := refs[i]
 		if sr.lookups >= limit {
 			break
 		}
 		sr.lookups++
 		sum.Lookups++
 		p, err := s.Lookup(ctx, ref.ExternalID)
+		if errors.Is(err, sources.ErrKeyRefused) && !sources.Keyless(ctx) {
+			// The key no longer works: look this one and the rest up without it.
+			ctx = sources.WithoutKey(ctx)
+			refused()
+			i--
+			continue
+		}
 		switch {
 		case err == nil:
 			if err := r.Store.SeenPosting(ctx, ref.PostingID, p.ExpiresAt); err != nil {
@@ -339,7 +348,7 @@ func (r *Refresher) runHimalayas(ctx context.Context, sr *searchResult, plan sea
 	}
 	since := utc.Now()
 	if plan.himalayas == nil {
-		return r.closeRecent(ctx, sr, nil, s, false, since)
+		return r.closeRecent(ctx, sr, nil, s, false, since, nil)
 	}
 	st := readHimalayasState(plan.himalayasState)
 	var sum *SearchSummary
@@ -351,8 +360,14 @@ func (r *Refresher) runHimalayas(ctx context.Context, sr *searchResult, plan sea
 		return err
 	}
 	sum = &sr.summaries[len(sr.summaries)-1]
+	// Once the search found the key refused, the lookups go without it too.
+	lookups := ctx
+	if !st.KeyRefusedAt.IsZero() {
+		lookups = sources.WithoutKey(ctx)
+	}
+	cerr := r.closeRecent(lookups, sr, sum, s, true, since, func() { st.KeyRefusedAt = utc.Now() })
 	if err := r.Store.SetSourceState(ctx, s.Name(), mustJSON(st)); err != nil {
 		return err
 	}
-	return r.closeRecent(ctx, sr, sum, s, true, since)
+	return cerr
 }

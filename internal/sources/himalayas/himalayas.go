@@ -15,6 +15,7 @@ package himalayas
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -187,10 +188,12 @@ func (s *Source) Lookup(ctx context.Context, id string) (sources.Posting, error)
 }
 
 // Verify checks a key with one small request, before it is saved. It
-// returns sources.ErrKeyRefused when Himalayas doesn't accept it.
+// returns sources.ErrKeyRefused when Himalayas doesn't accept it. The
+// search is one no one has made, so Himalayas's edge cache can't answer
+// it without checking the key.
 func (s *Source) Verify(ctx context.Context, key string) error {
 	var p page
-	return s.request(ctx, "/search?q=engineer&page=1", key, &p)
+	return s.request(ctx, "/search?q=jhh-key-check-"+rand.Text()+"&page=1", key, &p)
 }
 
 // get makes one request with the saved key, unless ctx says to go without

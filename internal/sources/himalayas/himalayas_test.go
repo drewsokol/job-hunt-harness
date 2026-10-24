@@ -89,9 +89,10 @@ func TestSearchRecent(t *testing.T) {
 }
 
 func TestKey(t *testing.T) {
-	var auth []string
+	var auth, queries []string
 	s := newTestSource(t, testKey, func(w http.ResponseWriter, r *http.Request) {
 		auth = append(auth, r.Header.Get("Authorization"))
+		queries = append(queries, r.URL.Query().Get("q"))
 		if r.Header.Get("Authorization") != "" && r.Header.Get("Authorization") != "Bearer "+testKey {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -111,12 +112,17 @@ func TestKey(t *testing.T) {
 	if !s.HasKey() {
 		t.Error("HasKey")
 	}
+	queries = nil
 	if err := s.Verify(ctx, testKey); err != nil {
 		t.Errorf("good key: %v", err)
 	}
 	err := s.Verify(ctx, "made-up-wrong-key")
 	if !errors.Is(err, sources.ErrKeyRefused) || strings.Contains(err.Error(), "made-up-wrong-key") {
 		t.Errorf("wrong key: %v", err)
+	}
+	// Each check searches for something new, so no cached reply answers it.
+	if len(queries) != 2 || queries[0] == queries[1] || !strings.HasPrefix(queries[0], "jhh-key-check-") {
+		t.Errorf("checks searched %q; want two different searches", queries)
 	}
 }
 

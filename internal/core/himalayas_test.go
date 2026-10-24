@@ -29,6 +29,9 @@ type fakeRecent struct {
 	gone     map[string]bool
 	expires  time.Time // what a lookup that finds a job says about its expiry
 	lookups  []string
+
+	refuseLookups bool   // the saved key is refused for lookups only
+	lookupKeyless []bool // whether each lookup went without the key
 }
 
 func (s *fakeRecent) Name() string   { return "himalayas" }
@@ -54,9 +57,13 @@ func (s *fakeRecent) SearchRecent(ctx context.Context, _ sources.TextQuery, page
 	return sources.SearchResult{Postings: ps[lo:hi], Pages: (len(ps) + size - 1) / size}, nil
 }
 
-func (s *fakeRecent) Lookup(_ context.Context, id string) (sources.Posting, error) {
+func (s *fakeRecent) Lookup(ctx context.Context, id string) (sources.Posting, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.lookupKeyless = append(s.lookupKeyless, sources.Keyless(ctx))
+	if s.keyed && (s.refuse || s.refuseLookups) && !sources.Keyless(ctx) {
+		return sources.Posting{}, fmt.Errorf("himalayas: %w", sources.ErrKeyRefused)
+	}
 	s.lookups = append(s.lookups, id)
 	if s.gone[id] {
 		return sources.Posting{}, sources.ErrPostingNotFound
@@ -235,6 +242,43 @@ func TestHimalayasRefusedKeyCarriesOnWithout(t *testing.T) {
 	f.refresh()
 	if sourceByName(t, f.s, "himalayas").KeyRefused {
 		t.Error("the key is still marked refused after it worked")
+	}
+}
+
+func TestHimalayasRefusedKeyLooksUpWithout(t *testing.T) {
+	p := recentPosting("1", "Platform Engineer", time.Hour)
+	p.ExpiresAt = utc.Now().Add(2 * time.Second).Truncate(time.Second)
+	f, s := newHimalayasFixture(t, p)
+	s.keyed = true
+	f.refresh()
+	id := f.jobsByTitle()["Platform Engineer"].ID
+	if err := f.s.SetJobStatus(context.Background(), store.ActorUser, id, store.StatusReview); err != nil {
+		t.Fatal(err)
+	}
+	// Past its stored expiry and not in the search, so it's looked up.
+	time.Sleep(3 * time.Second)
+	s.postings = nil
+	s.expires = utc.Now().Add(30 * 24 * time.Hour).Truncate(time.Second)
+
+	// The search found the key refused, so the lookup goes without it.
+	s.refuse = true
+	s.lookupKeyless = nil
+	f.refresh()
+	if !slices.Equal(s.lookupKeyless, []bool{true}) || f.jobsByTitle()["Platform Engineer"].Closed {
+		t.Errorf("lookups keyless %v, closed %v; want one keyless lookup that keeps it open",
+			s.lookupKeyless, f.jobsByTitle()["Platform Engineer"].Closed)
+	}
+
+	// Refused only by a lookup: that lookup is tried again without the key,
+	// and the key is marked refused.
+	s.refuse, s.refuseLookups = false, true
+	s.lookupKeyless = nil
+	f.refresh()
+	if !slices.Equal(s.lookupKeyless, []bool{false, true}) || f.jobsByTitle()["Platform Engineer"].Closed {
+		t.Errorf("lookups keyless %v; want the key, then none", s.lookupKeyless)
+	}
+	if !sourceByName(t, f.s, "himalayas").KeyRefused {
+		t.Error("a key refused by a lookup isn't marked refused")
 	}
 }
 
