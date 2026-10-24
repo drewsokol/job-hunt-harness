@@ -18,6 +18,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 
 - [x] Hacker News's monthly "Who is hiring?" threads as a search source (`search.hackernews` in the filters)
 - [x] Sources screen and tools: turn each search source on and off and change its settings from the dashboard or through MCP (`list_sources`, `set_source`), moving `search` out of the filters
+- [ ] Himalayas as a search source: remote jobs across employers, searched by the agent's queries, with no key
 
 ## Next (M6–M8)
 
