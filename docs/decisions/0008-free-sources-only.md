@@ -1,6 +1,6 @@
 # 0008: Ship only sources that are free to use
 
-Status: Accepted, 2026-10-24. Supersedes the keys part of [0007](0007-source-settings.md).
+Status: Accepted, 2026-10-24. Supersedes the keys part of [0007](0007-source-settings.md). Its "key storage isn't built" is superseded by [0009](0009-optional-keys.md); the rule that every source is free stands.
 
 ## Context
 

@@ -170,7 +170,7 @@ How jhh uses it:
 - **Dedupe:** Hacker News allows one ad per company in each thread, so an employer's new ad continues its earlier one when they share a role, or when either names no role; the job takes the newest ad's roles. An ad for entirely different roles is a job of its own. (Text alone can't decide this: descriptions are only kept for jobs that pass stage 1.) When the employer's board is added later, a board posting joins the ad's job if its title matches one of the ad's roles, and the job takes the board's title: the board has confirmed which opening it is, so the ad's other roles no longer count for or against it.
 
 **Himalayas** (planned) adds remote jobs across employers of every size, between The Muse's large employers and Hacker News's startups. Himalayas lists only remote jobs, about 126,000 of them on 2026-10-24. What its API offers, checked that day with live calls and against its API page and terms (himalayas.app/api, himalayas.app/terms):
-- **No account or key.** A free key raises the limits (60 requests a minute, 10,000 a day), but every request works without one, and jhh doesn't use one ([decision 0008](decisions/0008-free-sources-only.md)). Requests without a key share one public allowance with every other caller, its size unpublished; going over returns 429. Replies are cached for an hour at Himalayas's edge, and cached replies don't count. The test calls carried no rate-limit headers.
+- **No account or key needed; a free key is optional.** Every request works without a key. Requests without one share one public allowance with every other caller, its size unpublished; going over returns 429. A key, free with a Himalayas account (checked by signing up, as [decision 0008](decisions/0008-free-sources-only.md) asks: no card, plan or trial), gives the account its own limit of 60 requests a minute and 10,000 a UTC day. It is sent as `Authorization: Bearer <key>`, never in the URL; a 429 with a key carries `Retry-After` and `X-RateLimit-*` headers, and an invalid, revoked or suspended key returns 401. Replies are cached for an hour at Himalayas's edge, and cached replies don't count. The keyless test calls carried no rate-limit headers.
 - **Use:** personal and commercial use is allowed without asking. The terms ask that Himalayas be clearly named as the source, with a link; that the apply link be used as given (`applicationLink`, the job's page on Himalayas, never swapped for the employer's); that jobs not be passed on to other job boards or aggregators; and that jobs be removed once they expire. jhh shows jobs only to its own user, and closes them at their expiry (below).
 - **Search:** `/jobs/api/search` with `q` (free text), `country` (one country: an ISO code or a name; two are refused with HTTP 400), `exclude_worldwide`, `seniority` (several values, comma-separated: Entry-level, Mid-level, Senior, Manager, Director, Executive), `employment_type` and `sort=recent`, 20 to a page, numbered from 1. `q` matches descriptions as well as titles: "kubernetes" in the US returned 20 jobs with it in the description and none in the title. Searches stop at 5,000 results; "platform engineer" alone was 4,725.
 - **A country search includes worldwide jobs** unless `exclude_worldwide` is set: "platform engineer" in the US was 3,433 jobs, 3,226 without worldwide ones. On a page of 19, 18 listed the US and one was open worldwide.
@@ -182,7 +182,7 @@ How jhh uses it:
 How jhh will use it:
 - **Queries live in Himalayas's source settings**, like The Muse's, set by the agent with `set_source`: `{"queries": [{"q": "platform engineer", "country": "US", "seniority": ["Senior"], "employment_types": ["Full Time"], "exclude_worldwide": false}]}`, up to 10, each needing `q`. Seniority and employment types must be Himalayas's names, which jhh checks. The filters can't stand in for a query: `q` is matched against descriptions too, so a title word like "engineer" alone would hit the 5,000 cap. With no query, Himalayas needs setup.
 - **Each refresh reads only what changed since the last.** Each query keeps a stopping point in jhh's own state for the source, apart from its settings. A refresh reads the query's pages newest first until a page's oldest job is older than the stopping point, then sets the new stopping point to the newest `pubDate` it saw, minus one hour. The stopping point comes from what Himalayas returned, not from jhh's clock, and the hour reaches back past the edge cache, so a job updated just before a cached page was built is still read next time; dedupe absorbs the overlap. A query with no stopping point (its first read, or after its query changes) reads back one day.
-- **Requests are shared out.** Himalayas gets 50 requests a refresh in all, one a second, divided evenly among its queries, with what one query doesn't use passed on to the next. When a query's share runs out before its stopping point, the oldest job it reached becomes the new stopping point anyway: the next refresh carries on from the present instead of starting the same read over, and refresh reports the gap (that query, and the hours between the oldest job read and the old stopping point) so the agent can narrow it. A query is reported as too broad only when one refresh's new jobs don't fit its share; falling behind once, for example after a few days without a refresh, costs that one gap and nothing after.
+- **Requests are shared out.** Himalayas gets 50 requests a refresh in all without a key and 250 with one, one a second either way, divided evenly among its queries, with what one query doesn't use passed on to the next. When a query's share runs out before its stopping point, the oldest job it reached becomes the new stopping point anyway: the next refresh carries on from the present instead of starting the same read over, and refresh reports the gap (that query, and the hours between the oldest job read and the old stopping point) so the agent can narrow it. A query is reported as too broad only when one refresh's new jobs don't fit its share; falling behind once, for example after a few days without a refresh, costs that one gap and nothing after.
 - **Closing.** A search that reads only what changed can't tell a closed job from a quiet one, so:
   - a posting closes when its `expiryDate` passes (stored with the posting). This needs no request, so it happens on every refresh, even while Himalayas is paused: the terms ask that expired jobs be removed. Closing is that removal: a closed job leaves the lists the agent screens and the dashboard's open views, and untouched closed jobs are deleted by the usual retention;
   - postings of jobs you are pursuing (`review` onward) are checked one by one, least recently seen first, within the refresh's 25 lookups, and close on 410 or 404;
@@ -191,6 +191,7 @@ How jhh will use it:
 - **Pay** is read from the structured fields only when the currency is given: annual as yearly, monthly and hourly as they are. Weekly and fortnightly pay is left out, since turning it into a year would guess how many weeks are worked; missing figures are left out too.
 - **The link** is `applicationLink`, unchanged. The dashboard shows "via Himalayas", and the job's link is its page on Himalayas.
 - **Board postings win**, as for every search source, and its results go through the same storing, dedupe and prefilter as The Muse's.
+- **The key is optional** and follows the rules in "Keys" below. With one saved, every request sends it; a 429 stops Himalayas for that refresh, waiting no longer than its `Retry-After` allows within the refresh. A 401 means Himalayas no longer accepts the key: that refresh carries on without it, within the keyless budget, and the Sources tab and `list_sources` say the key was refused, so a revoked key never stops the search.
 
 ### Turning sources on and off
 
@@ -208,7 +209,14 @@ Added after the MVP; see [decision 0007](decisions/0007-source-settings.md). **T
 - **On the dashboard**, each search source has its switch and its last run; Hacker News's months can be changed there, and The Muse's queries are shown as text, with the phrase to ask the agent for a change, since picking categories is judgment.
 - **Moving existing setups over:** migration 0003 copies the active filters' `search` section into the source settings (a Muse query turns The Muse on; `hackernews` turns Hacker News on, and its absence turns it off, so nothing changes for existing users), then saves a new filter version without `search`, written by `system`. Afterwards `set_filters` rejects `search` with an error that names `set_source`, so an agent working from old instructions learns the new place.
 
-**Sources that need an account** aren't built. Adzuna was planned, with its key entered only in the dashboard, until signing up showed its "free" key is 25 test calls, with real use at £8 a month; see [decision 0008](decisions/0008-free-sources-only.md).
+**Keys** (planned, for Himalayas; [decision 0009](decisions/0009-optional-keys.md)). A source may take an optional key when the key is free and the source works without it. jhh keeps a key on your machine and out of the agent's hands:
+- **A key is entered only in the dashboard**, on the source's card on the Sources tab, never through MCP or the CLI. It never passes through the agent's context or a chat transcript.
+- **It's never sent back out.** The API and the page show only "key saved", with Replace and Remove; no tool returns it, and logs and errors never contain it. `list_sources` says only whether a key is saved and whether the service last refused it.
+- **It lives in its own file**, `keys.json` in the data directory, readable only by your OS user, not in the SQLite file, so backups and exports never contain it.
+- **jhh sends a key only to the service it belongs to**, over HTTPS, in a header rather than the URL.
+- **Saving a key checks it** with one request first; a key the service refuses isn't saved. Removing it changes nothing else: the source goes on without one.
+
+**Sources that require an account** aren't built. Adzuna was planned, with its key entered only in the dashboard, until signing up showed its "free" key is 25 test calls, with real use at £8 a month; see [decision 0008](decisions/0008-free-sources-only.md).
 
 ### What each board's API allows (tested against live feeds, 2026-10-18)
 
@@ -474,7 +482,7 @@ memories       id, kind, content, basis(user_said|inferred), evidence, evidence_
 memories_fts   FTS5 index over memories.content (after the MVP)
 settings       key, value                                       -- ask_percentile=0.85, port, etc.
 sources        name PK, enabled (NULL until someone chooses), settings, reason, last_run_at, last_postings,
-               last_error, updated_at, updated_by               -- a source with no row has its defaults
+               last_error, updated_at, updated_by               -- a source with no row has its defaults; keys never go here
                state (planned: jhh's own record of how far each query was read; not a setting)
 fetch_runs     id, started_at, finished_at, companies, postings, new_jobs, passed, errors_json
 content_flags  id, posting_id, detector(rule:<name>|agent:<name>), kind(canary|hostile|hidden_text|unclear),
@@ -541,7 +549,7 @@ Tool outputs are compact JSON written with the agent's context window in mind. D
 | `preview_filters(filters)` | Dry run: counts and examples of what would be newly dropped or newly kept. |
 | `set_filters(filters, rationale, confirm=false)` | Saves a new filter version and re-runs the prefilter. Subject to the guardrail in section 3. |
 | `get_filter_history()` | Past versions, with their rationale and effect. |
-| `list_sources()` / `set_source(name, enabled?, settings?, reason?)` | Every source with its status (`on`, `off`, `needs setup`), settings, last run and last error; and turning a search source on or off or changing its settings. Settings are checked by the source, and changes are recorded with the agent's name. |
+| `list_sources()` / `set_source(name, enabled?, settings?, reason?)` | Every source with its status (`on`, `off`, `needs setup`), settings, last run and last error; and turning a search source on or off or changing its settings. Settings are checked by the source, and changes are recorded with the agent's name. Keys can't be set or read here: a source says only whether one is saved (see "Keys"). |
 | `list_companies(query?)` / `add_company(name, where?)` / `set_company_enabled(company_id, enabled)` | `add_company` takes what `jhh companies add` takes: a board slug, `source:slug` or a link to one of the company's postings, or nothing to guess slugs from the name. It probes every source, adds the company when exactly one board matches, and otherwise returns the boards it found. |
 
 There are deliberately no delete tools in v1. Deleting is done in the UI, so an agent that goes wrong can't destroy data.
@@ -583,7 +591,7 @@ It is built with static HTML, CSS and vanilla JS, ported from the original perso
 | **Profile** | Markdown editor and resume paste box. Version history with author, summary, diff and Restore. A banner when the latest change came from an agent. |
 | **Memories** | Everything the agent has learned, grouped by kind. Inferred ones are marked, with Confirm and Archive. You can edit them inline, add your own, delete permanently, and see which agent wrote each one and when. |
 | **Filters** | The active filters as a readable form, with the agent's rationale. The version history shows each version's effect, with Restore. Manual edits are allowed and are saved as a new version written by "user". |
-| **Sources** | Every source with its status, last run and last error; on/off switches for search sources; each source's settings (Hacker News's months; The Muse's and Himalayas's queries, shown as text). Jobs from a paused source say "Source paused". |
+| **Sources** | Every source with its status, last run and last error; on/off switches for search sources; each source's settings (Hacker News's months; The Muse's and Himalayas's queries, shown as text). Jobs from a paused source say "Source paused". Planned: Himalayas's optional key, typed in once and afterwards shown only as "key saved", with Replace and Remove. |
 | **Companies** | List with ATS, slug, open postings, last fetch result; add (with probe results), enable/disable, remove; "Refresh now" with progress. |
 | **Settings / Connect** | Copy-paste MCP setup for Claude Code, Cursor, Claude Desktop and generic clients; data directory location; ask percentile; export/backup. |
 
@@ -632,6 +640,7 @@ The summary strip from the reference (to review, applications, applied in the la
 - **Logs contain IDs and counts only**: never profile, resume, memory or description text.
 - Before running a migration, jhh automatically copies the database to `backups/` and keeps the last five copies.
 - Exports carry a warning that they contain personal data.
+- **Keys for services** (planned) live in `keys.json` in the data directory, readable only by your OS user. They are entered only in the dashboard, never returned by the API or any tool, never logged, and never in the database, so backups and exports leave them out.
 - Encrypting the database is out of scope; OS disk encryption covers it.
 
 ### Proposed layout
