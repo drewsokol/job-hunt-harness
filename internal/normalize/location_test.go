@@ -68,6 +68,9 @@ func TestParseLocation(t *testing.T) {
 		{name: "place inside a phrase", raw: "DE Frankfurt a.M., ONSITE/HYBRID PREFERRED", wantWorkplace: Hybrid, wantPlaces: []Place{{City: "Frankfurt", Country: "DE"}}},
 		{name: "greater area", raw: "Greater Boston Area", wantWorkplace: Unknown, wantPlaces: []Place{us("Boston", "MA")}},
 		{name: "title parts are exact", title: "Robotics Engineer - Boston Dynamics team", wantWorkplace: Unknown},
+		{name: "longer name isn't the place in it", raw: "Remote - New England", wantWorkplace: Remote, wantPlaces: []Place{{City: "New England"}}},
+		{name: "longer name of three words", raw: "Remote - New South Wales", wantWorkplace: Remote, wantPlaces: []Place{{City: "New South Wales"}}},
+		{name: "region name isn't the country in it", raw: "Remote - Central America", wantWorkplace: Remote, wantPlaces: []Place{{City: "Central America"}}},
 
 		// Titles
 		{

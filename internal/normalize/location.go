@@ -74,11 +74,22 @@ const (
 	// freeform reads location text a person wrote freely: known places are
 	// found inside phrases, and other words are ignored.
 	freeform
+	// entry reads a place a person wrote on purpose, such as a filter
+	// entry: other text is kept as a city, but a phrase isn't searched for
+	// places, so free text stays an error for the agent to rewrite.
+	entry
 	// exact reads text that may not be a location at all, such as a title
 	// part: only a part that is a known place counts ("Boston Dynamics"
 	// isn't Boston).
 	exact
 )
+
+// searchesPhrases reports whether m looks for a known place inside a
+// longer phrase.
+func (m placeMode) searchesPhrases() bool { return m == lenient || m == freeform }
+
+// keepsUnknown reports whether m keeps text it can't place as a city.
+func (m placeMode) keepsUnknown() bool { return m == lenient || m == entry }
 
 // ParseFreeformLocation is ParseLocation for location text a person wrote
 // freely, such as a Hacker News ad's header ("Remote (some overlap with
@@ -171,12 +182,12 @@ func parsePlaces(seg string, mode placeMode) []Place {
 		if p, ok := knownPlace(parts[0]); ok {
 			return []Place{p}
 		}
-		if mode != exact {
+		if mode.searchesPhrases() {
 			if p, ok := placeInWords(parts[0]); ok {
 				return []Place{p}
 			}
 		}
-		if mode != lenient || !looksLikeName(parts[0]) {
+		if !mode.keepsUnknown() || !looksLikeName(parts[0]) {
 			return nil
 		}
 		return []Place{{City: parts[0]}}
@@ -231,7 +242,7 @@ func parsePlaces(seg string, mode placeMode) []Place {
 	for _, part := range parts {
 		if kp, ok := knownPlace(part); ok {
 			known = append(known, kp)
-		} else if mode != exact {
+		} else if mode.searchesPhrases() {
 			if kp, ok := placeInWords(part); ok {
 				known = append(known, kp)
 			}
@@ -240,7 +251,7 @@ func parsePlaces(seg string, mode placeMode) []Place {
 	if len(known) > 0 {
 		return dropCovered(known)
 	}
-	if mode != lenient || !looksLikeName(strings.Join(parts, " ")) {
+	if !mode.keepsUnknown() || !looksLikeName(strings.Join(parts, " ")) {
 		return nil
 	}
 	return []Place{{City: strings.Join(parts, ", ")}}
@@ -248,17 +259,29 @@ func parsePlaces(seg string, mode placeMode) []Place {
 
 // placeInWords finds a place named inside a longer phrase ("DE Frankfurt
 // a.M.", "Greater Boston Area"): the longest run of up to three words that
-// is a place jhh knows, the first one when runs tie.
+// is a place jhh knows, the first one when runs tie. A run that the word
+// before it makes part of a longer name ("New England", "Central America")
+// doesn't count.
 func placeInWords(s string) (Place, bool) {
 	words := strings.Fields(s)
 	for n := min(3, len(words)-1); n >= 1; n-- {
 		for i := 0; i+n <= len(words); i++ {
+			if i > 0 && nameJoiners[strings.ToLower(strings.Trim(words[i-1], edgeJunk))] {
+				continue
+			}
 			if p, ok := knownPlace(strings.Trim(strings.Join(words[i:i+n], " "), edgeJunk)); ok {
 				return p, true
 			}
 		}
 	}
 	return Place{}, false
+}
+
+// nameJoiners are words that start a longer place name around a known one:
+// "New England" isn't England, and "Central America" isn't the US.
+var nameJoiners = map[string]bool{
+	"new": true, "north": true, "south": true, "east": true, "west": true, "central": true,
+	"northern": true, "southern": true, "eastern": true, "western": true, "latin": true,
 }
 
 // slashedPlaces splits "US/Canada" into its places when every piece is one

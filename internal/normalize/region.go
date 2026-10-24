@@ -13,7 +13,7 @@ func ParsePlace(s string) (Place, bool) {
 	if len(segmentSep.Split(strings.TrimSpace(s), -1)) != 1 {
 		return Place{}, false
 	}
-	ps := parsePlaces(s, lenient)
+	ps := parsePlaces(s, entry)
 	if len(ps) != 1 || (ps[0].Country == "" && ps[0].Region == "") {
 		return Place{}, false
 	}
