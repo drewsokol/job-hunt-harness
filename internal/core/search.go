@@ -43,6 +43,9 @@ type SearchSummary struct {
 	Incomplete []string
 	// Stopped says why searching stopped before the last query, if it did.
 	Stopped string
+	// Gaps describe what a source read only for what changed (Himalayas)
+	// skipped, when a query ran out of requests before its stopping point.
+	Gaps    []string
 	Closed  int // search postings closed
 	Lookups int
 }
@@ -98,11 +101,11 @@ func (r *Refresher) search(ctx context.Context, filters *prefilter.Compiled, ver
 	if err != nil {
 		return sr, err
 	}
-	run := func(s sources.Searcher, read func() (SearchSummary, *found, error)) error {
+	run := func(s sources.Searcher, onlyChanges bool, read func() (SearchSummary, *found, error)) error {
 		errs := len(sr.errors)
 		sum, fd, err := read()
 		if err == nil {
-			err = r.storeSearch(ctx, &sr, s, &sum, fd, filters, version)
+			err = r.storeSearch(ctx, &sr, s, &sum, fd, filters, version, !onlyChanges)
 		}
 		sr.summaries = append(sr.summaries, sum)
 		if err != nil {
@@ -115,15 +118,18 @@ func (r *Refresher) search(ctx context.Context, filters *prefilter.Compiled, ver
 		return r.Store.RecordSourceRun(ctx, s.Name(), last)
 	}
 	if s, ok := r.Searchers["themuse"].(sources.QuerySearcher); ok && plan.muse != nil {
-		if err := run(s, func() (SearchSummary, *found, error) { return r.searchMuse(ctx, &sr, s, plan.muse.Queries) }); err != nil {
+		if err := run(s, false, func() (SearchSummary, *found, error) { return r.searchMuse(ctx, &sr, s, plan.muse.Queries) }); err != nil {
 			return sr, err
 		}
 	}
 	if s, ok := r.Searchers["hackernews"].(sources.ThreadSearcher); ok && plan.hackerNews != nil {
 		months := plan.hackerNews.Months
-		if err := run(s, func() (SearchSummary, *found, error) { return r.searchThreads(ctx, &sr, s, months) }); err != nil {
+		if err := run(s, false, func() (SearchSummary, *found, error) { return r.searchThreads(ctx, &sr, s, months) }); err != nil {
 			return sr, err
 		}
+	}
+	if err := r.runHimalayas(ctx, &sr, plan, run); err != nil {
+		return sr, err
 	}
 	return sr, nil
 }
@@ -201,10 +207,11 @@ func (r *Refresher) searchThreads(ctx context.Context, sr *searchResult, s sourc
 	return sum, fd, nil
 }
 
-// storeSearch stores one source's results under their employers, then
-// closes what the source no longer returns if it was read in full.
+// storeSearch stores one source's results under their employers, then,
+// with closeMissing, closes what the source no longer returns if it was
+// read in full. A source read only for what changed closes by other rules.
 func (r *Refresher) storeSearch(ctx context.Context, sr *searchResult, s sources.Searcher, sum *SearchSummary, fd *found,
-	filters *prefilter.Compiled, version int64) error {
+	filters *prefilter.Compiled, version int64, closeMissing bool) error {
 	sum.Postings, sum.Old = len(fd.order), len(fd.old)
 	names := make([]string, 0, len(fd.order))
 	for _, id := range fd.order {
@@ -238,7 +245,7 @@ func (r *Refresher) storeSearch(ctx context.Context, sr *searchResult, s sources
 		}
 	}
 
-	if !sum.Complete() {
+	if !closeMissing || !sum.Complete() {
 		return nil
 	}
 	missing, err := r.Store.CloseSearchMissing(ctx, r.By, s.Name(), seen)

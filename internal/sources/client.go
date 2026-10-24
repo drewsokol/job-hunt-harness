@@ -54,8 +54,14 @@ func (e *StatusError) Error() string { return fmt.Sprintf("%s: HTTP %d", e.URL, 
 // notModified=true without touching v. A 404 returns ErrBoardNotFound. A 429
 // or 5xx reply is retried once, honoring a short Retry-After.
 func (c *Client) GetJSON(ctx context.Context, url, etag string, v any) (notModified bool, newETag string, err error) {
+	return c.GetJSONWith(ctx, url, etag, nil, v)
+}
+
+// GetJSONWith is GetJSON with extra request headers, such as a service's
+// key. Headers never appear in the errors it returns.
+func (c *Client) GetJSONWith(ctx context.Context, url, etag string, header http.Header, v any) (notModified bool, newETag string, err error) {
 	for attempt := 0; ; attempt++ {
-		notModified, newETag, retryAfter, err := c.get(ctx, url, etag, v)
+		notModified, newETag, retryAfter, err := c.get(ctx, url, etag, header, v)
 		if retryAfter < 0 || attempt == 1 {
 			return notModified, newETag, err
 		}
@@ -68,10 +74,13 @@ func (c *Client) GetJSON(ctx context.Context, url, etag string, v any) (notModif
 }
 
 // get makes one request. retryAfter is negative when the result is final.
-func (c *Client) get(ctx context.Context, url, etag string, v any) (notModified bool, newETag string, retryAfter time.Duration, err error) {
+func (c *Client) get(ctx context.Context, url, etag string, header http.Header, v any) (notModified bool, newETag string, retryAfter time.Duration, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, "", -1, err
+	}
+	for k, vs := range header {
+		req.Header[k] = vs
 	}
 	req.Header.Set("User-Agent", c.UserAgent)
 	req.Header.Set("Accept", "application/json")

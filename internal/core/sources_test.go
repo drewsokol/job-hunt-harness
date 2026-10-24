@@ -37,19 +37,19 @@ func TestSourceDefaults(t *testing.T) {
 		got = append(got, info.Name+":"+info.Kind+":"+info.Status)
 	}
 	// Hacker News needs no setup, so it's on; The Muse waits for a query.
-	if strings.Join(got, " ") != "hackernews:search:on themuse:search:needs setup fake:board: lever:board:" {
+	if strings.Join(got, " ") != "hackernews:search:on himalayas:search:needs setup themuse:search:needs setup fake:board: lever:board:" {
 		t.Errorf("sources = %v", got)
 	}
 	if hn := ss[0]; string(hn.Settings) != `{"months":2}` || hn.Chosen {
 		t.Errorf("hacker news defaults: %+v", hn)
 	}
-	if m := ss[1]; !strings.Contains(m.Setup, "at least one query") || string(m.Settings) != `{"queries":[]}` {
+	if m := ss[2]; !strings.Contains(m.Setup, "at least one query") || string(m.Settings) != `{"queries":[]}` {
 		t.Errorf("the muse: %+v", m)
 	}
-	if b := ss[2]; b.Title != "fake" || b.Companies != 1 || b.EnabledCompanies != 1 {
+	if b := ss[3]; b.Title != "fake" || b.Companies != 1 || b.EnabledCompanies != 1 {
 		t.Errorf("the board of the one company: %+v", b)
 	}
-	if l := ss[3]; l.Title != "Lever" || l.Companies != 0 {
+	if l := ss[4]; l.Title != "Lever" || l.Companies != 0 {
 		t.Errorf("lever: %+v", l)
 	}
 }
@@ -83,7 +83,7 @@ func TestSetSource(t *testing.T) {
 		want string
 	}{
 		{"greenhouse", SourceUpdate{Enabled: &off}, "set_company_enabled"},
-		{"monster", SourceUpdate{Enabled: &off}, `"monster" is not a search source; use one of hackernews, themuse`},
+		{"monster", SourceUpdate{Enabled: &off}, `"monster" is not a search source; use one of hackernews, himalayas, themuse`},
 		{"hackernews", SourceUpdate{}, "say what to change"},
 		{"hackernews", SourceUpdate{Settings: json.RawMessage(`{"months": 4}`)}, "settings.months: must be between 1 and 3"},
 		{"hackernews", SourceUpdate{Settings: json.RawMessage(`{"month": 2}`)}, `unknown field "month"`},

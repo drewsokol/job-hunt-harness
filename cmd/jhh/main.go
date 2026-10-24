@@ -28,6 +28,7 @@ import (
 
 	"github.com/drewsokol/job-hunt-harness/internal/buildinfo"
 	"github.com/drewsokol/job-hunt-harness/internal/datadir"
+	"github.com/drewsokol/job-hunt-harness/internal/keys"
 	"github.com/drewsokol/job-hunt-harness/internal/logging"
 	"github.com/drewsokol/job-hunt-harness/internal/mcpserver"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
@@ -141,18 +142,21 @@ func serveStdio(ctx context.Context, stdin io.ReadCloser, stdout io.WriteCloser,
 	defer st.Close()
 	client := sources.NewClient()
 	srcs := builtin.All(client)
+	keyFile := keys.Open(dir.Keys())
+	searchers := builtin.Searchers(client, keyFile)
 	// The dashboard is served alongside, unless another jhh already serves it.
 	port, err := web.Port()
 	if err != nil {
 		logger.Error("starting the dashboard", "err", err)
 		return 1
 	}
-	dash := web.NewDashboard(ctx, web.Deps{Store: st, Logger: logger, Sources: srcs, Instance: web.Instance(dir.DB())}, port)
+	dash := web.NewDashboard(ctx, web.Deps{Store: st, Logger: logger, Sources: srcs, Searchers: searchers, Keys: keyFile,
+		Instance: web.Instance(dir.DB())}, port)
 	if err := dash.Start(); err != nil {
 		logger.Warn("not serving the dashboard", "err", err)
 	}
 	defer dash.Close()
-	srv := mcpserver.New(mcpserver.Deps{Store: st, Logger: logger, Sources: srcs, Searchers: builtin.Searchers(client),
+	srv := mcpserver.New(mcpserver.Deps{Store: st, Logger: logger, Sources: srcs, Searchers: searchers, Keys: keyFile,
 		Dashboard: dash, OpenBrowser: web.OpenBrowser})
 	err = srv.Run(ctx, &mcp.IOTransport{Reader: stdin, Writer: stdout})
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {

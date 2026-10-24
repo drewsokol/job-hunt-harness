@@ -9,7 +9,7 @@
 //
 // Every source must pass the shared conformance suite in sources/conformance.
 //
-// Search sources (The Muse, Hacker News) implement Searcher instead: they
+// Search sources (The Muse, Hacker News, Himalayas) implement Searcher instead: they
 // find postings across employers, and each result names its employer.
 package sources
 
@@ -90,6 +90,9 @@ type Posting struct {
 	// Company is the employer's name, set by search sources, whose results
 	// come from many employers. Board sources leave it empty.
 	Company string
+	// ExpiresAt is when the source stops listing the posting, for a source
+	// read only for what changed (Himalayas), which closes it then.
+	ExpiresAt time.Time // UTC
 }
 
 // ListResult is what Source.List returns.
@@ -167,6 +170,44 @@ type QuerySearcher interface {
 	Search(ctx context.Context, q Query, page int) (SearchResult, error)
 }
 
+// TextQuery is one free-text search (Himalayas). Q is matched against
+// titles and descriptions; the other fields narrow it, and an empty one
+// doesn't.
+type TextQuery struct {
+	Q                string
+	Country          string // one country
+	Seniority        []string
+	EmploymentTypes  []string
+	ExcludeWorldwide bool // leave out jobs open anywhere
+}
+
+// RecentSearcher runs text searches newest first by last update, a page at
+// a time (Himalayas). Its Lookup returns ErrPostingNotFound once a posting
+// has closed.
+type RecentSearcher interface {
+	Searcher
+	// SearchRecent returns one page of q, numbered from 1.
+	SearchRecent(ctx context.Context, q TextQuery, page int) (SearchResult, error)
+}
+
+// ErrKeyRefused means a service refused the key it was sent.
+var ErrKeyRefused = errors.New("the service refused the key")
+
+// keylessKey marks a context whose requests go without a key.
+type keylessKey struct{}
+
+// WithoutKey returns a context whose requests a source sends without its
+// key, after the service refused it.
+func WithoutKey(ctx context.Context) context.Context {
+	return context.WithValue(ctx, keylessKey{}, true)
+}
+
+// Keyless reports whether requests made with ctx go without a key.
+func Keyless(ctx context.Context) bool {
+	v, _ := ctx.Value(keylessKey{}).(bool)
+	return v
+}
+
 // Thread is one monthly hiring thread.
 type Thread struct {
 	ID       string
@@ -233,7 +274,7 @@ func UnixMillis(ms int64) time.Time {
 }
 
 // searchTitles are the search sources' names for people, by Name.
-var searchTitles = map[string]string{"themuse": "The Muse", "hackernews": "Hacker News"}
+var searchTitles = map[string]string{"themuse": "The Muse", "hackernews": "Hacker News", "himalayas": "Himalayas"}
 
 // SearchTitle is the name people know a search source by ("The Muse"), or
 // name itself for one it doesn't know.

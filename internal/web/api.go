@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/core"
+	"github.com/drewsokol/job-hunt-harness/internal/keys"
 	"github.com/drewsokol/job-hunt-harness/internal/normalize"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
@@ -55,6 +56,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	api("GET /api/profile", s.profile)
 	api("GET /api/sources", s.listSources)
 	api("PATCH /api/sources/{name}", s.setSource)
+	api("PUT /api/sources/{name}/key", s.saveKey)
+	api("DELETE /api/sources/{name}/key", s.removeKey)
 }
 
 type errorJSON struct {
@@ -205,12 +208,18 @@ type sourceJSON struct {
 	By               string          `json:"by,omitempty"`
 	At               string          `json:"at,omitempty"`
 	Reason           string          `json:"reason,omitempty"`
+	// Whether the source takes an optional key, and whether one is saved:
+	// never the key.
+	TakesKey   bool `json:"takes_key,omitempty"`
+	KeySaved   bool `json:"key_saved,omitempty"`
+	KeyRefused bool `json:"key_refused,omitempty"`
 }
 
 func newSourceJSON(info core.SourceInfo) sourceJSON {
 	o := sourceJSON{Name: info.Name, Title: info.Title, Kind: info.Kind, Status: info.Status, Setup: info.Setup, Settings: info.Settings,
 		Companies: info.Companies, EnabledCompanies: info.EnabledCompanies, LastRun: timeText(info.LastRunAt),
-		LastPostings: info.LastPostings, LastError: info.LastError}
+		LastPostings: info.LastPostings, LastError: info.LastError,
+		TakesKey: info.TakesKey, KeySaved: info.KeySaved, KeyRefused: info.KeySaved && info.KeyRefused}
 	if info.UpdatedBy != store.ActorSystem && info.UpdatedBy != "" {
 		o.By, o.At, o.Reason = string(info.UpdatedBy), timeText(info.UpdatedAt), info.Reason
 	}
@@ -231,6 +240,7 @@ func (s *server) listSources(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	core.MarkKeys(ss, s.Keys)
 	out := make([]sourceJSON, 0, len(ss))
 	for _, info := range ss {
 		out = append(out, newSourceJSON(info))
@@ -255,7 +265,99 @@ func (s *server) setSource(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, newSourceJSON(info))
+	s.writeSource(w, info)
+}
+
+func (s *server) writeSource(w http.ResponseWriter, info core.SourceInfo) {
+	ss := []core.SourceInfo{info}
+	core.MarkKeys(ss, s.Keys)
+	writeJSON(w, http.StatusOK, newSourceJSON(ss[0]))
+}
+
+// keyVerifier is a search source that can check a key before it's saved.
+type keyVerifier interface {
+	Verify(ctx context.Context, key string) error
+}
+
+// saveKey checks a source's optional key with the service and saves it.
+// The key is never logged, echoed or returned, only "saved".
+func (s *server) saveKey(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Key string `json:"key"`
+	}
+	if err := decode(r, &in); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	in.Key = strings.TrimSpace(in.Key)
+	name := r.PathValue("name")
+	v, ok := s.Searchers[name].(keyVerifier)
+	switch {
+	case !ok:
+		s.fail(w, r, &core.InputError{Problems: []string{fmt.Sprintf("%s takes no key", name)}})
+		return
+	case in.Key == "" || len(in.Key) > keys.MaxKeyLen || strings.ContainsAny(in.Key, " \t\r\n"):
+		s.fail(w, r, &core.InputError{Problems: []string{"key: paste the key as your account shows it, without spaces"}})
+		return
+	}
+	err := v.Verify(r.Context(), in.Key)
+	switch {
+	case errors.Is(err, sources.ErrKeyRefused):
+		s.fail(w, r, &core.InputError{Problems: []string{sources.SearchTitle(name) + " refused this key, so it wasn't saved. Check it in your account and paste it again."}})
+		return
+	case errors.Is(err, sources.ErrRateLimited):
+		s.fail(w, r, &core.InputError{Problems: []string{sources.SearchTitle(name) + " is limiting requests right now, so the key couldn't be checked. Try again in a few minutes."}})
+		return
+	case err != nil:
+		// Not the key's fault, and the error never holds the key.
+		s.Logger.Warn("checking a key", "source", name, "err", err)
+		s.fail(w, r, &core.InputError{Problems: []string{"jhh couldn't reach " + sources.SearchTitle(name) + " to check the key. Try again later."}})
+		return
+	}
+	if err := s.Keys.Set(name, in.Key); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := core.KeyChanged(r.Context(), s.Store, by, name, true); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.Logger.Info("key saved", "source", name)
+	s.sourceAfterKey(w, r, name)
+}
+
+// removeKey deletes a source's optional key. The source goes on without one.
+func (s *server) removeKey(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if _, ok := s.Searchers[name].(keyVerifier); !ok {
+		s.fail(w, r, &core.InputError{Problems: []string{fmt.Sprintf("%s takes no key", name)}})
+		return
+	}
+	if err := s.Keys.Remove(name); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := core.KeyChanged(r.Context(), s.Store, by, name, false); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.Logger.Info("key removed", "source", name)
+	s.sourceAfterKey(w, r, name)
+}
+
+func (s *server) sourceAfterKey(w http.ResponseWriter, r *http.Request, name string) {
+	ss, err := core.ListSources(r.Context(), s.Store, nil)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	for _, info := range ss {
+		if info.Name == name {
+			s.writeSource(w, info)
+			return
+		}
+	}
+	s.fail(w, r, store.ErrNotFound)
 }
 
 // jobJSON is a job as the page shows it. Company, title, places, pay, URL

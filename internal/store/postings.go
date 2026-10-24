@@ -33,9 +33,12 @@ type PostingInput struct {
 	URL             string
 	PostedAt        time.Time
 	SourceUpdatedAt time.Time
-	PayRaw          string
-	PayRanges       json.RawMessage // []normalize.PayRange
-	EmploymentType  string
+	// ExpiresAt is when a search source read only for what changed
+	// (Himalayas) stops listing the posting; it closes then.
+	ExpiresAt      time.Time
+	PayRaw         string
+	PayRanges      json.RawMessage // []normalize.PayRange
+	EmploymentType string
 	// Partial means the listing left out the description (Greenhouse
 	// lists): the stored description and pay are kept, and the posting
 	// still needs a detail fetch. A complete posting replaces them, even
@@ -313,6 +316,10 @@ func (a *applier) upsert(companyID int64, p PostingInput) error {
 	if err != nil {
 		return err
 	}
+	expiresAt, err := timeText(p.ExpiresAt)
+	if err != nil {
+		return err
+	}
 	locations, pay := jsonOr(p.Locations, "[]"), jsonOr(p.PayRanges, "[]")
 	workplace := p.Workplace
 	if workplace == "" {
@@ -329,12 +336,12 @@ func (a *applier) upsert(companyID int64, p PostingInput) error {
 			INSERT INTO postings (id, company_id, source, external_id, opening_key, canonical_url, fingerprint,
 			                      title, title_key, location_raw, workplace, locations, url, posted_at, source_updated_at,
 			                      pay_raw, pay_ranges, employment_type, description, description_html_raw, search, detail_fetched_at,
-			                      first_seen_at, last_seen_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                      first_seen_at, last_seen_at, expires_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			p.ID, companyID, p.Source, p.ExternalID, nullString(p.OpeningKey), nullString(p.CanonicalURL), nullString(p.Fingerprint),
 			p.Title, p.TitleKey, nullString(p.LocationRaw), workplace, locations, nullString(p.URL), postedAt, updatedAt,
 			nullString(p.PayRaw), pay, nullString(p.EmploymentType), nullString(p.Description), nullString(p.DescriptionHTML), p.Search,
-			a.detailStamp(hasDetail), a.now, a.now); err != nil {
+			a.detailStamp(hasDetail), a.now, a.now, expiresAt); err != nil {
 			return err
 		}
 	case err != nil:
@@ -345,7 +352,7 @@ func (a *applier) upsert(companyID int64, p PostingInput) error {
 			UPDATE postings SET opening_key = ?, canonical_url = ?, title = ?, title_key = ?, location_raw = ?,
 			       workplace = ?, locations = ?, url = ?, posted_at = ?, source_updated_at = ?, pay_raw = ?,
 			       pay_ranges = CASE WHEN ? = '[]' AND NOT ? THEN pay_ranges ELSE ? END,
-			       employment_type = ?, last_seen_at = ?, closed_at = NULL,
+			       employment_type = ?, last_seen_at = ?, closed_at = NULL, expires_at = ?,
 			       fingerprint          = CASE WHEN ? THEN ? ELSE fingerprint END,
 			       description          = CASE WHEN ? THEN ? ELSE description END,
 			       description_html_raw = CASE WHEN ? THEN ? ELSE description_html_raw END,
@@ -354,7 +361,7 @@ func (a *applier) upsert(companyID int64, p PostingInput) error {
 			nullString(p.OpeningKey), nullString(p.CanonicalURL), p.Title, p.TitleKey, nullString(p.LocationRaw),
 			workplace, locations, nullString(p.URL), postedAt, updatedAt, nullString(p.PayRaw),
 			pay, hasDetail, pay,
-			nullString(p.EmploymentType), a.now,
+			nullString(p.EmploymentType), a.now, expiresAt,
 			hasDetail, nullString(p.Fingerprint),
 			hasDetail, nullString(p.Description),
 			hasDetail, nullString(p.DescriptionHTML),

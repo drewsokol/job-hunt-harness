@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/drewsokol/job-hunt-harness/internal/keys"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 )
@@ -48,6 +49,11 @@ type Deps struct {
 	Store   *store.Store
 	Logger  *slog.Logger
 	Sources map[string]sources.Source // for adding a job by its link
+	// Searchers check a key before it's saved.
+	Searchers map[string]sources.Searcher
+	// Keys holds services' optional keys. The dashboard is the only place
+	// one is entered, and nothing here ever sends one back.
+	Keys *keys.File
 	// Instance names the data directory, so a process can tell whether the
 	// jhh serving the port shares its data.
 	Instance string

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/dedupe"
 )
@@ -165,4 +166,85 @@ func pursued(st JobStatus) bool {
 		return true
 	}
 	return false
+}
+
+// CloseExpired closes the open postings found by source whose expiry date
+// has passed, and closes their jobs when no posting is left open. Postings
+// of jobs the user is pursuing are closed only with pursued true: while the
+// source is on they are looked up instead (PursuedToCheck), since a job
+// still listed has a later expiry date than the one stored.
+func (s *Store) CloseExpired(ctx context.Context, by Actor, source string, pursuedToo bool) ([]int64, error) {
+	var closed []int64
+	err := s.write(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT p.id, j.status FROM postings p JOIN jobs j ON j.id = p.job_id
+			WHERE p.source = ? AND p.search = 1 AND p.closed_at IS NULL AND p.expires_at IS NOT NULL AND p.expires_at < ?`,
+			source, s.stamp())
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var id, status string
+			if err := rows.Scan(&id, &status); err != nil {
+				rows.Close()
+				return err
+			}
+			if pursuedToo || !pursued(JobStatus(status)) {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		a := applier{ctx: ctx, tx: tx, now: s.stamp(), at: s.now(), by: by, out: &FetchOutcome{}}
+		err = a.closePostings(ids)
+		closed = a.out.ClosedJobs
+		return err
+	})
+	return closed, err
+}
+
+// PursuedToCheck returns up to limit open postings found by source, of jobs
+// the user is pursuing, that weren't seen since since: those past their
+// expiry date first, then the least recently seen.
+func (s *Store) PursuedToCheck(ctx context.Context, source string, since time.Time, limit int) ([]DetailRef, error) {
+	at, err := timeText(since)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id, p.external_id FROM postings p JOIN jobs j ON j.id = p.job_id
+		WHERE p.source = ? AND p.search = 1 AND p.closed_at IS NULL AND (? IS NULL OR p.last_seen_at < ?)
+		  AND j.status IN ('review', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn')
+		ORDER BY (p.expires_at IS NOT NULL AND p.expires_at < ?) DESC, p.last_seen_at, p.id
+		LIMIT ?`, source, at, at, s.stamp(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DetailRef
+	for rows.Next() {
+		var r DetailRef
+		if err := rows.Scan(&r.PostingID, &r.ExternalID); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SeenPosting records that a source still lists a posting it was asked
+// about, with its new expiry date if it gave one.
+func (s *Store) SeenPosting(ctx context.Context, id string, expiresAt time.Time) error {
+	exp, err := timeText(expiresAt)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE postings SET last_seen_at = ?, expires_at = coalesce(?, expires_at) WHERE id = ?`,
+			s.stamp(), exp, id)
+		return err
+	})
 }

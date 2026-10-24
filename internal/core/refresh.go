@@ -55,6 +55,7 @@ type Refresher struct {
 	DetailConcurrency int
 	MaxDetails        int
 	MaxSearchRequests int // per refresh, across every query
+	MaxRecentRequests int // Himalayas's per refresh; 0 means its default
 	MaxLookups        int // pursued search postings checked per refresh
 }
 
@@ -487,6 +488,7 @@ func normalizePosting(id, source string, p sources.Posting) store.PostingInput {
 		URL:             p.URL,
 		PostedAt:        p.PostedAt,
 		SourceUpdatedAt: p.UpdatedAt,
+		ExpiresAt:       p.ExpiresAt,
 		PayRaw:          untrusted.Clean(p.PayRaw),
 		PayRanges:       mustJSON(orEmpty(pay)),
 		EmploymentType:  untrusted.Clean(p.EmploymentType),
