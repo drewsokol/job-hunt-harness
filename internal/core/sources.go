@@ -269,7 +269,7 @@ const maxSourceReason = 500
 
 // SetSource turns a search source on or off, or replaces its settings, and
 // returns it as it is now. Board sources are turned on and off per
-// company, and keys can't be set here.
+// company.
 func SetSource(ctx context.Context, s *store.Store, by store.Actor, name string, u SourceUpdate) (SourceInfo, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	spec, ok := searchSpecs[name]
