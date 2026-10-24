@@ -38,7 +38,7 @@ const state = {
   info: null, lists: {}, outreach: null, profile: null, sources: null,
   details: new Map(), open: new Set(),
   selected: 0, picked: new Set(),
-  form: null, formError: "", outreachFor: null,
+  form: null, formError: "", outreachFor: null, keyFor: null, keyError: "",
   visited: null, askApplied: null,
   pending: false, undo: null, live: false,
 };
@@ -905,6 +905,65 @@ function museQueries(settings) {
     ].filter(Boolean).join(" · ")))));
 }
 
+// himalayasQueries shows Himalayas's queries as text.
+function himalayasQueries(settings) {
+  const qs = (settings && settings.queries) || [];
+  if (!qs.length) return h("p", { class: "hint" }, "No queries yet. Ask your agent, for example: \"search Himalayas for remote data engineer jobs open to the US\".");
+  return h("ul", { class: "memories" }, qs.map((q) => h("li", null,
+    h("span", null, [
+      q.q ? `Search: ${q.q}` : "",
+      q.country ? `Open to: ${q.country}${q.exclude_worldwide ? " (not worldwide)" : ""}` : "",
+      q.seniority && q.seniority.length ? `Seniority: ${q.seniority.join(", ")}` : "",
+      q.employment_types && q.employment_types.length ? `Type: ${q.employment_types.join(", ")}` : "",
+    ].filter(Boolean).join(" · ") || "Every recent job"))));
+}
+
+// keyPanel lets the user save, replace or remove a source's optional key.
+// The key is sent once and never comes back: jhh only says it's saved.
+function keyPanel(src) {
+  const editing = state.keyFor === src.name || !src.key_saved;
+  let status;
+  if (src.key_saved && src.key_refused) status = h("p", { class: "reason" }, `${src.title} refused the saved key, so jhh searches without one, within the lower limits. Paste the key again or remove it.`);
+  else if (src.key_saved) status = h("p", { class: "hint" }, "Key saved. jhh searches with the higher limits.");
+  else status = h("p", { class: "hint" }, `Optional. ${src.title} works without a key; a free key from your ${src.title} account raises the limits. jhh keeps it in keys.json in its data folder and never shows it again.`);
+  const actions = src.key_saved && !editing ? h("div", { class: "form-actions" },
+    h("button", { class: "btn quiet", type: "button", onclick: () => removeKey(src) }, "Remove key"),
+    h("button", { class: "btn", type: "button", onclick: () => { state.keyFor = src.name; state.keyError = ""; render(); } }, "Replace key")) : null;
+  const form = editing ? h("form", { class: "key-form", onsubmit: (e) => saveKey(e, src) },
+    h("label", { class: "inline" }, "API key",
+      h("input", { name: "key", type: "password", autocomplete: "off", spellcheck: "false", required: true, "aria-label": `${src.title} API key` })),
+    h("button", { class: "btn primary", type: "submit" }, "Save key"),
+    src.key_saved ? h("button", { class: "btn quiet", type: "button", onclick: () => { state.keyFor = null; state.keyError = ""; render(); } }, "Cancel") : null) : null;
+  return [status, actions, form,
+    state.keyError && editing ? h("p", { class: "form-error" }, state.keyError) : null];
+}
+
+async function saveKey(e, src) {
+  e.preventDefault();
+  const input = e.target.querySelector("input[name=key]");
+  const btn = e.target.querySelector("button[type=submit]");
+  btn.disabled = true;
+  try {
+    await api("PUT", `/api/sources/${encodeURIComponent(src.name)}/key`, { key: input.value });
+    input.value = "";
+    state.keyFor = null;
+    state.keyError = "";
+    toast(`Saved the key. ${src.title} checked it and the next refresh uses it.`);
+  } catch (err) {
+    state.keyError = err.message;
+    btn.disabled = false;
+  }
+  reload();
+}
+
+async function removeKey(src) {
+  try {
+    await api("DELETE", `/api/sources/${encodeURIComponent(src.name)}/key`, {});
+    toast(`Removed the key. ${src.title} searches without one.`);
+  } catch (e) { toast(e.message); }
+  reload();
+}
+
 function searchSource(src) {
   const [cls, label] = SOURCE_STATUS[src.status] || ["st-idle", src.status];
   const on = src.status !== "off";
@@ -921,6 +980,8 @@ function searchSource(src) {
         [1, 2, 3].map((n) => h("option", { value: String(n), selected: n === months }, n === 1 ? "The latest month" : `The latest ${n} months`))));
   } else if (src.name === "themuse") {
     settings = museQueries(src.settings);
+  } else if (src.name === "himalayas") {
+    settings = himalayasQueries(src.settings);
   }
   const last = src.last_run
     ? h("p", { class: "hint" }, `Last ran ${fmtDate(src.last_run)}: ${plural(src.last_postings, "posting", "postings")} found.`)
@@ -928,7 +989,7 @@ function searchSource(src) {
   return h("section", { class: "panel" },
     h("div", { class: "row-head" }, h("h2", null, src.title), pill(cls, label), h("span", { class: "grow" }), toggle),
     src.setup ? h("p", { class: "reason" }, `Needs ${src.setup.replace(/^needs /, "")}.`) : null,
-    settings, last,
+    settings, src.takes_key ? keyPanel(src) : null, last,
     src.last_error ? h("p", { class: "reason" }, `Last error: ${src.last_error}`) : null,
     src.by ? h("p", { class: "hint" }, `Last changed by ${who(src.by)} on ${fmtDate(src.at)}${src.reason ? `: ${src.reason}` : ""}`) : null);
 }

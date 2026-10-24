@@ -4,10 +4,12 @@
 package builtin
 
 import (
+	"github.com/drewsokol/job-hunt-harness/internal/keys"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/ashby"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/greenhouse"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/hackernews"
+	"github.com/drewsokol/job-hunt-harness/internal/sources/himalayas"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/lever"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/themuse"
 )
@@ -22,9 +24,10 @@ func All(client *sources.Client) map[string]sources.Source {
 }
 
 // Searchers returns every built-in search source by name, sharing client.
-func Searchers(client *sources.Client) map[string]sources.Searcher {
+// Sources that take an optional key read it from k, which may be nil.
+func Searchers(client *sources.Client, k *keys.File) map[string]sources.Searcher {
 	m := map[string]sources.Searcher{}
-	for _, s := range []sources.Searcher{themuse.New(client), hackernews.New(client)} {
+	for _, s := range []sources.Searcher{themuse.New(client), hackernews.New(client), himalayas.New(client, k)} {
 		m[s.Name()] = s
 	}
 	return m

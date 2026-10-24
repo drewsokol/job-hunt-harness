@@ -1,0 +1,77 @@
+{
+  "comments": "Search results come 20 to a page.",
+  "updatedAt": 1792833433,
+  "offset": 0,
+  "limit": 20,
+  "totalCount": 45,
+  "jobs": [
+    {
+      "title": "Senior Platform Engineer",
+      "excerpt": "Run a made-up platform.",
+      "companyName": "Exampleco",
+      "companySlug": "exampleco",
+      "companyLogo": "https://cdn.example.com/logo.png",
+      "employmentType": "Full Time",
+      "minSalary": 150000,
+      "maxSalary": 180000,
+      "salaryPeriod": "annual",
+      "seniority": ["Senior"],
+      "currency": "USD",
+      "locationRestrictions": ["United States", "Canada"],
+      "timezoneRestrictions": [-5, -6],
+      "categories": ["Platform-Engineer"],
+      "parentCategories": ["Engineering"],
+      "description": "<p>Exampleco builds made-up software. You will run our platform.</p>",
+      "pubDate": 1792832400,
+      "expiryDate": 1798016400,
+      "applicationLink": "https://himalayas.app/companies/exampleco/jobs/senior-platform-engineer?utm_source=api",
+      "guid": "https://himalayas.app/companies/exampleco/jobs/senior-platform-engineer"
+    },
+    {
+      "title": "Backend Developer",
+      "companyName": "Made-Up Labs",
+      "employmentType": "Contractor",
+      "minSalary": 60,
+      "maxSalary": null,
+      "salaryPeriod": "hourly",
+      "currency": "EUR",
+      "locationRestrictions": [],
+      "description": "<p>Made-Up Labs is hiring.</p>",
+      "pubDate": 1792828800,
+      "expiryDate": 1798012800,
+      "applicationLink": "https://himalayas.app/companies/made-up-labs/jobs/backend-developer",
+      "guid": "https://himalayas.app/companies/made-up-labs/jobs/backend-developer"
+    },
+    {
+      "title": "Weekly Paid Engineer",
+      "companyName": "Weekly Co",
+      "employmentType": "Full Time",
+      "minSalary": 2000,
+      "maxSalary": 2500,
+      "salaryPeriod": "weekly",
+      "currency": "USD",
+      "locationRestrictions": ["United Kingdom"],
+      "description": "",
+      "pubDate": 1792825200,
+      "expiryDate": 1798009200,
+      "applicationLink": "https://himalayas.app/companies/weekly-co/jobs/weekly-paid-engineer",
+      "guid": "https://himalayas.app/companies/weekly-co/jobs/weekly-paid-engineer"
+    },
+    {
+      "title": "No Employer",
+      "companyName": "",
+      "description": "",
+      "pubDate": 1792825200,
+      "applicationLink": "https://himalayas.app/companies/x/jobs/y",
+      "guid": "https://himalayas.app/companies/x/jobs/y"
+    },
+    {
+      "title": "Odd Link",
+      "companyName": "Odd Co",
+      "description": "",
+      "pubDate": 1792825200,
+      "applicationLink": "https://himalayas.app/elsewhere",
+      "guid": "https://himalayas.app/../../admin"
+    }
+  ]
+}

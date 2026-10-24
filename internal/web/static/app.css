@@ -142,6 +142,8 @@ select.compact { padding: 4px 6px; font-size: 13px; }
 .form-grid label { display: grid; gap: 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .form-grid label.wide { grid-column: 1 / -1; }
 .form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.key-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.key-form input { width: 22em; max-width: 100%; }
 .form-error { color: var(--bad-fg); font-size: 13px; margin: 0; }
 
 .doc { overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; max-width: 80ch; }

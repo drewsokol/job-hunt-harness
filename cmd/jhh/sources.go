@@ -10,6 +10,8 @@ import (
 	"slices"
 
 	"github.com/drewsokol/job-hunt-harness/internal/core"
+	"github.com/drewsokol/job-hunt-harness/internal/datadir"
+	"github.com/drewsokol/job-hunt-harness/internal/keys"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/builtin"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
@@ -20,7 +22,7 @@ const sourcesUsage = `usage:
   jhh sources on|off <name>    turn a search source on or pause it
   jhh sources set <name> <file>
                                replace a search source's settings with a JSON file
-                               (examples/themuse.json shows The Muse's queries)
+                               (examples/themuse.json and examples/himalayas.json show the queries)
 Usually your agent does this. Company boards are turned on and off per company.`
 
 // maxSettingsFile caps a settings file.
@@ -56,6 +58,7 @@ func sourcesCmd(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			fmt.Fprintln(stderr, "jhh:", err)
 			return 1
 		}
+		markKeys(ss)
 		printSources(stdout, ss)
 		return 0
 	}
@@ -71,8 +74,18 @@ func sourcesCmd(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintln(stderr, "jhh:", err)
 		return 1
 	}
-	printSources(stdout, []core.SourceInfo{info})
+	ss := []core.SourceInfo{info}
+	markKeys(ss)
+	printSources(stdout, ss)
 	return 0
+}
+
+// markKeys notes which optional keys are saved. Keys are entered only on
+// the dashboard, never here.
+func markKeys(ss []core.SourceInfo) {
+	if dir, err := datadir.Resolve(); err == nil {
+		core.MarkKeys(ss, keys.Open(dir.Keys()))
+	}
 }
 
 func readSettings(path string) ([]byte, error) {
@@ -110,6 +123,14 @@ func printSources(w io.Writer, ss []core.SourceInfo) {
 		}
 		if s.LastError != "" {
 			fmt.Fprintf(w, "             last error: %s\n", oneLine(s.LastError))
+		}
+		switch {
+		case s.TakesKey && s.KeySaved && s.KeyRefused:
+			fmt.Fprintln(w, "             key: saved, but refused last time, so it searches without one; replace it on the dashboard")
+		case s.TakesKey && s.KeySaved:
+			fmt.Fprintln(w, "             key: saved")
+		case s.TakesKey:
+			fmt.Fprintln(w, "             key: none (optional; a free key raises the limits; enter it on the dashboard's Sources tab)")
 		}
 	}
 }

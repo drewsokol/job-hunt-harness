@@ -95,6 +95,11 @@ type sourceOut struct {
 	ChangedBy string `json:"changed_by,omitempty"`
 	ChangedAt string `json:"changed_at,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+	Key       *struct {
+		Saved   bool   `json:"saved"`
+		Refused bool   `json:"refused,omitempty"`
+		Note    string `json:"note"`
+	} `json:"key,omitempty"` // whether the optional key is saved; never the key
 }
 
 func newSourceOut(info core.SourceInfo) sourceOut {
@@ -113,6 +118,20 @@ func newSourceOut(info core.SourceInfo) sourceOut {
 	}
 	if info.UpdatedBy != store.ActorSystem && info.UpdatedBy != "" {
 		o.ChangedBy, o.ChangedAt, o.Reason = string(info.UpdatedBy), timeOrEmpty(info.UpdatedAt), info.Reason
+	}
+	if info.TakesKey {
+		note := "Optional: a free key from the user's own account raises the limits. Only the user enters it, on the dashboard's Sources tab; you never see or send it."
+		switch {
+		case info.KeySaved && info.KeyRefused:
+			note = "The service refused the saved key, so jhh searches without it. The user can replace it on the dashboard's Sources tab."
+		case info.KeySaved:
+			note = "A key is saved, so this source has its own higher limits."
+		}
+		o.Key = &struct {
+			Saved   bool   `json:"saved"`
+			Refused bool   `json:"refused,omitempty"`
+			Note    string `json:"note"`
+		}{info.KeySaved, info.KeySaved && info.KeyRefused, note}
 	}
 	return o
 }
@@ -157,6 +176,7 @@ func (t *tools) addManageTools(s *mcp.Server) {
 			Closed     int      `json:"closed"`
 			Incomplete []string `json:"not_read_in_full,omitempty"`
 			Stopped    string   `json:"stopped,omitempty"`
+			Gaps       []string `json:"skipped,omitempty"`
 		}
 		out := struct {
 			Companies       int          `json:"companies"`
@@ -187,7 +207,7 @@ func (t *tools) addManageTools(s *mcp.Server) {
 		}
 		for _, sr := range res.Searches {
 			out.Search = append(out.Search, searchOut{sr.Source, sr.Queries, sr.Threads, sr.Requests, sr.Postings, sr.Covered, sr.Old,
-				sr.Unreadable, sr.Closed, sr.Incomplete, sr.Stopped})
+				sr.Unreadable, sr.Closed, sr.Incomplete, sr.Stopped, sr.Gaps})
 		}
 		slices.SortFunc(res.Errors, func(a, b store.FetchError) int { return strings.Compare(a.Company, b.Company) })
 		for _, e := range res.Errors {
@@ -240,6 +260,7 @@ func (t *tools) addManageTools(s *mcp.Server) {
 		if err != nil {
 			return nil, err
 		}
+		core.MarkKeys(ss, t.Keys)
 		out := make([]sourceOut, 0, len(ss))
 		for _, info := range ss {
 			out = append(out, newSourceOut(info))
@@ -250,7 +271,7 @@ func (t *tools) addManageTools(s *mcp.Server) {
 	})
 
 	type setSourceIn struct {
-		Name     string         `json:"name" jsonschema:"the search source: hackernews or themuse"`
+		Name     string         `json:"name" jsonschema:"the search source: hackernews, himalayas or themuse"`
 		Enabled  *bool          `json:"enabled,omitempty" jsonschema:"true to turn it on, false to pause it; leave out to keep it as it is"`
 		Settings map[string]any `json:"settings,omitempty" jsonschema:"the source's whole settings object, replacing the current one; leave out to keep them"`
 		Reason   string         `json:"reason,omitempty" jsonschema:"one sentence: why, shown to the user"`
@@ -268,7 +289,9 @@ func (t *tools) addManageTools(s *mcp.Server) {
 		if err != nil {
 			return nil, err
 		}
-		return newSourceOut(info), nil
+		ss := []core.SourceInfo{info}
+		core.MarkKeys(ss, t.Keys)
+		return newSourceOut(ss[0]), nil
 	})
 
 	type companiesIn struct {

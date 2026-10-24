@@ -14,6 +14,7 @@ import (
 
 	"github.com/drewsokol/job-hunt-harness/internal/core"
 	"github.com/drewsokol/job-hunt-harness/internal/datadir"
+	"github.com/drewsokol/job-hunt-harness/internal/keys"
 	"github.com/drewsokol/job-hunt-harness/internal/logging"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/sources/builtin"
@@ -62,7 +63,7 @@ func refresh(ctx context.Context, args []string, stdout io.Writer, stderr *os.Fi
 			return 1
 		}
 	}
-	r := &core.Refresher{Store: st, Sources: srcs, Searchers: builtin.Searchers(client), Logger: logger, By: store.ActorUser}
+	r := &core.Refresher{Store: st, Sources: srcs, Searchers: builtin.Searchers(client, keys.Open(dir.Keys())), Logger: logger, By: store.ActorUser}
 	res, err := r.Refresh(ctx, opts)
 	printRefresh(stdout, res)
 	if err != nil {
@@ -107,7 +108,12 @@ func printRefresh(w io.Writer, res core.RefreshResult) {
 		if s.Stopped != "" {
 			fmt.Fprintf(w, "    Searching stopped early: %s. The rest waits for the next refresh.\n", s.Stopped)
 		}
-		if len(s.Incomplete) > 0 {
+		switch {
+		case len(s.Gaps) > 0:
+			for _, g := range s.Gaps {
+				fmt.Fprintf(w, "    Skipped: %s.\n", g)
+			}
+		case len(s.Incomplete) > 0 && s.Source != "himalayas":
 			fmt.Fprintf(w, "    Not read in full: %s. Until everything is read in full, jobs %s no longer lists aren't closed.\n",
 				strings.Join(s.Incomplete, ", "), s.Title)
 		}

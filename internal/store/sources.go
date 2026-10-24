@@ -22,13 +22,16 @@ type SourceRow struct {
 	LastError    string // may quote the service's reply
 	UpdatedAt    time.Time
 	UpdatedBy    Actor
+	// State is jhh's own record of the source's progress (Himalayas's
+	// stopping points), apart from the settings people choose.
+	State json.RawMessage
 }
 
 // SourceRows returns every stored source row by name.
 func (s *Store) SourceRows(ctx context.Context) (map[string]SourceRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, enabled, settings, coalesce(reason, ''), last_run_at, coalesce(last_postings, 0), coalesce(last_error, ''),
-		       updated_at, updated_by
+		       updated_at, updated_by, state
 		FROM sources`)
 	if err != nil {
 		return nil, err
@@ -40,15 +43,16 @@ func (s *Store) SourceRows(ctx context.Context) (map[string]SourceRow, error) {
 			r              SourceRow
 			enabled        sql.NullBool
 			settings, by   string
+			state          string
 			lastRun, updAt sql.NullString
 		)
-		if err := rows.Scan(&r.Name, &enabled, &settings, &r.Reason, &lastRun, &r.LastPostings, &r.LastError, &updAt, &by); err != nil {
+		if err := rows.Scan(&r.Name, &enabled, &settings, &r.Reason, &lastRun, &r.LastPostings, &r.LastError, &updAt, &by, &state); err != nil {
 			return nil, err
 		}
 		if enabled.Valid {
 			r.Enabled = &enabled.Bool
 		}
-		r.Settings, r.UpdatedBy = json.RawMessage(settings), Actor(by)
+		r.Settings, r.UpdatedBy, r.State = json.RawMessage(settings), Actor(by), json.RawMessage(state)
 		if r.LastRunAt, err = parseTime(lastRun); err != nil {
 			return nil, err
 		}
@@ -122,6 +126,26 @@ func (s *Store) RecordSourceRun(ctx context.Context, name string, run SourceRun)
 			ON CONFLICT (name) DO UPDATE SET last_run_at = ?2, last_postings = ?3, last_error = nullif(?4, '')`,
 			name, at, run.Postings, run.Error, s.stamp(), ActorSystem)
 		return err
+	})
+}
+
+// SetSourceState replaces a source's state, jhh's own record of its
+// progress. It changes nothing anyone chose.
+func (s *Store) SetSourceState(ctx context.Context, name string, state json.RawMessage) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO sources (name, state, updated_at, updated_by) VALUES (?1, ?2, ?3, ?4)
+			ON CONFLICT (name) DO UPDATE SET state = ?2`,
+			name, string(state), s.stamp(), ActorSystem)
+		return err
+	})
+}
+
+// KeyChanged records on the timeline that a source's optional key was
+// saved or removed. The key itself is never stored here.
+func (s *Store) KeyChanged(ctx context.Context, by Actor, name string, saved bool) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		return insertEvent(ctx, tx, s.stamp(), by, "source_changed", eventRefs{}, map[string]any{"source": name, "key_saved": saved})
 	})
 }
 

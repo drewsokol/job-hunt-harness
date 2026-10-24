@@ -21,6 +21,10 @@ func TestSources(t *testing.T) {
 		Companies *int           `json:"companies"`
 		ChangedBy string         `json:"changed_by"`
 		Reason    string         `json:"reason"`
+		Key       *struct {
+			Saved bool   `json:"saved"`
+			Note  string `json:"note"`
+		} `json:"key"`
 		Untrusted *struct {
 			LastError string `json:"last_error"`
 		} `json:"untrusted"`
@@ -33,13 +37,19 @@ func TestSources(t *testing.T) {
 	for _, s := range list.Sources {
 		got = append(got, s.Name+":"+s.Status)
 	}
-	if strings.Join(got, " ") != "hackernews:on themuse:needs setup greenhouse: lever:" {
+	if strings.Join(got, " ") != "hackernews:on himalayas:needs setup themuse:needs setup greenhouse: lever:" {
 		t.Fatalf("sources = %v", got)
 	}
-	if m := list.Sources[1]; !strings.Contains(m.Needs, "query") {
+	if hm := list.Sources[1]; hm.Key == nil || hm.Key.Saved || !strings.Contains(hm.Key.Note, "dashboard") {
+		t.Errorf("himalayas key: %+v", hm.Key)
+	}
+	if list.Sources[0].Key != nil {
+		t.Errorf("hacker news takes no key: %+v", list.Sources[0].Key)
+	}
+	if m := list.Sources[2]; !strings.Contains(m.Needs, "query") {
 		t.Errorf("the muse doesn't say what it needs: %+v", m)
 	}
-	if g := list.Sources[2]; g.Kind != "board" || g.Companies == nil || *g.Companies != 0 {
+	if g := list.Sources[3]; g.Kind != "board" || g.Companies == nil || *g.Companies != 0 {
 		t.Errorf("greenhouse: %+v", g)
 	}
 
@@ -57,6 +67,16 @@ func TestSources(t *testing.T) {
 
 	if msg := h.fail("set_source", map[string]any{"name": "greenhouse", "enabled": false}); !strings.Contains(msg, "set_company_enabled") {
 		t.Errorf("board error: %s", msg)
+	}
+	// Keys are entered only on the dashboard, never by the agent.
+	if msg := h.fail("set_source", map[string]any{"name": "himalayas", "settings": map[string]any{"api_key": "made-up"}}); !strings.Contains(msg, "dashboard") || strings.Contains(msg, "made-up") {
+		t.Errorf("key through set_source: %s", msg)
+	}
+	var hm source
+	h.call("set_source", map[string]any{"name": "himalayas", "settings": map[string]any{
+		"queries": []any{map[string]any{"q": "data engineer", "country": "US"}}}}, &hm)
+	if hm.Status != "on" {
+		t.Errorf("setting Himalayas up should turn it on: %+v", hm)
 	}
 	if msg := h.fail("set_source", map[string]any{"name": "hackernews", "settings": map[string]any{"months": 9}}); !strings.Contains(msg, "settings.months") {
 		t.Errorf("settings error: %s", msg)

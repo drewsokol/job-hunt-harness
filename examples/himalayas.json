@@ -1,0 +1,6 @@
+{
+  "queries": [
+    { "q": "machine learning engineer", "country": "US", "seniority": ["Senior"], "employment_types": ["Full Time"] },
+    { "q": "AI platform", "country": "US", "seniority": ["Senior"] }
+  ]
+}

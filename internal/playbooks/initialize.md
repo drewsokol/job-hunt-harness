@@ -51,7 +51,7 @@ Call `get_context` to see the current filters, if any. Draft new ones from the p
 2. If it drops jobs that look right, loosen the rule and preview again.
 3. Save with `set_filters` and a one-sentence rationale, after the user agrees.
 
-Then decide where jhh searches beyond company boards. Call `list_sources`. Hacker News's monthly "Who is hiring?" threads are on from the start and suit startups and tech roles; ask whether the user wants them, and turn them off with `set_source` if not. The Muse needs queries in its own categories, levels and locations: suggest one or two for the user's field and area, and save them with `set_source` once the user agrees. The filters judge whatever every source finds.
+Then decide where jhh searches beyond company boards. Call `list_sources`. Hacker News's monthly "Who is hiring?" threads are on from the start and suit startups and tech roles; ask whether the user wants them, and turn them off with `set_source` if not. The Muse needs queries in its own categories, levels and locations: suggest one or two for the user's field and area, and save them with `set_source` once the user agrees. If the user wants remote work, Himalayas (remote jobs only) needs text queries: suggest one or two specific ones (a role or skill, not a bare word like "engineer", which also matches descriptions), with the country the job must be open to, and save them once the user agrees. Himalayas works without a key; a free key from a Himalayas account raises its limits, and the user enters it on the dashboard's Sources tab (`open_dashboard`), never through you, so never ask them to paste it to you. The filters judge whatever every source finds.
 
 ## 6. Companies
 

@@ -1,5 +1,5 @@
 // Package datadir finds and prepares the directory that holds a user's jhh
-// data: the SQLite database, logs and backups.
+// data: the SQLite database, logs, backups and services' keys.
 //
 // The default location is per-user and outside any repository:
 //
@@ -31,6 +31,10 @@ func (d Dir) DB() string { return filepath.Join(d.Root, "jhh.db") }
 
 // Logs returns the directory for log files.
 func (d Dir) Logs() string { return filepath.Join(d.Root, "logs") }
+
+// Keys returns the path of the file holding services' optional keys,
+// kept out of the database so backups and exports never contain them.
+func (d Dir) Keys() string { return filepath.Join(d.Root, "keys.json") }
 
 // Backups returns the directory for automatic database backups.
 func (d Dir) Backups() string { return filepath.Join(d.Root, "backups") }

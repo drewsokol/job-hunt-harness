@@ -53,6 +53,10 @@ type SourceInfo struct {
 	Reason                      string
 	UpdatedAt                   time.Time
 	UpdatedBy                   store.Actor
+	// TakesKey says the source can use an optional key; KeySaved (set by
+	// MarkKeys) whether one is saved, and KeyRefused whether the service
+	// refused it on its last use. The key itself is never here.
+	TakesKey, KeySaved, KeyRefused bool
 }
 
 // searchSpec is what jhh knows about a search source's settings.
@@ -61,14 +65,18 @@ type searchSpec struct {
 	// check reads settings, fills in defaults, and returns what's wrong
 	// with them, field by field, and what the source still needs to run.
 	check func(raw json.RawMessage) (settings any, problems []string, setup string)
+	// takesKey says the source can use an optional key, entered only on
+	// the dashboard.
+	takesKey bool
 }
 
 // searchOrder is the order search sources are listed in.
-var searchOrder = []string{"hackernews", "themuse"}
+var searchOrder = []string{"hackernews", "himalayas", "themuse"}
 
 var searchSpecs = map[string]searchSpec{
 	"hackernews": {title: sources.SearchTitle("hackernews"), check: checkHackerNews},
 	"themuse":    {title: sources.SearchTitle("themuse"), check: checkMuse},
+	"himalayas":  {title: sources.SearchTitle("himalayas"), check: checkHimalayas, takesKey: true},
 }
 
 // boardTitles are the board sources' names for people.
@@ -233,7 +241,10 @@ func ListSources(ctx context.Context, s *store.Store, boards []string) ([]Source
 		settings, setup, status := searchStatus(spec, row)
 		info := SourceInfo{Name: name, Title: spec.title, Kind: KindSearch, Status: status, Setup: setup, Chosen: row.Enabled != nil,
 			LastRunAt: row.LastRunAt, LastPostings: row.LastPostings, LastError: row.LastError,
-			Reason: row.Reason, UpdatedAt: row.UpdatedAt, UpdatedBy: row.UpdatedBy}
+			Reason: row.Reason, UpdatedAt: row.UpdatedAt, UpdatedBy: row.UpdatedBy, TakesKey: spec.takesKey}
+		if spec.takesKey {
+			info.KeyRefused = !readHimalayasState(row.State).KeyRefusedAt.IsZero()
+		}
 		if settings != nil {
 			info.Settings = mustJSON(settings)
 		}
@@ -286,6 +297,9 @@ func SetSource(ctx context.Context, s *store.Store, by store.Actor, name string,
 		return SourceInfo{}, &InputError{Problems: []string{fmt.Sprintf("reason: longer than %d characters", maxSourceReason)}}
 	}
 	c := store.SourceChange{Enabled: u.Enabled, Reason: u.Reason}
+	if spec.takesKey && mentionsKey(u.Settings) {
+		return SourceInfo{}, &InputError{Problems: []string{fmt.Sprintf("settings: %s's key is entered only by the user, on the dashboard's Sources tab (open_dashboard); it never goes in settings", spec.title)}}
+	}
 	if u.Settings != nil {
 		settings, problems, _ := spec.check(u.Settings)
 		if problems != nil {
@@ -308,11 +322,30 @@ func SetSource(ctx context.Context, s *store.Store, by store.Actor, name string,
 	return SourceInfo{}, fmt.Errorf("source %s missing after saving it", name)
 }
 
+// mentionsKey reports whether settings have a top-level field that looks
+// like a key, so the error can say where keys go instead of only that the
+// field is unknown.
+func mentionsKey(raw json.RawMessage) bool {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return false
+	}
+	for k := range m {
+		switch strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(k)) {
+		case "key", "apikey", "token", "apitoken", "secret":
+			return true
+		}
+	}
+	return false
+}
+
 // searchPlan is what a refresh searches: the settings of each search
 // source that is on.
 type searchPlan struct {
-	muse       *MuseSettings
-	hackerNews *HackerNewsSettings
+	muse           *MuseSettings
+	hackerNews     *HackerNewsSettings
+	himalayas      *HimalayasSettings
+	himalayasState json.RawMessage
 }
 
 func plannedSearches(ctx context.Context, s *store.Store) (searchPlan, error) {
@@ -331,9 +364,23 @@ func plannedSearches(ctx context.Context, s *store.Store) (searchPlan, error) {
 			p.muse = &v
 		case HackerNewsSettings:
 			p.hackerNews = &v
+		case HimalayasSettings:
+			p.himalayas, p.himalayasState = &v, rows[name].State
 		}
 	}
 	return p, nil
+}
+
+// Keys is where the optional keys are kept (keys.File); nil means none.
+type Keys interface{ Has(source string) bool }
+
+// MarkKeys fills in whether a key is saved for each source that takes one.
+func MarkKeys(ss []SourceInfo, k Keys) {
+	for i := range ss {
+		if ss[i].TakesKey && k != nil {
+			ss[i].KeySaved = k.Has(ss[i].Name)
+		}
+	}
 }
 
 // SearchesOn counts the search sources that are on.

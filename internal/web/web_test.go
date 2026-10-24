@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/core"
+	"github.com/drewsokol/job-hunt-harness/internal/keys"
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
@@ -31,8 +33,27 @@ type fixture struct {
 	t      *testing.T
 	s      *store.Store
 	d      *Dashboard
+	keys   *keys.File
 	base   string
 	client *http.Client
+}
+
+// keyChecker is a search source that takes a key; it accepts goodKey.
+type keyChecker struct{ checked []string }
+
+const goodKey = "made-up-good-key"
+
+func (k *keyChecker) Name() string   { return "himalayas" }
+func (k *keyChecker) Prefix() string { return "hm" }
+func (k *keyChecker) Lookup(context.Context, string) (sources.Posting, error) {
+	return sources.Posting{}, sources.ErrPostingNotFound
+}
+func (k *keyChecker) Verify(_ context.Context, key string) error {
+	k.checked = append(k.checked, key)
+	if key != goodKey {
+		return fmt.Errorf("himalayas: %w (HTTP 401)", sources.ErrKeyRefused)
+	}
+	return nil
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -44,12 +65,14 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	d := NewDashboard(ctx, Deps{Store: s, Instance: "test"}, 0)
+	k := keys.Open(filepath.Join(t.TempDir(), "keys.json"))
+	d := NewDashboard(ctx, Deps{Store: s, Instance: "test", Keys: k,
+		Searchers: map[string]sources.Searcher{"himalayas": &keyChecker{}}}, 0)
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
-	f := &fixture{t: t, s: s, d: d, base: "http://127.0.0.1:" + strconv.Itoa(d.Serving())}
+	f := &fixture{t: t, s: s, d: d, keys: k, base: "http://127.0.0.1:" + strconv.Itoa(d.Serving())}
 	f.client = f.browser()
 	f.signIn(f.client)
 	return f
@@ -509,8 +532,9 @@ func TestSourcesPage(t *testing.T) {
 		Sources []sourceJSON `json:"sources"`
 	}
 	f.ok("GET", "/api/sources", nil, &list)
-	if len(list.Sources) != 2 || list.Sources[0].Name != "hackernews" || list.Sources[0].Status != core.SourceOn ||
-		list.Sources[1].Status != core.SourceNeedsSetup {
+	if len(list.Sources) != 3 || list.Sources[0].Name != "hackernews" || list.Sources[0].Status != core.SourceOn ||
+		list.Sources[1].Name != "himalayas" || !list.Sources[1].TakesKey || list.Sources[1].KeySaved ||
+		list.Sources[2].Status != core.SourceNeedsSetup {
 		t.Fatalf("sources %+v", list.Sources)
 	}
 
@@ -534,6 +558,59 @@ func TestSourcesPage(t *testing.T) {
 	}
 	if code := f.do("PATCH", "/api/sources/hackernews", map[string]any{"key": "secret"}, nil); code != http.StatusBadRequest {
 		t.Errorf("a field the endpoint doesn't take: status %d", code)
+	}
+}
+
+func TestSourceKeys(t *testing.T) {
+	f := newFixture(t)
+	var src sourceJSON
+	// A key the service refuses isn't saved.
+	if code := f.do("PUT", "/api/sources/himalayas/key", map[string]any{"key": "made-up-wrong-key"}, nil); code != http.StatusBadRequest {
+		t.Errorf("refused key: status %d", code)
+	}
+	if f.keys.Has("himalayas") {
+		t.Fatal("a refused key was saved")
+	}
+	for _, bad := range []map[string]any{{"key": ""}, {"key": "two words"}, {"key": goodKey, "extra": 1}} {
+		if code := f.do("PUT", "/api/sources/himalayas/key", bad, nil); code != http.StatusBadRequest {
+			t.Errorf("%v: status %d", bad, code)
+		}
+	}
+	if code := f.do("PUT", "/api/sources/themuse/key", map[string]any{"key": goodKey}, nil); code != http.StatusBadRequest {
+		t.Errorf("a source that takes no key: status %d", code)
+	}
+
+	f.ok("PUT", "/api/sources/himalayas/key", map[string]any{"key": " " + goodKey + " "}, &src)
+	if !src.KeySaved || src.KeyRefused {
+		t.Errorf("after saving: %+v", src)
+	}
+	if k, ok, _ := f.keys.Get("himalayas"); !ok || k != goodKey {
+		t.Errorf("saved %q, %v", k, ok)
+	}
+	// Nothing the dashboard sends back holds the key.
+	for _, path := range []string{"/api/sources", "/api/state"} {
+		var raw json.RawMessage
+		f.ok("GET", path, nil, &raw)
+		if bytes.Contains(raw, []byte(goodKey)) {
+			t.Errorf("%s returned the key: %s", path, raw)
+		}
+	}
+	db, err := sql.Open("sqlite", f.s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var events int
+	if err := db.QueryRow("SELECT count(*) FROM events WHERE kind = 'source_changed' AND data LIKE '%key_saved%'").Scan(&events); err != nil || events != 1 {
+		t.Errorf("%d key events, %v", events, err)
+	}
+	if err := db.QueryRow("SELECT count(*) FROM events WHERE data LIKE ?", "%"+goodKey+"%").Scan(&events); err != nil || events != 0 {
+		t.Errorf("the key reached the timeline: %d, %v", events, err)
+	}
+
+	f.ok("DELETE", "/api/sources/himalayas/key", map[string]any{}, &src)
+	if src.KeySaved || f.keys.Has("himalayas") {
+		t.Errorf("after removing: %+v", src)
 	}
 }
 

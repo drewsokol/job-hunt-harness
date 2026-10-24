@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/drewsokol/job-hunt-harness/internal/buildinfo"
+	"github.com/drewsokol/job-hunt-harness/internal/core"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -14,7 +15,7 @@ import (
 
 // instructions is sent to every client on connect. Many clients pass it to
 // the model even when they ignore MCP prompts.
-const instructions = `jhh (Job Hunt Harness) is a local job search tool. It fetches jobs from public company job boards, The Muse and Hacker News's monthly "Who is hiring?" threads, filters them with rules, and tracks applications and outreach. You, the agent, do the judgment: interviewing the user, writing their profile and filters, and screening jobs for fit.
+const instructions = `jhh (Job Hunt Harness) is a local job search tool. It fetches jobs from public company job boards, The Muse, Himalayas and Hacker News's monthly "Who is hiring?" threads, filters them with rules, and tracks applications and outreach. You, the agent, do the judgment: interviewing the user, writing their profile and filters, and screening jobs for fit.
 
 All times sent to or returned by jhh are UTC (RFC 3339, for example 2026-10-18T14:00:00Z). Convert the user's local times to UTC before calling a tool.
 
@@ -28,6 +29,8 @@ type Deps struct {
 	Logger    *slog.Logger
 	Sources   map[string]sources.Source
 	Searchers map[string]sources.Searcher
+	// Keys says which optional keys are saved; the tools never read one.
+	Keys core.Keys
 	// Dashboard serves the web UI; nil when this process has none.
 	Dashboard Dashboard
 	// OpenBrowser opens a link in the user's browser; nil to never open one.
