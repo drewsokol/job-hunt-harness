@@ -52,6 +52,11 @@ func (s *Store) OutreachEvents(ctx context.Context, outreachID int64) ([]Event, 
 	return s.events(ctx, "outreach_id = ?", outreachID)
 }
 
+// ContactEvents returns a contact's history, oldest first.
+func (s *Store) ContactEvents(ctx context.Context, contactID int64) ([]Event, error) {
+	return s.events(ctx, "contact_id = ?", contactID)
+}
+
 func (s *Store) events(ctx context.Context, where string, args ...any) ([]Event, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, at, actor, kind, job_id, outreach_id, contact_id, company_id, data
