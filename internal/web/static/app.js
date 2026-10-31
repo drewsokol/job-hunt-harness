@@ -450,6 +450,7 @@ function badges(j) {
       : ["rejected", "withdrawn"].includes(j.status) ? "st-bad" : "st-idle";
     out.push(pill(cls, STATUS[j.status] || j.status));
   }
+  if (j.applied_elsewhere) out.push(pill("st-idle", "Applied elsewhere", "You applied outside jhh; your agent recorded it."));
   if (j.applied_unconfirmed) out.push(pill("st-warn", "Confirm applied", "Your agent wasn't sure this was submitted. Set the applied date to confirm."));
   if (j.open_flags && j.open_flags.length) {
     const canaryOnly = j.open_flags.every((k) => k === "canary");

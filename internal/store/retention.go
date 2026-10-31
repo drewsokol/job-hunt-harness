@@ -57,7 +57,7 @@ func (s *Store) Prune(ctx context.Context) (PruneOutcome, error) {
 
 		rows, err := tx.QueryContext(ctx, `
 			SELECT id FROM jobs j
-			WHERE closed_at IS NOT NULL AND closed_at < ? AND status IN ('new', 'filtered_out', 'unscreened') AND notes = ''
+			WHERE closed_at IS NOT NULL AND closed_at < ? AND status IN ('new', 'filtered_out', 'unscreened') AND notes = '' AND applied_elsewhere = 0
 			  AND NOT EXISTS (SELECT 1 FROM screenings s WHERE s.job_id = j.id)
 			  AND NOT EXISTS (SELECT 1 FROM outreach o WHERE o.job_id = j.id)
 			  AND NOT EXISTS (SELECT 1 FROM interviews i WHERE i.job_id = j.id)

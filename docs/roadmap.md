@@ -25,7 +25,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - [x] Interviews: `save_interview`, upcoming interviews in the tracker, a job moves to interviewing when its first interview is logged
 - [x] Handled email: links from threads, jobs and interviews to email threads, and a record of which messages the agent has already handled (`handled_messages`)
 - [x] Contacts: organization type, warmth, tags and a date to get back in touch; `list_contacts` and `save_contact`
-- [ ] Applications made elsewhere: `add_jobs` records a job the user applied to outside jhh, in its status, so a later reply has somewhere to go
+- [x] Applications made elsewhere: `add_jobs` records a job the user applied to outside jhh, in its status, so a later reply has somewhere to go
 - [ ] Later, once there are offers to compare: offer details (base, bonus, equity, sign-on, deadline) and a comparison across jobs
 
 ## Next (M6–M8)

@@ -64,6 +64,7 @@ type jobOut struct {
 	Closed         string             `json:"closed,omitempty"`
 	Reposted       string             `json:"reposted,omitempty"`
 	Applied        string             `json:"applied,omitempty"`
+	Elsewhere      bool               `json:"applied_elsewhere,omitempty"` // the user applied outside jhh
 	Untrusted      untrustedJob       `json:"untrusted"`
 }
 
@@ -74,7 +75,7 @@ func job(r store.JobRow, allReasons bool) jobOut {
 		Job: r.ID, Status: string(r.Status), Origin: r.Origin, Workplace: r.Workplace, Via: sources.SearchTitle(r.Via),
 		ContentFlags: r.OpenFlags, Score: r.Score,
 		FirstSeen: timeOrEmpty(r.FirstSeenAt), Posted: timeOrEmpty(r.PostedAt), Closed: timeOrEmpty(r.ClosedAt),
-		Reposted: timeOrEmpty(r.RepostedAt), Applied: timeOrEmpty(r.AppliedAt),
+		Reposted: timeOrEmpty(r.RepostedAt), Applied: timeOrEmpty(r.AppliedAt), Elsewhere: r.AppliedElsewhere,
 		Untrusted: untrustedJob{
 			Source: r.PostingID, Company: r.Company, Title: r.Title, Places: core.Places(r.Locations),
 			Pay: core.PayRanges(r.PayRanges), PayText: r.PayRaw, Employment: r.EmploymentType, URL: r.URL,
@@ -267,7 +268,7 @@ func (t *tools) addJobTools(s *mcp.Server) {
 	})
 
 	type agentJobIn struct {
-		URL            string `json:"url,omitempty" jsonschema:"the posting's link; a Greenhouse, Lever or Ashby link is read from the board"`
+		URL            string `json:"url,omitempty" jsonschema:"the posting's link"`
 		Company        string `json:"company"`
 		Title          string `json:"title,omitempty" jsonschema:"required unless url is a Greenhouse, Lever or Ashby posting"`
 		Location       string `json:"location,omitempty"`
@@ -275,6 +276,8 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		Pay            string `json:"pay,omitempty" jsonschema:"as the listing states it"`
 		EmploymentType string `json:"employment_type,omitempty"`
 		Notes          string `json:"notes,omitempty" jsonschema:"where the job came from, for the user; added to the job's notes"`
+		Status         string `json:"status,omitempty" jsonschema:"applied outside jhh: applied, interviewing, offer, rejected or withdrawn"`
+		AppliedAt      string `json:"applied_at,omitempty" jsonschema:"with status: when they applied, UTC, RFC 3339; default now"`
 	}
 	type addJobsIn struct {
 		Jobs []agentJobIn `json:"jobs"`
@@ -283,7 +286,8 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		js := make([]core.AgentJob, 0, len(in.Jobs))
 		for _, j := range in.Jobs {
 			js = append(js, core.AgentJob{URL: j.URL, Company: j.Company, Title: j.Title, Location: j.Location,
-				Description: j.Description, Pay: j.Pay, EmploymentType: j.EmploymentType, Notes: j.Notes})
+				Description: j.Description, Pay: j.Pay, EmploymentType: j.EmploymentType, Notes: j.Notes,
+				Status: j.Status, AppliedAt: j.AppliedAt})
 		}
 		added, err := core.AddJobs(ctx, t.Store, t.Sources, c.by, js)
 		if err != nil {
@@ -292,6 +296,7 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		type addedOut struct {
 			Job       int64  `json:"job,omitempty"`
 			Existing  bool   `json:"already_in_jhh,omitempty"`
+			ByTitle   bool   `json:"matched_by_title,omitempty"`
 			FromBoard bool   `json:"read_from_board,omitempty"`
 			Status    string `json:"status,omitempty"`
 			Untrusted *struct {
@@ -300,7 +305,7 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		}
 		out := make([]addedOut, 0, len(added))
 		for _, a := range added {
-			o := addedOut{Job: a.JobID, Existing: a.Existing, FromBoard: a.FromBoard, Status: string(a.Status)}
+			o := addedOut{Job: a.JobID, Existing: a.Existing, ByTitle: a.ByTitle, FromBoard: a.FromBoard, Status: string(a.Status)}
 			if a.Error != "" {
 				o.Untrusted = &struct {
 					Error string `json:"error"`

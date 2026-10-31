@@ -381,6 +381,7 @@ type jobJSON struct {
 	Reposted           string             `json:"reposted,omitempty"`
 	Applied            string             `json:"applied,omitempty"`
 	AppliedUnconfirmed bool               `json:"applied_unconfirmed,omitempty"`
+	AppliedElsewhere   bool               `json:"applied_elsewhere,omitempty"`
 	Fit                string             `json:"fit,omitempty"`
 	Reason             string             `json:"reason,omitempty"`
 	Gaps               string             `json:"gaps,omitempty"`
@@ -419,7 +420,8 @@ func (a asker) job(r store.JobRow) jobJSON {
 		Origin: r.Origin, Workplace: r.Workplace, Pay: payText(ranges, r.PayRaw), URL: webURL(r.URL), Via: sources.SearchTitle(r.Via),
 		Posted: timeText(r.PostedAt), FirstSeen: timeText(r.FirstSeenAt), Closed: timeText(r.ClosedAt),
 		Reposted: timeText(r.RepostedAt), Applied: timeText(r.AppliedAt), AppliedUnconfirmed: r.AppliedUnconfirmed,
-		OpenFlags: r.OpenFlags, Notes: r.Notes,
+		AppliedElsewhere: r.AppliedElsewhere,
+		OpenFlags:        r.OpenFlags, Notes: r.Notes,
 	}
 	for _, p := range core.Places(r.Locations) {
 		j.Places = append(j.Places, p.String())
