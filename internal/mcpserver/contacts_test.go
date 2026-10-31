@@ -34,7 +34,7 @@ func TestContacts(t *testing.T) {
 		t.Fatalf("candidates %+v", page)
 	}
 	job := page.Jobs[0].Job
-	h.call("save_outreach", map[string]any{"person": "Alex Example", "company": "Exampleco", "channel": "email", "job_id": job,
+	h.call("save_outreach", map[string]any{"direction": "outbound", "person": "Alex Example", "company": "Exampleco", "channel": "email", "job_id": job,
 		"sent_at": daysAgo(3), "no_follow_up": true}, nil)
 
 	type saved struct {

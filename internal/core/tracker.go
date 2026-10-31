@@ -1,7 +1,9 @@
 package core
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -31,14 +33,19 @@ const (
 	maxOutreachPage   = 50
 )
 
-// OutreachInput is a message the user sent, as an agent reports it.
+// OutreachInput is a thread to log, as an agent reports it.
 type OutreachInput struct {
 	Person, Channel, Company, Role string
 	JobID                          int64
-	SentAt                         string // RFC 3339; default now
-	FollowUpAt                     string // RFC 3339; default DefaultFollowUp after SentAt
+	Direction                      string // inbound or outbound
+	Status                         string // default received for inbound, sent for outbound
+	SentAt                         string // RFC 3339, when the thread started; default now
+	FollowUpAt                     string // RFC 3339; outbound's default is DefaultFollowUp after SentAt
 	NoFollowUp                     bool
 	Note                           string
+	ClientCompany                  string
+	Pay                            PayInput
+	DeclineReason, DeclineNote     string
 }
 
 // LoggedOutreach is what LogOutreach stored.
@@ -54,7 +61,22 @@ func LogOutreach(ctx context.Context, s *store.Store, by store.Actor, in Outreac
 	o := store.NewOutreach{
 		Person: strings.TrimSpace(in.Person), Role: strings.TrimSpace(in.Role), Company: strings.TrimSpace(in.Company),
 		Channel: strings.ToLower(strings.TrimSpace(in.Channel)), JobID: in.JobID, Note: strings.TrimSpace(in.Note),
+		Direction: strings.ToLower(strings.TrimSpace(in.Direction)), Status: in.Status, ClientCompany: strings.TrimSpace(in.ClientCompany),
+		DeclineReason: in.DeclineReason, DeclineNote: strings.TrimSpace(in.DeclineNote),
 	}
+	status := o.Status
+	switch {
+	case status == "" && o.Direction == "inbound":
+		status = "received"
+	case status == "":
+		status = "sent"
+	case !slices.Contains(store.OutreachStatuses, status):
+		problems = append(problems, fmt.Sprintf("status: %q must be one of %s", status, strings.Join(store.OutreachStatuses, ", ")))
+	}
+	problems = append(problems, checkInbound(o.Direction, o.ClientCompany, o.DeclineReason, o.DeclineNote, status, true)...)
+	var payProblems []string
+	o.Pay, payProblems = checkPay(in.Pay)
+	problems = append(problems, payProblems...)
 	for _, f := range []struct {
 		name, v string
 		max     int
@@ -87,6 +109,7 @@ func LogOutreach(ctx context.Context, s *store.Store, by store.Actor, in Outreac
 	case in.NoFollowUp:
 	case in.FollowUpAt != "":
 		problems = append(problems, followUp(in.FollowUpAt, o.SentAt, &o.FollowUpAt)...)
+	case o.Direction == "inbound": // the next move is the user's
 	default:
 		o.FollowUpAt = o.SentAt.Add(DefaultFollowUp)
 	}
@@ -122,14 +145,34 @@ type OutreachUpdate struct {
 	FollowUpAt    string // RFC 3339
 	ClearFollowUp bool
 	Note          string // added to the thread's note
+	Direction     string
+	JobID         int64
+	ClientCompany string    // empty leaves it
+	Pay           *PayInput // replaces the pay
+	DeclineReason string
+	DeclineNote   string // replaces the decline note
 }
 
 // UpdateOutreach checks and records a change to a thread.
 func UpdateOutreach(ctx context.Context, s *store.Store, by store.Actor, id int64, in OutreachUpdate) error {
 	var problems []string
-	c := store.OutreachChange{Status: in.Status, ClearFollowUp: in.ClearFollowUp, AppendNote: strings.TrimSpace(in.Note)}
+	c := store.OutreachChange{Status: in.Status, ClearFollowUp: in.ClearFollowUp, AppendNote: strings.TrimSpace(in.Note),
+		Direction: strings.ToLower(strings.TrimSpace(in.Direction)), JobID: in.JobID,
+		DeclineReason: in.DeclineReason, DeclineNote: strings.TrimSpace(in.DeclineNote)}
 	if c.Status != "" && !slices.Contains(store.OutreachStatuses, c.Status) {
 		problems = append(problems, fmt.Sprintf("status: %q must be one of %s", c.Status, strings.Join(store.OutreachStatuses, ", ")))
+	}
+	// Without a status here, the store checks the thread's own.
+	problems = append(problems, checkInbound(c.Direction, in.ClientCompany, c.DeclineReason, c.DeclineNote, cmp.Or(c.Status, "declined"), false)...)
+	if client := strings.TrimSpace(in.ClientCompany); client != "" {
+		c.ClientCompany = &client
+	}
+	if in.JobID < 0 {
+		problems = append(problems, "job_id: a job's id")
+	}
+	if in.Pay != nil {
+		p, pp := checkPay(*in.Pay)
+		c.Pay, problems = &p, append(problems, pp...)
 	}
 	switch {
 	case in.ClearFollowUp && in.FollowUpAt != "":
@@ -140,26 +183,42 @@ func UpdateOutreach(ctx context.Context, s *store.Store, by store.Actor, id int6
 	if utf8.RuneCountInString(c.AppendNote) > maxOutreachNote {
 		problems = append(problems, fmt.Sprintf("note: up to %d characters", maxOutreachNote))
 	}
-	if c.Status == "" && c.FollowUpAt.IsZero() && !c.ClearFollowUp && c.AppendNote == "" {
-		problems = append(problems, "nothing to change: give a status, follow_up_at, clear_follow_up or note")
+	if c.Status == "" && c.FollowUpAt.IsZero() && !c.ClearFollowUp && c.AppendNote == "" && c.Direction == "" && c.JobID == 0 &&
+		c.ClientCompany == nil && c.Pay == nil && c.DeclineReason == "" && c.DeclineNote == "" {
+		problems = append(problems, "nothing to change: give a status, follow_up_at, clear_follow_up, note, direction, job_id, client_company, pay or a decline reason")
 	}
 	if len(problems) > 0 {
 		return &InputError{Problems: problems}
 	}
-	return inputIfNotFound(s.UpdateOutreach(ctx, by, id, c), fmt.Sprintf("outreach_id: no outreach %d", id))
+	err := s.UpdateOutreach(ctx, by, id, c)
+	switch {
+	case errors.Is(err, store.ErrNotDeclined):
+		return &InputError{Problems: []string{"decline_reason: only with status declined; pass status: declined with it"}}
+	case errors.Is(err, store.ErrNotFound) && c.JobID != 0:
+		// The thread or the job; say which.
+		if _, total, lerr := s.ListOutreach(ctx, store.OutreachQuery{ID: id, Limit: 1}); lerr == nil && total == 1 {
+			return &InputError{Problems: []string{fmt.Sprintf("job_id: no job %d", c.JobID)}}
+		}
+	}
+	return inputIfNotFound(err, fmt.Sprintf("outreach_id: no outreach %d", id))
 }
 
 // OutreachFilter selects outreach threads, as an agent asks for them.
 // Every field given must match.
 type OutreachFilter struct {
 	ID       int64    // one thread, with its history; nothing else may be set
-	Statuses []string // outreach statuses, or "open" for all but closed
+	Statuses []string // outreach statuses, or "open" for all but declined and closed
 	Person   string   // part of the person's name
 	Company  string   // part of the company's name
 	JobID    int64
 	FollowUp string // due, set or none
 	Limit    int
 	Cursor   string // from the previous page's Next
+
+	Direction     string
+	Channel       string
+	DeclineReason string
+	Since, Until  string // RFC 3339, on when the thread started
 }
 
 // OutreachFollowUps are the follow_up filters ListOutreach takes.
@@ -181,14 +240,15 @@ func ListOutreach(ctx context.Context, s *store.Store, in OutreachFilter) (Outre
 	var problems []string
 	q := store.OutreachQuery{ID: in.ID, Person: strings.TrimSpace(in.Person), Company: strings.TrimSpace(in.Company),
 		JobID: in.JobID, ChangedFirst: true}
-	if in.ID != 0 && (len(in.Statuses) > 0 || q.Person != "" || q.Company != "" || in.JobID != 0 || in.FollowUp != "" || in.Cursor != "") {
+	if in.ID != 0 && (len(in.Statuses) > 0 || q.Person != "" || q.Company != "" || in.JobID != 0 || in.FollowUp != "" || in.Cursor != "" ||
+		in.Direction != "" || in.Channel != "" || in.DeclineReason != "" || in.Since != "" || in.Until != "") {
 		problems = append(problems, "outreach_id: give it alone for one thread, or leave it out to filter")
 	}
 	for _, st := range in.Statuses {
 		switch {
 		case st == "open":
 			for _, o := range store.OutreachStatuses {
-				if o != "closed" && !slices.Contains(q.Statuses, o) {
+				if o != "closed" && o != "declined" && !slices.Contains(q.Statuses, o) {
 					q.Statuses = append(q.Statuses, o)
 				}
 			}
@@ -211,6 +271,7 @@ func ListOutreach(ctx context.Context, s *store.Store, in OutreachFilter) (Outre
 	default:
 		problems = append(problems, fmt.Sprintf("follow_up: %q must be one of %s", in.FollowUp, strings.Join(OutreachFollowUps, ", ")))
 	}
+	problems = append(problems, filterInbound(in, &q)...)
 	q.Limit = in.Limit
 	if q.Limit <= 0 {
 		q.Limit = outreachPage
@@ -264,7 +325,7 @@ func FindThread(ctx context.Context, s *store.Store, person, company string, job
 	case 1:
 		return os[0].ID, nil
 	case 0:
-		return 0, &InputError{Problems: []string{"person: no open outreach thread matches; check the name with list_outreach, and reopen a closed thread by its outreach_id"}}
+		return 0, &InputError{Problems: []string{"person: no open outreach thread matches; check the name with list_outreach, and reopen a declined or closed thread by its outreach_id"}}
 	}
 	ids := make([]string, 0, len(os))
 	for _, o := range os {
@@ -331,6 +392,7 @@ type WhatsNewReport struct {
 	FollowUpsDue        []store.Outreach
 	FollowUpsTotal      int
 	ReEngageDue         int            // contacts whose date to get back in touch has come
+	UnansweredInbound   int            // inbound threads still received
 	ChangedApplications []store.JobRow // closed or reposted
 	OpenFlags           int
 	Suspect             []store.Company
@@ -374,7 +436,7 @@ func WhatsNew(ctx context.Context, s *store.Store, by store.Actor, since string)
 	if err != nil {
 		return r, err
 	}
-	r.OpenFlags, r.LastRefreshAt = t.OpenFlags, t.LastRefreshAt
+	r.OpenFlags, r.LastRefreshAt, r.UnansweredInbound = t.OpenFlags, t.LastRefreshAt, t.Outreach.Unanswered
 	if r.Suspect, err = s.SuspectCompanies(ctx); err != nil {
 		return r, err
 	}
