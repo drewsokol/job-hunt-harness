@@ -292,3 +292,28 @@ func (s *Store) SetPrefilterOverride(ctx context.Context, by Actor, id int64, on
 			map[string]any{"from": from, "to": to, "cause": "prefilter_override"})
 	})
 }
+
+// JobWithTitle returns the newest job, not hidden, at a company with this
+// name key and with this title key, or 0. It matches an application made
+// elsewhere that came with no link or description to dedupe by: exact
+// keys only, never a near match.
+func (s *Store) JobWithTitle(ctx context.Context, companyKey, titleKey string) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT j.id FROM jobs j JOIN companies c ON c.id = j.company_id
+		WHERE c.name_key = ? AND j.title_key = ? AND j.hidden_at IS NULL
+		ORDER BY j.id DESC LIMIT 1`, companyKey, titleKey).Scan(&id)
+	if errNoRows(err) {
+		return 0, nil
+	}
+	return id, err
+}
+
+// MarkAppliedElsewhere records that the user applied to a job outside jhh.
+func (s *Store) MarkAppliedElsewhere(ctx context.Context, by Actor, id int64) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE jobs SET applied_elsewhere = 1, updated_at = ?, updated_by = ? WHERE id = ? AND applied_elsewhere = 0",
+			s.stamp(), by, id)
+		return err
+	})
+}

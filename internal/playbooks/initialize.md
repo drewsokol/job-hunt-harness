@@ -57,6 +57,8 @@ Then decide where jhh searches beyond company boards. Call `list_sources`. Hacke
 
 jhh reads the job boards of companies the user chooses, on Greenhouse, Lever and Ashby. Suggest five to ten companies that fit the profile, and ask which to add. Add each one the user picks with `set_company`. If several boards match, ask which is the company's. Companies on other systems still come through search, or the user can share links and you can add those jobs with `add_jobs`.
 
+Ask whether the user has already applied anywhere. Record each one with `add_jobs`, giving a status (applied, interviewing, offer, rejected or withdrawn) and the date they applied if they know it, so replies and interviews have a job to land on.
+
 ## 7. The first refresh and the calibration round
 
 1. Call `refresh_jobs`. It can take a few minutes.
