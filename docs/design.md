@@ -494,7 +494,6 @@ contacts       id, name, title, company_id NULL, company_name, relationship, sou
                why (who they are and why they matter), profile_url, email, phone, notes,
                org_type NULL (agency|employer|other), warmth NULL (cold|warm|advocate),
                tags (JSON list of short lowercase words), re_engage_after NULL
-               why (who they are and why they matter), profile_url, email, notes
 outreach       id, contact_id, job_id NULL, direction, channel, sent_at, status, follow_up_at, note,
                decline_reason NULL, decline_note, pay_min NULL, pay_max NULL, pay_currency NULL,
                pay_period NULL, pay_note, client_company NULL
