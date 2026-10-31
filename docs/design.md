@@ -163,7 +163,7 @@ How jhh uses it:
 - **Closing.** When every query was read in full, a Muse posting that none of them returned is closed, like a posting missing from a board. If a query has more pages than its cap, or searching stopped early, nothing is closed, and refresh says which query to narrow. Postings of jobs you are pursuing (`review` onward) are not closed just for missing from the queries: jhh looks each one up (`Lookup`, at most 25 a refresh) and closes it only when The Muse says it's gone. So changing your queries never marks a job you applied to as closed.
 - **Board postings win.** Each result names its employer. When the employer is a company whose board jhh already reads, the result is skipped, because the board has the same job with a direct apply link. Otherwise the employer is recorded as a company with no board (`origin=search`), matched by a normalized name ("Example Corp, Inc." and "example corp" are the same company), and its jobs go through the normal flow. If that company's board is added later, the board's postings attach to the jobs found by search (same company, same title key), so nothing you were tracking is lost.
 - **Descriptions** arrive with the results, so they are handled like Lever and Ashby: held in memory while stage 1 runs, and stored only for jobs that pass.
-- **Finding boards** (M4): your agent can suggest adding a company that search keeps finding, and `add_company` probes its board on Greenhouse, Lever and Ashby, which every company uses the same way, so there's no custom work per employer. jhh doesn't probe on its own: you decide which companies to add.
+- **Finding boards** (M4): your agent can suggest adding a company that search keeps finding, and `set_company` probes its board on Greenhouse, Lever and Ashby, which every company uses the same way, so there's no custom work per employer. jhh doesn't probe on its own: you decide which companies to add.
 - The CLI (and in M5 the UI) labels these jobs "via The Muse".
 
 **Hacker News** was added after the MVP, to find the startups and tech companies that The Muse, which leans toward large employers, mostly misses. Each month the `whoishiring` account posts "Ask HN: Who is hiring?", and every top-level comment is one employer's ad. The ads lean toward startups and tech companies, the kind people can't list up front. What its API offers, checked on 2026-10-23:
@@ -343,7 +343,7 @@ Unscreened jobs move with the decision: pass makes them `unscreened`, drop makes
 - **Titles naming several roles** are judged role by role, and the job passes if any role does, so "Engineering Manager · Senior Engineer" isn't dropped for the manager. Flags from every role are kept. Only titles from a source whose titles list roles are split: a Hacker News ad's, whose roles jhh joins with " · ". A board title is never split, whatever it contains. A title naming no role (an ad whose header lists none) isn't dropped by `titles.require_any` or title-only keywords; that leaves a note, and body keywords still apply.
 - **Keywords.** A title keyword passes the job; otherwise it needs `min_body_hits_without_title_match` (default 1) different body keywords. Body keywords are counted in the description with boilerplate trimmed, so a benefits list that mentions an AI tool doesn't count.
 - **Pay floor** is yearly. Hourly pay is multiplied by 2,080 and monthly by 12. A job is dropped only when every range in the floor's currency tops out below it.
-- `jhh filters preview` and `set` (and in M4, `preview_filters` and `set_filters`) show how many open jobs pass now and would pass, how many would wait for descriptions, and examples of newly dropped and newly kept jobs.
+- `jhh filters preview` and `set` (and through MCP, `set_filters` with and without `dry_run`) show how many open jobs pass now and would pass, how many would wait for descriptions, and examples of newly dropped and newly kept jobs.
 
 ## 3. Profile, memories and filters
 
@@ -367,9 +367,9 @@ The order of authority is **profile > confirmed memories > inferred memories**. 
    - if there's no resume text, asks whether there's a resume it can read. Agents with file access, like Claude Code, can read it from disk and save the text with `set_resume_text`.
    - interviews you. With no profile, this is a short interview (about 10 questions, covering target role and level, location, pay, deal-breakers, strengths and gaps, and projects worth calling out). With a profile, it only asks about what is unclear or missing (pay floor, the places where you'd work on-site, whether customer-facing roles are fine, the claims you're comfortable making). It also points out anything that looks undersold or inconsistent with the resume.
    - saves individual answers with `remember`, as confirmed memories;
-   - drafts the profile, or the changes to your existing profile, and shows it to you in the chat. It saves it with `update_profile` or `edit_profile_section` only after you agree.
-   - drafts filters, runs `preview_filters` against the jobs already in the database, shows you the effect in the chat, then calls `set_filters`;
-   - suggests companies to add based on your profile, and probes them with `add_company`;
+   - drafts the profile, or the changes to your existing profile, and shows it to you in the chat. It saves it with `update_profile`, whole or one section at a time, only after you agree.
+   - drafts filters, runs `set_filters` with `dry_run` against the jobs already in the database, shows you the effect in the chat, then saves them with `set_filters`;
+   - suggests companies to add based on your profile, and probes them with `set_company`;
    - runs `refresh_jobs`, then screens a first batch so you can calibrate on real results.
 3. **Later:** "tune my filters", "why am I seeing so many X roles?", "add the payments migration I led to my profile" or "I'm open to hybrid now" all go through the same tools. Initialization can be run again at any time. It builds on what is already stored and doesn't start over.
 
@@ -388,7 +388,7 @@ The order of authority is **profile > confirmed memories > inferred memories**. 
 
 **How the agent edits it:**
 - `update_profile(markdown, summary)` replaces the whole document. It is used for the first draft or a rewrite.
-- `edit_profile_section(heading, content, mode="replace"|"append", summary)` makes targeted changes, such as adding a line under Highlights or rewriting Location. Untouched sections are left exactly as they were. If the heading doesn't exist, the section is created.
+- `update_profile(heading, content, mode="replace"|"append", summary)` makes targeted changes, such as adding a line under Highlights or rewriting Location. Untouched sections are left exactly as they were. If the heading doesn't exist, the section is created.
 - Every save is a new version, recording who made it (`user` or the agent's name) and a one-line summary ("Added the payments migration project under Highlights"). The Profile screen shows the history with diffs and a Restore button, and marks the latest version when an agent made it.
 - **Consent is a rule in the prompts, not something the server enforces.** The tool descriptions and every prompt tell the agent to show the exact text and wait for your OK before saving. The server can't check that you agreed. The backstops are the version history, restore, and the "edited by agent" marker.
 - The highlights matter beyond screening. When the agent rates a job, it can say which highlight to lead with (see `screen_new_jobs`).
@@ -412,7 +412,7 @@ A memory is one short statement with metadata:
 - **Guarding against poisoned memories.** A malicious listing could try to steer the agent into saving something false about you ("is fine with relocating"). A memory the agent infers while looking at a job must cite that job in `evidence`. It can never be saved as `user_said`, and it is shown in the UI as coming from a listing.
 - **Learning from your actions.** `get_feedback_signals` returns the cases where what you did disagreed with the agent's rating: you skipped a strong fit, applied to a stretch or a role it screened out, got an interview or a rejection. The agent can turn patterns in these into inferred memories and filter changes. This is how the system improves over time without any AI in the server.
 - **Recall** uses SQLite FTS5 for search. There will usually be a few dozen memories, so `get_context` returns all active ones, grouped by kind, and agents rarely need to search.
-- **No hard deletes from the agent.** `forget` archives a memory. The user can permanently delete memories in the UI.
+- **No hard deletes from the agent.** `update_memory` with `archive` archives a memory. The user can permanently delete memories in the UI.
 
 ### Filters
 
@@ -440,7 +440,7 @@ A memory is one short statement with metadata:
 The filters judge jobs, wherever they came from. Which sources look for jobs isn't part of them: it's set per source (see "Turning sources on and off"), and filters with a `search` section, where the sources used to be named, are refused with an error that names `set_source`.
 
 **How the agent writes filters:**
-- `preview_filters(filters)` runs a dry run against the current jobs and returns something like "92 pass now, 87 would pass; 6 newly dropped, 1 newly kept", with examples. The prompts tell the agent to show this to you before saving.
+- `set_filters(filters, dry_run=true)` runs a dry run against the current jobs and returns something like "92 pass now, 87 would pass; 6 newly dropped, 1 newly kept", with examples. The prompts tell the agent to show this to you before saving.
 - `set_filters(filters, rationale)` saves a new version and re-runs the prefilter. Every version keeps its rationale, the agent that wrote it, and its effect, and the UI can restore any earlier version in one click.
 - **Guardrail:** if a change would drop any job you are reviewing or have applied to, or would cut more than half of the jobs that pass now, `set_filters` refuses and returns the preview. It saves only when called again with `confirm=true`. This catches a bad rule without adding a step in the UI.
 - Dropped roles are still visible under Filtered out, so a filter that is too strict can always be spotted and fixed.
@@ -527,7 +527,7 @@ The **suggested ask** is `min + ask_percentile × (max − min)` of the job's ye
 
 ### Tools
 
-Jobs are identified by their short number (`482`) in every tool, so you and the agent can use the same numbers in the chat ("mark 482 applied"). The MVP aims for **about 20 tools** (33 after the MVP: a new capability joins an existing tool when it fits there, as one thread's history joins `list_outreach`). Some clients cap the total number of tools across all servers, and every tool description costs context.
+Jobs are identified by their short number (`482`) in every tool, so you and the agent can use the same numbers in the chat ("mark 482 applied"). The MVP aimed for **about 20 tools**. After it, jhh stays under 35 ([decision 0010](decisions/0010-fewer-tools.md)): one tool saves each kind of record, new or changed; a change that is a mode of another is a parameter; and a read tool given an id returns that one record in full. Some clients cap the total number of tools across all servers, and every tool description costs context.
 
 Tool outputs are compact JSON written with the agent's context window in mind. Descriptions are truncated (5,000 characters by default, which matches the reference) unless the agent asks for the full text. Everything from a listing is returned inside an `untrusted` object (see "Untrusted content and prompt injection"). All times going in and out are UTC (see section 4).
 
@@ -540,8 +540,7 @@ Tool outputs are compact JSON written with the agent's context window in mind. D
 | `get_job(job_id, full_description=false)` | One job: all postings, parsed pay, prefilter reasons, screening history, notes, timeline, and the outreach threads about it (id, person, status, follow-up date). Timeline events about a thread carry its `outreach_id`. |
 | `record_screening(screenings: [{job_id, fit, reason, gaps, flags?}])` | Batch write. `fit` is `strong`, `good`, `stretch` or `no`. Moves jobs to `review` or `screened_out`. Stamps the current profile version. |
 | `update_application(job_id, status?, applied_at?, notes?, append_note?)` | Pipeline changes. Writes an event. |
-| `log_outreach(person, channel, company?, job_id?, role?, sent_at?, follow_up_at?, note?)` | Creates or reuses a contact and logs a touch. |
-| `update_outreach(outreach_id? \| person + company? + job_id?, status?, follow_up_at?, note?)` | Records a reply, schedules a follow-up, closes the thread. The thread is named by its id, or by the person (see "Finding outreach threads"). |
+| `save_outreach(outreach_id? \| find?: {person, company?, job_id?}, person?, channel?, company?, job_id?, role?, sent_at?, status?, follow_up_at?, no_follow_up?, clear_follow_up?, note?)` | With neither `outreach_id` nor `find`, logs a new thread: creates or reuses the contact (`person` and `channel` are required) and sets a follow-up a week out unless told otherwise. With `outreach_id`, or `find` naming the one open thread that matches (see "Finding outreach threads"), records what happened next: a status, a follow-up date moved or cleared, a line added to the note. Returns the thread's `outreach_id` either way. |
 | `list_outreach(outreach_id?, status?, person?, company?, job_id?, follow_up?, limit=20, cursor?)` | Finds outreach threads, so the agent never depends on remembering an id. With `outreach_id`, that one thread with its whole note and history. |
 | `get_tracker(view="summary"\|"applied"\|"followups_due"\|"stale")` | Lets the agent answer "what should I follow up on?" The summary counts outreach threads by status. |
 | `add_jobs(jobs: [{url?, company, title?, location?, description?, pay?, employment_type?, notes?}])` | **The agent as a source.** For each job: if `url` matches a supported board (through `MatchURL`), jhh fetches the posting from that board's API itself. Otherwise it saves the fields the agent supplied, with `origin=agent`. Everything is treated as untrusted, deduped by the ladder above, and lands in `unscreened`: the prefilter records its decision on an agent's job but never moves it, since the agent chose it. Returns the job number for each, and whether it matched an existing job. In the MVP, jhh never fetches arbitrary pages. Reading schema.org `JobPosting` data from any URL comes later, with private and loopback addresses blocked at connection time, and limits on size and redirects. |
@@ -549,26 +548,24 @@ Tool outputs are compact JSON written with the agent's context window in mind. D
 | `get_setup_state()` | What exists and what is missing: profile, resume, companies, memory count, filters, whether a refresh or screening has run yet. This is where `initialize` starts. |
 | `get_context()` | Everything needed for screening in one call: profile, resume, active memories (grouped, with inferred ones marked), and active filters. |
 | `get_playbook(name)` | Returns the text of a prompt (`initialize`, `screen_new_jobs`, `tune`), for clients that don't support MCP prompts. |
-| `update_profile(markdown, summary)` | Replaces the whole profile with a new version. For the first draft or a rewrite, after the user has approved the text. |
-| `edit_profile_section(heading, content, mode, summary)` | Replaces or appends to one `##` section, creating it if needed. Returns the diff. |
+| `update_profile(summary, markdown? \| heading + content + mode?)` | With `markdown`, replaces the whole profile with a new version: the first draft or a rewrite, after the user has approved the text. With `heading`, replaces (`mode="replace"`, the default) or appends to (`"append"`) one `##` section, creating it if needed, and leaves the others exactly as they were. Returns the new version and the diff. |
 | `get_profile_history(limit?)` | Versions with author, summary and diff. Lets the agent answer "what did we change last week?" |
 | `set_resume_text(text, source)` | Saves resume text the agent read from a file or the user pasted into the chat. |
 | `remember(content, kind, basis, evidence?, supersedes?)` | Saves a memory. Returns any existing memories it may duplicate or contradict, so the agent can merge them or ask. |
 | `recall(query?, kind?, include_archived=false)` | Searches memories. |
-| `update_memory(id, content?, kind?, basis?)` / `forget(id, reason)` | Edits or archives a memory. |
+| `update_memory(id, content?, kind?, basis?, archive?)` | Edits a memory, or archives it with `archive` set to the reason. It stays visible to the user, who can delete it in the UI. |
 | `report_injection(job_id, excerpt, kind, note?)` | The agent reports text in a listing that is addressed to an AI. Creates a `content_flags` row for the user to review. It never hides the job by itself. |
 | `get_feedback_signals(since?)` | Cases where the user's actions disagreed with the screening, plus application outcomes (see section 3). |
-| `preview_filters(filters)` | Dry run: counts and examples of what would be newly dropped or newly kept. |
-| `set_filters(filters, rationale, confirm=false)` | Saves a new filter version and re-runs the prefilter. Subject to the guardrail in section 3. |
+| `set_filters(filters, rationale?, dry_run=false, confirm=false)` | With `dry_run`, saves nothing and returns counts and examples of what would be newly dropped or newly kept. Otherwise saves a new filter version with its `rationale` and re-runs the prefilter. Subject to the guardrail in section 3. |
 | `get_filter_history()` | Past versions, with their rationale and effect. |
 | `list_sources()` / `set_source(name, enabled?, settings?, reason?)` | Every source with its status (`on`, `off`, `needs setup`), settings, last run and last error; and turning a search source on or off or changing its settings. Settings are checked by the source, and changes are recorded with the agent's name. Keys can't be set or read here: a source says only whether one is saved (see "Keys"). |
-| `list_companies(query?)` / `add_company(name, where?)` / `set_company_enabled(company_id, enabled)` | `add_company` takes what `jhh companies add` takes: a board slug, `source:slug` or a link to one of the company's postings, or nothing to guess slugs from the name. It probes every source, adds the company when exactly one board matches, and otherwise returns the boards it found. |
+| `list_companies(query?)` / `set_company(company, where?, enabled?)` | For a company jhh doesn't know yet, `set_company` takes what `jhh companies add` takes: a board slug, `source:slug` or a link to one of the company's postings in `where`, or nothing to guess slugs from the name. It probes every source, adds the company when exactly one board matches, and otherwise returns the boards it found. For a company jhh already has, `enabled` turns reading its board on or off; its jobs stay. |
 
 There are deliberately no delete tools in v1. Deleting is done in the UI, so an agent that goes wrong can't destroy data.
 
 #### Finding outreach threads
 
-`log_outreach` returns the thread's id, and `update_outreach` used to need it. An agent whose context is condensed loses the ids, and guessing the next number risks updating the wrong person. So every thread can be found again:
+Saving a thread returns its id, and changing one used to need it. An agent whose context is condensed loses the ids, and guessing the next number risks updating the wrong person. So every thread can be found again:
 
 - **`list_outreach`** returns threads with `outreach_id`, person, role, channel, job number, status, `sent_at`, `follow_up_at`, `updated_at` and the note cut at 200 characters (with `note_truncated`). The company and the job's title come inside `untrusted`, as in `get_tracker`, since they can come from a listing. Filters, all optional and combined with AND:
   - `status`: one or more of `sent`, `accepted`, `replied`, `scheduled`, `no_reply`, `closed`; `open` stands for every status but `closed`;
@@ -577,7 +574,7 @@ There are deliberately no delete tools in v1. Deleting is done in the UI, so an 
   - `follow_up`: `due` (waiting, with a follow-up date that has come), `set` (any follow-up date) or `none`.
 
   Threads come most recently changed first, 20 to a page, with a cursor and the total. With `outreach_id` it returns that one thread with its whole note and its history: every event about it (logged, status changes, follow-up dates moved or cleared, notes added), oldest first, with who made each change.
-- **`update_outreach` takes the person instead of the id.** `person` must match the contact's name exactly, ignoring case; `company` and `job_id` narrow it, matched the way `log_outreach` matches a company. Only open threads (any status but `closed`) are considered. Exactly one match is updated. Otherwise nothing changes and the error says why: no open thread, or several, listed with their ids, jobs and sent dates (not their companies, which can come from a listing, while errors sit outside the untrusted envelope), so the agent picks one by id. jhh never guesses between threads. A closed thread is reopened only by its id.
+- **`save_outreach` finds the thread by person instead of the id**, with `find: {person, company?, job_id?}`. `person` must match the contact's name exactly, ignoring case; `company` and `job_id` narrow it, the company matched the way a new thread's company is. Only open threads (any status but `closed`) are considered. Exactly one match is updated. Otherwise nothing changes and the error says why: no open thread, or several, listed with their ids, jobs and sent dates (not their companies, which can come from a listing, while errors sit outside the untrusted envelope), so the agent picks one by id. jhh never guesses between threads. A closed thread is reopened only by its id.
 - **`get_job`** lists the job's threads, and its timeline events about a thread carry `outreach_id`.
 - **`get_tracker`'s summary** counts threads by status. `followups_due` and `stale` already return threads with their ids.
 
