@@ -156,6 +156,10 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		if err != nil {
 			return nil, err
 		}
+		ivs, err := core.JobInterviews(ctx, t.Store, in.JobID)
+		if err != nil {
+			return nil, err
+		}
 		type threadOut struct {
 			ID         int64   `json:"outreach_id"`
 			Person     string  `json:"person"`
@@ -166,15 +170,25 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		}
 		out := struct {
 			jobOut
-			Notes      string       `json:"notes,omitempty"`
-			Postings   []postingOut `json:"postings"`
-			Screenings []*fitOut    `json:"screening_history,omitempty"`
-			Flags      []flagOut    `json:"content_flag_details,omitempty"`
-			Outreach   []threadOut  `json:"outreach,omitempty"`
-			Timeline   []eventOut   `json:"timeline"`
-		}{jobOut: job(d.JobRow, true), Notes: d.Notes, Postings: []postingOut{}, Timeline: []eventOut{}}
+			Notes      string         `json:"notes,omitempty"`
+			Postings   []postingOut   `json:"postings"`
+			Screenings []*fitOut      `json:"screening_history,omitempty"`
+			Flags      []flagOut      `json:"content_flag_details,omitempty"`
+			Outreach   []threadOut    `json:"outreach,omitempty"`
+			Interviews []interviewOut `json:"interviews,omitempty"`
+			Refs       []refOut       `json:"refs,omitempty"`
+			Timeline   []eventOut     `json:"timeline"`
+		}{jobOut: job(d.JobRow, true), Notes: d.Notes, Postings: []postingOut{}, Interviews: interviews(ivs, false), Timeline: []eventOut{}}
 		for _, o := range threads.Outreach {
 			out.Outreach = append(out.Outreach, threadOut{o.ID, o.Person, o.Status, timeOrEmpty(o.FollowUpAt), o.Direction, pay(o.Pay)})
+		}
+		refs, err := t.Store.Refs(ctx, store.RefTarget{JobID: in.JobID})
+		if err != nil {
+			return nil, err
+		}
+		out.Refs = refsOut(refs)
+		if out.Interviews, err = t.withRefs(ctx, out.Interviews); err != nil {
+			return nil, err
 		}
 		for _, p := range d.Postings {
 			out.Postings = append(out.Postings, postingOut{p.ID, p.Source, p.Search, timeOrEmpty(p.FirstSeenAt), timeOrEmpty(p.ClosedAt),
@@ -232,15 +246,29 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		AppliedAt  string  `json:"applied_at,omitempty" jsonschema:"UTC, RFC 3339; defaults to now when the status becomes applied"`
 		Notes      *string `json:"notes,omitempty" jsonschema:"replaces the job's notes"`
 		AppendNote string  `json:"append_note,omitempty" jsonschema:"adds a line to the notes"`
+		AddRefs    []refIn `json:"add_refs,omitempty" jsonschema:"links to the email threads about the application"`
+		RemoveRefs []int64 `json:"remove_refs,omitempty" jsonschema:"ids of links to remove"`
 	}
 	add(t, s, "update_application", writes, func(ctx context.Context, c call, in applicationIn) (any, error) {
-		return ok(core.UpdateApplication(ctx, t.Store, c.by, in.JobID, core.ApplicationInput{
-			Status: in.Status, AppliedAt: in.AppliedAt, Notes: in.Notes, AppendNote: in.AppendNote,
-		}))
+		refs := refInputs(in.AddRefs)
+		if err := core.CheckRefs(refs, in.RemoveRefs); err != nil {
+			return nil, err
+		}
+		if err := core.CheckRemovals(ctx, t.Store, store.RefTarget{JobID: in.JobID}, in.RemoveRefs); err != nil {
+			return nil, err
+		}
+		if in.Status != "" || in.AppliedAt != "" || in.Notes != nil || in.AppendNote != "" || !core.HasRefs(refs, in.RemoveRefs) {
+			if err := core.UpdateApplication(ctx, t.Store, c.by, in.JobID, core.ApplicationInput{
+				Status: in.Status, AppliedAt: in.AppliedAt, Notes: in.Notes, AppendNote: in.AppendNote,
+			}); err != nil {
+				return nil, err
+			}
+		}
+		return ok(core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{JobID: in.JobID}, refs, in.RemoveRefs))
 	})
 
 	type agentJobIn struct {
-		URL            string `json:"url,omitempty" jsonschema:"the posting's link; a Greenhouse, Lever or Ashby link is read from the board"`
+		URL            string `json:"url,omitempty" jsonschema:"the posting's link"`
 		Company        string `json:"company"`
 		Title          string `json:"title,omitempty" jsonschema:"required unless url is a Greenhouse, Lever or Ashby posting"`
 		Location       string `json:"location,omitempty"`
@@ -248,7 +276,7 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		Pay            string `json:"pay,omitempty" jsonschema:"as the listing states it"`
 		EmploymentType string `json:"employment_type,omitempty"`
 		Notes          string `json:"notes,omitempty" jsonschema:"where the job came from, for the user; added to the job's notes"`
-		Status         string `json:"status,omitempty" jsonschema:"for a job the user applied to outside jhh: applied, interviewing, offer, rejected or withdrawn"`
+		Status         string `json:"status,omitempty" jsonschema:"applied outside jhh: applied, interviewing, offer, rejected or withdrawn"`
 		AppliedAt      string `json:"applied_at,omitempty" jsonschema:"with status: when they applied, UTC, RFC 3339; default now"`
 	}
 	type addJobsIn struct {
@@ -322,17 +350,19 @@ func (t *tools) addJobTools(s *mcp.Server) {
 	})
 }
 
-// eventOut is one timeline event. OutreachID names the thread it's about.
+// eventOut is one timeline event. OutreachID and InterviewID name the
+// thread and interview it's about.
 type eventOut struct {
-	At         string          `json:"at"`
-	Actor      string          `json:"actor"`
-	Kind       string          `json:"kind"`
-	OutreachID int64           `json:"outreach_id,omitempty"`
-	Data       json.RawMessage `json:"data,omitempty"`
+	At          string          `json:"at"`
+	Actor       string          `json:"actor"`
+	Kind        string          `json:"kind"`
+	OutreachID  int64           `json:"outreach_id,omitempty"`
+	InterviewID int64           `json:"interview_id,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
 }
 
 func event(e store.Event) eventOut {
-	ev := eventOut{At: timeOrEmpty(e.At), Actor: string(e.Actor), Kind: e.Kind, OutreachID: e.OutreachID}
+	ev := eventOut{At: timeOrEmpty(e.At), Actor: string(e.Actor), Kind: e.Kind, OutreachID: e.OutreachID, InterviewID: e.InterviewID}
 	if string(e.Data) != "{}" {
 		ev.Data = e.Data
 	}

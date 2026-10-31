@@ -266,7 +266,7 @@ func (t *tools) addManageTools(s *mcp.Server) {
 	type setSourceIn struct {
 		Name     string         `json:"name" jsonschema:"the search source: hackernews, himalayas or themuse"`
 		Enabled  *bool          `json:"enabled,omitempty" jsonschema:"true to turn it on, false to pause it; leave out to keep it as it is"`
-		Settings map[string]any `json:"settings,omitempty" jsonschema:"the source's whole settings object, replacing the current one; leave out to keep them"`
+		Settings map[string]any `json:"settings,omitempty" jsonschema:"leave out to keep them"`
 		Reason   string         `json:"reason,omitempty" jsonschema:"one sentence: why, shown to the user"`
 	}
 	add(t, s, "set_source", writes, func(ctx context.Context, c call, in setSourceIn) (any, error) {

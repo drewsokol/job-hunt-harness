@@ -9,20 +9,21 @@ import (
 
 // Event is one entry in the timeline.
 type Event struct {
-	ID         int64
-	At         time.Time
-	Actor      Actor
-	Kind       string
-	JobID      int64
-	OutreachID int64
-	ContactID  int64
-	CompanyID  int64
-	Data       json.RawMessage
+	ID          int64
+	At          time.Time
+	Actor       Actor
+	Kind        string
+	JobID       int64
+	OutreachID  int64
+	ContactID   int64
+	CompanyID   int64
+	InterviewID int64
+	Data        json.RawMessage
 }
 
 // eventRefs says what an event is about. Zero ids are stored as NULL.
 type eventRefs struct {
-	JobID, OutreachID, ContactID, CompanyID int64
+	JobID, OutreachID, ContactID, CompanyID, InterviewID int64
 }
 
 // insertEvent records an event inside the caller's transaction, so the
@@ -36,9 +37,9 @@ func insertEvent(ctx context.Context, tx *sql.Tx, at string, by Actor, kind stri
 		}
 	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO events (at, actor, kind, job_id, outreach_id, contact_id, company_id, data)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		at, by, kind, nullID(refs.JobID), nullID(refs.OutreachID), nullID(refs.ContactID), nullID(refs.CompanyID), payload)
+		INSERT INTO events (at, actor, kind, job_id, outreach_id, contact_id, company_id, interview_id, data)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		at, by, kind, nullID(refs.JobID), nullID(refs.OutreachID), nullID(refs.ContactID), nullID(refs.CompanyID), nullID(refs.InterviewID), payload)
 	return err
 }
 
@@ -52,9 +53,19 @@ func (s *Store) OutreachEvents(ctx context.Context, outreachID int64) ([]Event, 
 	return s.events(ctx, "outreach_id = ?", outreachID)
 }
 
+// ContactEvents returns a contact's history, oldest first.
+func (s *Store) ContactEvents(ctx context.Context, contactID int64) ([]Event, error) {
+	return s.events(ctx, "contact_id = ?", contactID)
+}
+
+// InterviewEvents returns an interview's history, oldest first.
+func (s *Store) InterviewEvents(ctx context.Context, interviewID int64) ([]Event, error) {
+	return s.events(ctx, "interview_id = ?", interviewID)
+}
+
 func (s *Store) events(ctx context.Context, where string, args ...any) ([]Event, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, at, actor, kind, job_id, outreach_id, contact_id, company_id, data
+		SELECT id, at, actor, kind, job_id, outreach_id, contact_id, company_id, interview_id, data
 		FROM events WHERE `+where+` ORDER BY at, id`, args...)
 	if err != nil {
 		return nil, err
@@ -63,19 +74,19 @@ func (s *Store) events(ctx context.Context, where string, args ...any) ([]Event,
 	var es []Event
 	for rows.Next() {
 		var (
-			e                                       Event
-			at                                      sql.NullString
-			actor, data                             string
-			jobID, outreachID, contactID, companyID sql.NullInt64
+			e                                                    Event
+			at                                                   sql.NullString
+			actor, data                                          string
+			jobID, outreachID, contactID, companyID, interviewID sql.NullInt64
 		)
-		if err := rows.Scan(&e.ID, &at, &actor, &e.Kind, &jobID, &outreachID, &contactID, &companyID, &data); err != nil {
+		if err := rows.Scan(&e.ID, &at, &actor, &e.Kind, &jobID, &outreachID, &contactID, &companyID, &interviewID, &data); err != nil {
 			return nil, err
 		}
 		if e.At, err = parseTime(at); err != nil {
 			return nil, err
 		}
 		e.Actor, e.Data = Actor(actor), json.RawMessage(data)
-		e.JobID, e.OutreachID, e.ContactID, e.CompanyID = jobID.Int64, outreachID.Int64, contactID.Int64, companyID.Int64
+		e.JobID, e.OutreachID, e.ContactID, e.CompanyID, e.InterviewID = jobID.Int64, outreachID.Int64, contactID.Int64, companyID.Int64, interviewID.Int64
 		es = append(es, e)
 	}
 	return es, rows.Err()

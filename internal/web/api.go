@@ -390,6 +390,7 @@ type jobJSON struct {
 	OpenFlags          []string           `json:"open_flags,omitempty"`
 	Prefilter          []prefilter.Reason `json:"prefilter,omitempty"`
 	Notes              string             `json:"notes,omitempty"`
+	NextInterview      *interviewJSON     `json:"next_interview,omitempty"`
 }
 
 // asker computes suggested asks for a page of jobs.
@@ -458,6 +459,10 @@ func (s *server) listJobs(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		jobs = append(jobs, a.job(row))
 	}
+	if err := s.withNextInterviews(r.Context(), jobs); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, struct {
 		Total int       `json:"total"`
 		Jobs  []jobJSON `json:"jobs"`
@@ -470,7 +475,17 @@ type jobDetailJSON struct {
 	Postings    []postingJSON   `json:"postings"`
 	Screenings  []screeningJSON `json:"screenings"`
 	ContentFlag []flagJSON      `json:"content_flags"`
+	Interviews  []interviewJSON `json:"interviews"`
+	Refs        []refJSON       `json:"refs"`
 	Events      []eventJSON     `json:"events"`
+}
+
+// refJSON is a link to the email thread about an application. The agent
+// wrote it from mail others sent, so the page shows it as text and a link.
+type refJSON struct {
+	System string `json:"system"`
+	Ref    string `json:"ref"`
+	URL    string `json:"url,omitempty"`
 }
 
 type postingJSON struct {
@@ -524,7 +539,15 @@ func (s *server) getJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := jobDetailJSON{jobJSON: a.job(d.JobRow), Description: d.Description,
-		Postings: []postingJSON{}, Screenings: []screeningJSON{}, ContentFlag: []flagJSON{}, Events: []eventJSON{}}
+		Postings: []postingJSON{}, Screenings: []screeningJSON{}, ContentFlag: []flagJSON{}, Refs: []refJSON{}, Events: []eventJSON{}}
+	refs, err := s.Store.Refs(r.Context(), store.RefTarget{JobID: id})
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	for _, ref := range refs {
+		out.Refs = append(out.Refs, refJSON{System: ref.System, Ref: ref.Ref, URL: webURL(ref.URL)})
+	}
 	for _, p := range d.Postings {
 		out.Postings = append(out.Postings, postingJSON{ID: p.ID, Source: sources.SearchTitle(p.Source), Title: p.Title, Location: p.LocationRaw,
 			URL: webURL(p.URL), Closed: timeText(p.ClosedAt)})
@@ -537,6 +560,10 @@ func (s *server) getJob(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, e := range d.Events {
 		out.Events = append(out.Events, eventJSON{Kind: e.Kind, At: timeText(e.At), Actor: string(e.Actor), Data: e.Data})
+	}
+	if out.Interviews, err = s.jobInterviews(r.Context(), id); err != nil {
+		s.fail(w, r, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -712,17 +739,18 @@ func inputFields(err error) error {
 }
 
 type outreachJSON struct {
-	ID       int64  `json:"id"`
-	Person   string `json:"person"`
-	Role     string `json:"role,omitempty"`
-	Company  string `json:"company,omitempty"`
-	JobID    int64  `json:"job_id,omitempty"`
-	JobTitle string `json:"job_title,omitempty"`
-	Channel  string `json:"channel"`
-	Sent     string `json:"sent"`
-	Status   string `json:"status"`
-	FollowUp string `json:"follow_up,omitempty"`
-	Note     string `json:"note,omitempty"`
+	ID        int64  `json:"id"`
+	ContactID int64  `json:"contact_id,omitempty"`
+	Person    string `json:"person"`
+	Role      string `json:"role,omitempty"`
+	Company   string `json:"company,omitempty"`
+	JobID     int64  `json:"job_id,omitempty"`
+	JobTitle  string `json:"job_title,omitempty"`
+	Channel   string `json:"channel"`
+	Sent      string `json:"sent"`
+	Status    string `json:"status"`
+	FollowUp  string `json:"follow_up,omitempty"`
+	Note      string `json:"note,omitempty"`
 
 	Direction     string   `json:"direction"`
 	DeclineReason string   `json:"decline_reason,omitempty"`
@@ -739,16 +767,76 @@ func (s *server) listOutreach(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]outreachJSON, 0, len(os))
 	for _, o := range os {
-		out = append(out, outreachJSON{ID: o.ID, Person: o.Person, Role: o.Role, Company: o.Company, JobID: o.JobID, JobTitle: o.JobTitle,
+		out = append(out, outreachJSON{ID: o.ID, ContactID: o.ContactID, Person: o.Person, Role: o.Role, Company: o.Company, JobID: o.JobID, JobTitle: o.JobTitle,
 			Channel: o.Channel, Sent: timeText(o.SentAt), Status: o.Status, FollowUp: timeText(o.FollowUpAt), Note: o.Note,
 			Direction: o.Direction, DeclineReason: o.DeclineReason, DeclineNote: o.DeclineNote, ClientCompany: o.ClientCompany, Pay: payOf(o.Pay)})
 	}
+	// The contacts behind the threads on the page, and those due to get
+	// back in touch with.
+	var ids []int64
+	seen := map[int64]bool{}
+	for _, o := range os {
+		if o.ContactID != 0 && !seen[o.ContactID] {
+			seen[o.ContactID] = true
+			ids = append(ids, o.ContactID)
+		}
+	}
+	contacts := map[string]contactJSON{}
+	if len(ids) > 0 {
+		cs, _, err := s.Store.ListContacts(r.Context(), store.ContactQuery{IDs: ids, Limit: len(ids)})
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		for _, c := range cs {
+			contacts[strconv.FormatInt(c.ID, 10)] = contactToJSON(c)
+		}
+	}
+	due, _, err := s.Store.ListContacts(r.Context(), store.ContactQuery{ReEngageDueBy: utc.Now(), Limit: maxList})
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	dueOut := make([]contactJSON, 0, len(due))
+	for _, c := range due {
+		dueOut = append(dueOut, contactToJSON(c))
+	}
 	writeJSON(w, http.StatusOK, struct {
-		Total          int            `json:"total"`
-		Statuses       []string       `json:"statuses"`
-		DeclineReasons []string       `json:"decline_reasons"`
-		Items          []outreachJSON `json:"items"`
-	}{total, store.OutreachStatuses, store.DeclineReasons, out})
+		Total          int                    `json:"total"`
+		Statuses       []string               `json:"statuses"`
+		DeclineReasons []string               `json:"decline_reasons"`
+		Items          []outreachJSON         `json:"items"`
+		Contacts       map[string]contactJSON `json:"contacts"`
+		ContactsDue    []contactJSON          `json:"contacts_due"`
+	}{total, store.OutreachStatuses, store.DeclineReasons, out, contacts, dueOut})
+}
+
+// contactJSON is a contact as the Outreach tab shows it.
+type contactJSON struct {
+	ID            int64    `json:"id"`
+	Name          string   `json:"name"`
+	Role          string   `json:"role,omitempty"`
+	Company       string   `json:"company,omitempty"`
+	Relationship  string   `json:"relationship,omitempty"`
+	OrgType       string   `json:"org_type,omitempty"`
+	Warmth        string   `json:"warmth,omitempty"`
+	Tags          []string `json:"tags"`
+	Email         string   `json:"email,omitempty"`
+	Phone         string   `json:"phone,omitempty"`
+	ProfileURL    string   `json:"profile_url,omitempty"`
+	Why           string   `json:"why,omitempty"`
+	ReEngageAfter string   `json:"re_engage_after,omitempty"`
+	LastThreadAt  string   `json:"last_thread_at,omitempty"`
+}
+
+func contactToJSON(c store.Contact) contactJSON {
+	tags := c.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	return contactJSON{ID: c.ID, Name: c.Name, Role: c.Title, Company: c.Company, Relationship: c.Relationship, OrgType: c.OrgType,
+		Warmth: c.Warmth, Tags: tags, Email: c.Email, Phone: c.Phone, ProfileURL: c.ProfileURL, Why: c.Why,
+		ReEngageAfter: timeText(c.ReEngageAfter), LastThreadAt: timeText(c.LastThreadAt)}
 }
 
 func (s *server) logOutreach(w http.ResponseWriter, r *http.Request) {

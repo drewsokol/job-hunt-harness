@@ -33,7 +33,15 @@ const EVENTS = {
   outreach_updated: "Outreach updated", injection_reported: "Text aimed at an AI reported", content_flag_reviewed: "Content flag reviewed",
   job_merged: "Merged into another job", jobs_merged_in: "Other jobs merged in", job_unmerged: "Merge undone",
   job_split: "Postings split off", job_split_off: "Split off from another job", posting_closed: "Posting closed",
+  interview_logged: "Interview logged", interview_updated: "Interview updated",
+  refs_changed: "Email links changed",
 };
+const STAGES = {
+  recruiter_screen: "Recruiter screen", hiring_manager: "Hiring manager", technical: "Technical", system_design: "System design",
+  panel: "Panel", product: "Product", final: "Final", other: "Interview",
+};
+const INTERVIEW_STATUS = { scheduled: "Scheduled", completed: "Done", cancelled: "Cancelled", no_show: "No-show" };
+const OUTCOMES = { pending: "waiting to hear", advanced: "advanced", rejected: "rejected", offer: "offer" };
 
 const state = {
   signedOut: false, error: "", loaded: false,
@@ -94,6 +102,11 @@ function fmtDate(iso) {
   const opts = { month: "short", day: "numeric" };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
   return d.toLocaleDateString(undefined, opts);
+}
+// fmtWhen is a date and local time, for interviews.
+function fmtWhen(iso) {
+  if (!iso) return "";
+  return `${fmtDate(iso)}, ${new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 function who(actor) {
   if (!actor || actor === "user") return "you";
@@ -552,6 +565,17 @@ function detailsEl(j) {
           p.location ? ` · ${p.location}` : "", ` · ${p.source}`, p.closed ? ` · closed ${fmtDate(p.closed)}` : "");
       })));
   }
+  if (d.interviews && d.interviews.length) {
+    el.append(h("span", { class: "label" }, "Interviews"), h("ul", { class: "interviews" }, d.interviews.map(interviewEl)));
+  }
+  if (d.refs && d.refs.length) {
+    el.append(h("span", { class: "label" }, "Email"),
+      h("ul", { class: "postings" }, d.refs.map((r) => {
+        const url = safeURL(r.url);
+        const text = `${r.system}: ${r.ref}`;
+        return h("li", null, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, text) : text);
+      })));
+  }
   el.append(h("label", { class: "notes-box" }, "Your notes",
     h("textarea", { id: `notes-${j.id}`, rows: "3", placeholder: "Recruiter name, referral, what you emphasized, interview dates",
       value: j.notes || "", onchange: (e) => change(j, { notes: e.target.value.trim() }, "Notes saved.", { notes: j.notes || "" }) })));
@@ -563,11 +587,30 @@ function detailsEl(j) {
   return el;
 }
 
+// interviewEl is one interview in a job's detail. Everything in it is the
+// agent's record, shown as text.
+function interviewEl(iv) {
+  const status = iv.status === "completed" ? `Done, ${OUTCOMES[iv.outcome] || iv.outcome}` : INTERVIEW_STATUS[iv.status] || iv.status;
+  const people = (iv.interviewers || []).map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(", ");
+  return h("li", null,
+    h("div", null, h("b", null, STAGES[iv.stage] || iv.stage), ` · ${fmtWhen(iv.scheduled_at)}`,
+      iv.duration_minutes ? ` · ${iv.duration_minutes} min` : "", iv.medium !== "other" ? ` · ${iv.medium}` : "", ` · ${status}`),
+    people ? h("div", { class: "hint" }, `With ${people}`) : null,
+    iv.joining ? h("div", { class: "joining" }, iv.joining) : null,
+    iv.next_step_at && iv.outcome === "pending" ? h("div", { class: "hint" }, `Expecting to hear by ${fmtDate(iv.next_step_at)}`) : null,
+    iv.prep_notes ? h("p", { class: "mynote" }, h("b", null, "Prep: "), iv.prep_notes) : null,
+    iv.debrief_notes ? h("p", { class: "mynote" }, h("b", null, "Debrief: "), iv.debrief_notes) : null);
+}
+
+function nextInterviewEl(iv) {
+  return h("p", { class: "next-interview" }, h("b", null, "Next interview: "), `${STAGES[iv.stage] || iv.stage} · ${fmtWhen(iv.scheduled_at)}`);
+}
+
 function eventText(e) {
   const d = e.data || {};
   switch (e.kind) {
     case "status_changed": {
-      const why = d.cause === "prefilter" ? " (filters)" : d.cause === "content_flag" ? " (hidden for AI instructions)" : d.cause === "prefilter_override" ? " (sent to screening)" : "";
+      const why = d.cause === "prefilter" ? " (filters)" : d.cause === "content_flag" ? " (hidden for AI instructions)" : d.cause === "prefilter_override" ? " (sent to screening)" : d.cause === "interview" ? " (interview logged)" : "";
       return `${STATUS[d.from] || d.from} → ${STATUS[d.to] || d.to}${why}`;
     }
     case "screened": return `Rated: ${FIT[d.fit] || d.fit}`;
@@ -652,7 +695,8 @@ function viewApplied() {
   const jobs = state.lists.applied || [];
   const sections = [["interviewing", "Interviewing"], ["offer", "Offers"], ["applied", "Waiting to hear back"]].map(([s, label]) => {
     const js = jobs.filter((j) => j.status === s);
-    return js.length ? [h("p", { class: "section-label" }, `${label} · ${js.length}`), js.map((j) => jobRow(j))] : [];
+    return js.length ? [h("p", { class: "section-label" }, `${label} · ${js.length}`),
+      js.map((j) => jobRow(j, { extra: j.next_interview ? nextInterviewEl(j.next_interview) : null }))] : [];
   }).flat(2);
   return sections.length ? h("div", { class: "list" }, sections)
     : empty("No applications yet", "Mark a role applied from To review and it moves here.");
@@ -817,6 +861,35 @@ async function updateOutreach(o, patch, msg, back) {
   reload();
 }
 
+const WARMTH = { cold: "Cold", warm: "Warm", advocate: "Advocate" };
+const ORG_TYPE = { agency: "Agency", employer: "Employer", other: "Other" };
+
+// contactLine shows what jhh knows about a contact beyond the thread: how
+// warm they are, who they are to the user, how to reach them, and tags.
+function contactLine(c) {
+  if (!c) return null;
+  const url = safeURL(c.profile_url || "");
+  const parts = [
+    c.warmth ? pill(c.warmth === "advocate" ? "st-ok" : c.warmth === "warm" ? "st-applied" : "st-idle", WARMTH[c.warmth] || c.warmth) : null,
+    c.org_type ? h("span", null, ORG_TYPE[c.org_type] || c.org_type) : null,
+    c.relationship ? h("span", null, c.relationship.replaceAll("_", " ")) : null,
+    c.email ? h("span", { class: "mono" }, c.email) : null,
+    c.phone ? h("span", { class: "mono" }, c.phone) : null,
+    url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, "Profile") : null,
+    ...(c.tags || []).map((t) => h("span", { class: "tag" }, `#${t}`)),
+  ].filter(Boolean);
+  return parts.length ? h("div", { class: "meta" }, parts) : null;
+}
+
+function reEngageRow(c) {
+  return h("li", null, h("span", { class: "company" }, c.name),
+    h("span", null, [c.role, c.company].filter(Boolean).join(", ")),
+    h("span", { class: "meta" }, `get back in touch since ${fmtDate(c.re_engage_after)}`,
+      c.last_thread_at ? ` · last in touch ${fmtDate(c.last_thread_at)}` : ""),
+    contactLine(c),
+    c.why ? h("p", { class: "reason" }, c.why) : null);
+}
+
 function outreachRow(o) {
   const cls = ["replied", "accepted", "scheduled"].includes(o.status) ? "st-ok" : ["no_reply", "declined", "closed"].includes(o.status) ? "st-idle"
     : o.status === "received" ? "st-warn" : "st-applied";
@@ -831,6 +904,7 @@ function outreachRow(o) {
       h("div", { class: "meta" }, h("span", null, o.direction === "inbound" ? "They wrote first" : "You wrote first"),
         h("span", null, channelName(o.channel)), h("span", { class: "mono" }, fmtDate(o.sent)),
         o.job_id ? h("span", null, `#${o.job_id} ${o.job_title}`) : null),
+      contactLine(o.contact_id && state.outreach.contacts ? state.outreach.contacts[o.contact_id] : null),
       o.pay ? h("p", { class: "reason" }, `Pay mentioned: ${payText(o.pay)}`) : null,
       declined ? h("p", { class: "reason" }, `Declined: ${declined}`) : null,
       o.note ? h("p", { class: "reason mynote" }, o.note) : null,
@@ -870,10 +944,14 @@ function viewOutreach() {
     h("button", { class: "chip", type: "button", "aria-pressed": String(state.outDir === k), onclick: () => { state.outDir = k; render(); } }, label));
   const toolbar = h("div", { class: "toolbar" }, h("div", { class: "chips" }, chips),
     h("button", { class: "btn primary", type: "button", onclick: () => toggleForm("outreach") }, state.form === "outreach" ? "Close" : "Log outreach"));
+  const dueContacts = (state.outreach && state.outreach.contacts_due) || [];
+  const reEngage = dueContacts.length ? h("section", { class: "panel" }, h("h2", null, `Get back in touch · ${dueContacts.length}`),
+    h("p", { class: "hint" }, "People whose date to get back in touch has come. Your agent sets it with save_contact."),
+    h("ul", { class: "memories" }, dueContacts.map(reEngageRow))) : null;
   if (!items.length && all.length) {
-    return [toolbar, state.form === "outreach" ? outreachForm() : null, empty("No threads this way", "Try another filter above.")].filter(Boolean);
+    return [toolbar, state.form === "outreach" ? outreachForm() : null, reEngage, empty("No threads this way", "Try another filter above.")].filter(Boolean);
   }
-  return [toolbar, state.form === "outreach" ? outreachForm() : null,
+  return [toolbar, state.form === "outreach" ? outreachForm() : null, reEngage,
     items.length ? h("div", { class: "list" }, items.map(outreachRow))
       : empty("No outreach logged", "Log a message you sent or a recruiter who wrote to you, or tell your agent about it.")].filter(Boolean);
 }
