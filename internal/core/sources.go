@@ -286,7 +286,7 @@ func SetSource(ctx context.Context, s *store.Store, by store.Actor, name string,
 	spec, ok := searchSpecs[name]
 	switch {
 	case !ok && boardTitles[name] != "":
-		return SourceInfo{}, &InputError{Problems: []string{fmt.Sprintf("name: %s is a board source, read for each company added; turn a company's board on or off with set_company_enabled", boardTitles[name])}}
+		return SourceInfo{}, &InputError{Problems: []string{fmt.Sprintf("name: %s is a board source, read for each company added; turn a company's board on or off with set_company", boardTitles[name])}}
 	case !ok:
 		return SourceInfo{}, &InputError{Problems: []string{fmt.Sprintf("name: %q is not a search source; use one of %s", name, strings.Join(searchOrder, ", "))}}
 	case u.Enabled == nil && u.Settings == nil:

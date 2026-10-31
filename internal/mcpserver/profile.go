@@ -121,22 +121,32 @@ func (t *tools) addProfileTools(s *mcp.Server) {
 	})
 
 	type updateProfileIn struct {
-		Markdown string `json:"markdown" jsonschema:"the whole profile, in markdown"`
 		Summary  string `json:"summary" jsonschema:"what changed, in one line"`
+		Markdown string `json:"markdown,omitempty" jsonschema:"the whole profile, in markdown; or give heading instead"`
+		Heading  string `json:"heading,omitempty" jsonschema:"one section to change, such as Highlights; the others stay as they are"`
+		Content  string `json:"content,omitempty" jsonschema:"with heading: the section's text, without its heading"`
+		Mode     string `json:"mode,omitempty" jsonschema:"with heading: replace (the default) or append"`
 	}
 	add(t, s, "update_profile", writes, func(ctx context.Context, c call, in updateProfileIn) (any, error) {
-		p, err := core.UpdateProfile(ctx, t.Store, c.by, in.Markdown, in.Summary)
-		return savedProfile{p.Version, p.Diff}, err
-	})
-
-	type editSectionIn struct {
-		Heading string `json:"heading" jsonschema:"the section's name, such as Highlights"`
-		Content string `json:"content" jsonschema:"the section's text, without its heading"`
-		Mode    string `json:"mode" jsonschema:"replace or append"`
-		Summary string `json:"summary" jsonschema:"what changed, in one line"`
-	}
-	add(t, s, "edit_profile_section", writes, func(ctx context.Context, c call, in editSectionIn) (any, error) {
-		p, err := core.EditProfileSection(ctx, t.Store, c.by, in.Heading, in.Content, in.Mode, in.Summary)
+		var (
+			p   core.ProfileSaved
+			err error
+		)
+		switch {
+		case (in.Markdown == "") == (in.Heading == ""):
+			return nil, &core.InputError{Problems: []string{"markdown: give the whole profile in markdown, or one section's heading and content, not both"}}
+		case in.Markdown != "":
+			if in.Content != "" || in.Mode != "" {
+				return nil, &core.InputError{Problems: []string{"content: goes with heading, not with markdown"}}
+			}
+			p, err = core.UpdateProfile(ctx, t.Store, c.by, in.Markdown, in.Summary)
+		default:
+			mode := in.Mode
+			if mode == "" {
+				mode = "replace"
+			}
+			p, err = core.EditProfileSection(ctx, t.Store, c.by, in.Heading, in.Content, mode, in.Summary)
+		}
 		return savedProfile{p.Version, p.Diff}, err
 	})
 
@@ -236,18 +246,17 @@ func (t *tools) addProfileTools(s *mcp.Server) {
 		Content *string `json:"content,omitempty"`
 		Kind    *string `json:"kind,omitempty"`
 		Basis   *string `json:"basis,omitempty"`
+		Archive string  `json:"archive,omitempty" jsonschema:"archive the memory instead: why it's wrong or no longer true"`
 	}
 	add(t, s, "update_memory", writes, func(ctx context.Context, c call, in updateMemoryIn) (any, error) {
+		if in.Archive != "" {
+			if in.Content != nil || in.Kind != nil || in.Basis != nil {
+				return nil, &core.InputError{Problems: []string{"archive: archives the memory as it is; leave out content, kind and basis"}}
+			}
+			return ok(core.Forget(ctx, t.Store, c.by, in.ID, in.Archive))
+		}
 		err := core.UpdateMemory(ctx, t.Store, c.by, in.ID, core.MemoryEdit{Content: in.Content, Kind: in.Kind, Basis: in.Basis})
 		return ok(err)
-	})
-
-	type forgetIn struct {
-		ID     int64  `json:"id"`
-		Reason string `json:"reason" jsonschema:"why it's wrong or no longer true"`
-	}
-	add(t, s, "forget", writes, func(ctx context.Context, c call, in forgetIn) (any, error) {
-		return ok(core.Forget(ctx, t.Store, c.by, in.ID, in.Reason))
 	})
 }
 

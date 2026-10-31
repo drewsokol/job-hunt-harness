@@ -82,7 +82,7 @@ func TestSetSource(t *testing.T) {
 		u    SourceUpdate
 		want string
 	}{
-		{"greenhouse", SourceUpdate{Enabled: &off}, "set_company_enabled"},
+		{"greenhouse", SourceUpdate{Enabled: &off}, "set_company"},
 		{"monster", SourceUpdate{Enabled: &off}, `"monster" is not a search source; use one of hackernews, himalayas, themuse`},
 		{"hackernews", SourceUpdate{}, "say what to change"},
 		{"hackernews", SourceUpdate{Settings: json.RawMessage(`{"months": 4}`)}, "settings.months: must be between 1 and 3"},

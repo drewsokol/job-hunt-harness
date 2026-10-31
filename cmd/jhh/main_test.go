@@ -261,7 +261,7 @@ func TestCommands(t *testing.T) {
 		{args: []string{"sources", "set", "themuse", "../../examples/themuse.json"}, code: 0, inStdout: `themuse      on           {"queries":[{"categories":["Software Engineering","Data Science"]`},
 		{args: []string{"sources", "set", "himalayas", "../../examples/himalayas.json"}, code: 0, inStdout: `himalayas    on           {"queries":[{"q":"machine learning engineer"`},
 		{args: []string{"sources"}, code: 0, inStdout: "key: none (optional"},
-		{args: []string{"sources", "on", "greenhouse"}, code: 1, inStderr: "set_company_enabled"},
+		{args: []string{"sources", "on", "greenhouse"}, code: 1, inStderr: "set_company"},
 		{args: []string{"sources", "frobnicate"}, code: 2, inStderr: "usage:"},
 		{args: []string{"sources"}, code: 0, inStdout: "greenhouse   board        0 companies"},
 	}

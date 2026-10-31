@@ -108,7 +108,7 @@ func UpdateMemory(ctx context.Context, s *store.Store, by store.Actor, id int64,
 func Forget(ctx context.Context, s *store.Store, by store.Actor, id int64, reason string) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" || utf8.RuneCountInString(reason) > maxReasonLen {
-		return &InputError{Problems: []string{fmt.Sprintf("reason: say why in a sentence (1 to %d characters)", maxReasonLen)}}
+		return &InputError{Problems: []string{fmt.Sprintf("archive: say why in a sentence (1 to %d characters)", maxReasonLen)}}
 	}
 	return inputIfNotFound(s.ForgetMemory(ctx, by, id, reason), fmt.Sprintf("id: no memory %d", id))
 }

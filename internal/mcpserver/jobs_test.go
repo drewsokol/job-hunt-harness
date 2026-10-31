@@ -113,15 +113,15 @@ func TestFindScreenAndTrackJobs(t *testing.T) {
 			Postings int    `json:"open_postings"`
 		} `json:"boards"`
 	}
-	h.call("add_company", map[string]any{"name": "Exampleco"}, &added)
+	h.call("set_company", map[string]any{"name": "Exampleco"}, &added)
 	if !added.Added || len(added.Boards) != 1 || added.Boards[0].Board != "fake:exampleco" || added.Boards[0].Postings != 3 {
-		t.Fatalf("add_company: %+v", added)
+		t.Fatalf("set_company: %+v", added)
 	}
-	h.call("add_company", map[string]any{"name": "Exampleco", "where": "fake:exampleco"}, &added)
+	h.call("set_company", map[string]any{"name": "Exampleco", "where": "fake:exampleco"}, &added)
 	if added.Added {
 		t.Error("the same board was added twice")
 	}
-	h.call("add_company", map[string]any{"name": "Nobody Inc"}, &added)
+	h.call("set_company", map[string]any{"name": "Nobody Inc"}, &added)
 	if added.Added || len(added.Boards) != 0 {
 		t.Errorf("a company with no board: %+v", added)
 	}
@@ -171,15 +171,15 @@ func TestFindScreenAndTrackJobs(t *testing.T) {
 	if err := json.Unmarshal([]byte(narrower), &nf); err != nil {
 		t.Fatal(err)
 	}
-	text, _ := h.raw("preview_filters", map[string]any{"filters": nf})
+	text, _ := h.raw("set_filters", map[string]any{"filters": nf, "dry_run": true})
 	if err := json.Unmarshal([]byte(text), &preview); err != nil {
 		t.Fatal(err)
 	}
 	if preview.Jobs != 3 || preview.PassNow != 2 || preview.PassAfter != 1 || preview.NewlyDropped != 1 || len(preview.Dropped) != 1 {
-		t.Errorf("preview_filters: %s", text)
+		t.Errorf("set_filters dry run: %s", text)
 	}
 	if bad := listingTextOutsideEnvelope(t, text); len(bad) > 0 {
-		t.Errorf("preview_filters: listing text outside the envelope at %v", bad)
+		t.Errorf("set_filters dry run: listing text outside the envelope at %v", bad)
 	}
 
 	// Screening: candidates come with descriptions on request, and every
@@ -302,7 +302,7 @@ func TestFindScreenAndTrackJobs(t *testing.T) {
 			Open    int    `json:"open_postings"`
 		} `json:"companies"`
 	}
-	h.call("set_company_enabled", map[string]any{"company_id": added.CompanyID, "enabled": false}, nil)
+	h.call("set_company", map[string]any{"company_id": added.CompanyID, "enabled": false}, nil)
 	h.call("list_companies", map[string]any{"query": "example"}, &companies)
 	if len(companies.Companies) != 1 || companies.Companies[0].Enabled || companies.Companies[0].Open != 3 || companies.Companies[0].Name != "Exampleco" {
 		t.Errorf("list_companies: %+v", companies)
@@ -319,7 +319,7 @@ func TestAgentAddsJobs(t *testing.T) {
 		"madeup":    {posting("7", "Platform Engineer")},
 	}}
 	h := newHarness(t, Deps{Sources: map[string]sources.Source{"fake": src}})
-	h.call("add_company", map[string]any{"name": "Exampleco"}, nil)
+	h.call("set_company", map[string]any{"name": "Exampleco"}, nil)
 	var filters map[string]any
 	if err := json.Unmarshal([]byte(engineersRemoteInUS), &filters); err != nil {
 		t.Fatal(err)
@@ -409,9 +409,9 @@ func TestAgentAddsJobs(t *testing.T) {
 		CompanyID int64 `json:"company_id"`
 		Added     bool  `json:"added"`
 	}
-	h.call("add_company", map[string]any{"name": "Made-Up Labs", "where": "fake:madeup"}, &co)
+	h.call("set_company", map[string]any{"name": "Made-Up Labs", "where": "fake:madeup"}, &co)
 	if !co.Added {
-		t.Fatalf("add_company: %+v", co)
+		t.Fatalf("set_company: %+v", co)
 	}
 	h.call("refresh_jobs", map[string]any{"companies": []string{"fake:madeup"}}, nil)
 	var page struct {
@@ -438,7 +438,7 @@ func TestMergeAndSplitJobs(t *testing.T) {
 		"exampleco": {posting("1", "Senior Backend Engineer"), posting("2", "Backend Engineer II")},
 	}}
 	h := newHarness(t, Deps{Sources: map[string]sources.Source{"fake": src}})
-	h.call("add_company", map[string]any{"name": "Exampleco"}, nil)
+	h.call("set_company", map[string]any{"name": "Exampleco"}, nil)
 	var filters map[string]any
 	if err := json.Unmarshal([]byte(engineersRemoteInUS), &filters); err != nil {
 		t.Fatal(err)

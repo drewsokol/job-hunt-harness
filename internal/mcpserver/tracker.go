@@ -63,46 +63,51 @@ func jobs(rs []store.JobRow) []jobOut {
 }
 
 func (t *tools) addTrackerTools(s *mcp.Server) {
-	type logIn struct {
-		Person     string `json:"person" jsonschema:"who the user wrote to"`
-		Channel    string `json:"channel" jsonschema:"such as linkedin, email, phone or in_person"`
-		Company    string `json:"company,omitempty" jsonschema:"default: the job's company"`
-		JobID      int64  `json:"job_id,omitempty" jsonschema:"the job it's about, if any"`
-		Role       string `json:"role,omitempty" jsonschema:"the person's job title"`
-		SentAt     string `json:"sent_at,omitempty" jsonschema:"UTC, RFC 3339; default now"`
-		FollowUpAt string `json:"follow_up_at,omitempty" jsonschema:"UTC, RFC 3339; default a week after sent_at"`
-		NoFollowUp bool   `json:"no_follow_up,omitempty"`
-		Note       string `json:"note,omitempty"`
+	type findIn struct {
+		Person  string `json:"person" jsonschema:"the person's name, exactly (any case)"`
+		Company string `json:"company,omitempty" jsonschema:"narrows the match"`
+		JobID   int64  `json:"job_id,omitempty" jsonschema:"narrows the match"`
 	}
-	add(t, s, "log_outreach", writes, func(ctx context.Context, c call, in logIn) (any, error) {
-		l, err := core.LogOutreach(ctx, t.Store, c.by, core.OutreachInput{Person: in.Person, Channel: in.Channel, Company: in.Company,
-			Role: in.Role, JobID: in.JobID, SentAt: in.SentAt, FollowUpAt: in.FollowUpAt, NoFollowUp: in.NoFollowUp, Note: in.Note})
-		return struct {
+	type saveIn struct {
+		OutreachID    int64   `json:"outreach_id,omitempty" jsonschema:"a thread to change"`
+		Find          *findIn `json:"find,omitempty" jsonschema:"instead of outreach_id: the one open thread with this person"`
+		Person        string  `json:"person,omitempty" jsonschema:"new thread: who the user wrote to"`
+		Channel       string  `json:"channel,omitempty" jsonschema:"new thread: such as linkedin, email, phone or in_person"`
+		Company       string  `json:"company,omitempty" jsonschema:"new thread; default: the job's company"`
+		JobID         int64   `json:"job_id,omitempty" jsonschema:"new thread: the job it's about, if any"`
+		Role          string  `json:"role,omitempty" jsonschema:"new thread: the person's job title"`
+		SentAt        string  `json:"sent_at,omitempty" jsonschema:"new thread: UTC, RFC 3339; default now"`
+		NoFollowUp    bool    `json:"no_follow_up,omitempty" jsonschema:"new thread: no follow-up date"`
+		Status        string  `json:"status,omitempty" jsonschema:"change: sent, accepted, replied, scheduled, no_reply or closed"`
+		FollowUpAt    string  `json:"follow_up_at,omitempty" jsonschema:"UTC, RFC 3339; a new thread's default is a week after sent_at"`
+		ClearFollowUp bool    `json:"clear_follow_up,omitempty" jsonschema:"change: remove the follow-up date"`
+		Note          string  `json:"note,omitempty" jsonschema:"a new thread's note, or a line added to it"`
+	}
+	add(t, s, "save_outreach", writes, func(ctx context.Context, c call, in saveIn) (any, error) {
+		type saved struct {
 			ID         int64  `json:"outreach_id"`
-			ContactID  int64  `json:"contact_id"`
-			NewContact bool   `json:"new_contact"`
+			New        bool   `json:"new"`
+			ContactID  int64  `json:"contact_id,omitempty"`
+			NewContact bool   `json:"new_contact,omitempty"`
 			FollowUpAt string `json:"follow_up_at,omitempty"`
-		}{l.ID, l.ContactID, l.NewContact, timeOrEmpty(l.FollowUpAt)}, err
-	})
-
-	type updateIn struct {
-		OutreachID    int64  `json:"outreach_id,omitempty" jsonschema:"the thread; or name it by person"`
-		Person        string `json:"person,omitempty" jsonschema:"instead of outreach_id: the person's name, exactly"`
-		Company       string `json:"company,omitempty" jsonschema:"with person: narrows the match"`
-		JobID         int64  `json:"job_id,omitempty" jsonschema:"with person: narrows the match"`
-		Status        string `json:"status,omitempty" jsonschema:"sent, accepted, replied, scheduled, no_reply or closed"`
-		FollowUpAt    string `json:"follow_up_at,omitempty" jsonschema:"UTC, RFC 3339"`
-		ClearFollowUp bool   `json:"clear_follow_up,omitempty"`
-		Note          string `json:"note,omitempty" jsonschema:"added to the thread's note"`
-	}
-	add(t, s, "update_outreach", writes, func(ctx context.Context, c call, in updateIn) (any, error) {
+		}
 		id := in.OutreachID
+		if id == 0 && in.Find == nil {
+			if in.Status != "" || in.ClearFollowUp {
+				return nil, &core.InputError{Problems: []string{"status: a new thread starts as sent; to change a thread, give outreach_id or find"}}
+			}
+			l, err := core.LogOutreach(ctx, t.Store, c.by, core.OutreachInput{Person: in.Person, Channel: in.Channel, Company: in.Company,
+				Role: in.Role, JobID: in.JobID, SentAt: in.SentAt, FollowUpAt: in.FollowUpAt, NoFollowUp: in.NoFollowUp, Note: in.Note})
+			return saved{l.ID, true, l.ContactID, l.NewContact, timeOrEmpty(l.FollowUpAt)}, err
+		}
 		switch {
-		case id != 0 && (in.Person != "" || in.Company != "" || in.JobID != 0):
-			return nil, &core.InputError{Problems: []string{"outreach_id: give the id, or person (with company or job_id to narrow it), not both"}}
+		case id != 0 && in.Find != nil:
+			return nil, &core.InputError{Problems: []string{"outreach_id: give the id or find, not both"}}
+		case in.Person != "" || in.Channel != "" || in.Company != "" || in.JobID != 0 || in.Role != "" || in.SentAt != "" || in.NoFollowUp:
+			return nil, &core.InputError{Problems: []string{"person: a thread's person, channel, company, job, role and sent_at are set when it's logged; a change takes status, follow_up_at, clear_follow_up and note (use find to name the thread by person)"}}
 		case id == 0:
 			var err error
-			if id, err = core.FindThread(ctx, t.Store, in.Person, in.Company, in.JobID); err != nil {
+			if id, err = core.FindThread(ctx, t.Store, in.Find.Person, in.Find.Company, in.Find.JobID); err != nil {
 				return nil, err
 			}
 		}
@@ -110,10 +115,7 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			Status: in.Status, FollowUpAt: in.FollowUpAt, ClearFollowUp: in.ClearFollowUp, Note: in.Note}); err != nil {
 			return nil, err
 		}
-		return struct {
-			OK bool  `json:"ok"`
-			ID int64 `json:"outreach_id"`
-		}{true, id}, nil
+		return saved{ID: id}, nil
 	})
 
 	type listOutreachIn struct {

@@ -65,7 +65,7 @@ func TestSources(t *testing.T) {
 		t.Errorf("setting The Muse up should turn it on: %+v", m)
 	}
 
-	if msg := h.fail("set_source", map[string]any{"name": "greenhouse", "enabled": false}); !strings.Contains(msg, "set_company_enabled") {
+	if msg := h.fail("set_source", map[string]any{"name": "greenhouse", "enabled": false}); !strings.Contains(msg, "set_company") {
 		t.Errorf("board error: %s", msg)
 	}
 	// Keys are entered only on the dashboard, never by the agent.

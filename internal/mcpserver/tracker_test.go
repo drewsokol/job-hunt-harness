@@ -16,7 +16,7 @@ func daysAgo(n int) string {
 func TestOutreachAndCheckIns(t *testing.T) {
 	src := &board{boards: map[string][]sources.Posting{"exampleco": {posting("1", "Senior Backend Engineer"), posting("2", "Data Engineer")}}}
 	h := newHarness(t, Deps{Sources: map[string]sources.Source{"fake": src}})
-	h.call("add_company", map[string]any{"name": "Exampleco"}, nil)
+	h.call("set_company", map[string]any{"name": "Exampleco"}, nil)
 	var filters map[string]any
 	if err := json.Unmarshal([]byte(engineersRemoteInUS), &filters); err != nil {
 		t.Fatal(err)
@@ -64,12 +64,12 @@ func TestOutreachAndCheckIns(t *testing.T) {
 		FollowUpAt string `json:"follow_up_at"`
 	}
 	var a, b logged
-	h.call("log_outreach", map[string]any{"person": "Alex Example", "channel": "LinkedIn", "job_id": job, "role": "Engineering Manager", "sent_at": daysAgo(20)}, &a)
-	h.call("log_outreach", map[string]any{"person": "alex example", "channel": "email", "company": "Exampleco", "sent_at": daysAgo(15), "no_follow_up": true}, &b)
+	h.call("save_outreach", map[string]any{"person": "Alex Example", "channel": "LinkedIn", "job_id": job, "role": "Engineering Manager", "sent_at": daysAgo(20)}, &a)
+	h.call("save_outreach", map[string]any{"person": "alex example", "channel": "email", "company": "Exampleco", "sent_at": daysAgo(15), "no_follow_up": true}, &b)
 	if !a.NewContact || b.NewContact || a.ContactID != b.ContactID || a.FollowUpAt == "" || b.FollowUpAt != "" {
-		t.Errorf("log_outreach: %+v then %+v", a, b)
+		t.Errorf("save_outreach: %+v then %+v", a, b)
 	}
-	if msg := h.fail("log_outreach", map[string]any{"person": "Alex Example", "channel": "email", "sent_at": daysAgo(-3)}); !strings.Contains(msg, "in the future") {
+	if msg := h.fail("save_outreach", map[string]any{"person": "Alex Example", "channel": "email", "sent_at": daysAgo(-3)}); !strings.Contains(msg, "in the future") {
 		t.Errorf("a message not sent yet: %s", msg)
 	}
 
@@ -116,16 +116,16 @@ func TestOutreachAndCheckIns(t *testing.T) {
 		t.Errorf("unknown view: %s", msg)
 	}
 
-	h.call("update_outreach", map[string]any{"outreach_id": a.ID, "status": "replied", "note": "Suggested a call."}, nil)
+	h.call("save_outreach", map[string]any{"outreach_id": a.ID, "status": "replied", "note": "Suggested a call."}, nil)
 	due = view{}
 	h.call("get_tracker", map[string]any{"view": "followups_due"}, &due)
 	if len(due.Outreach) != 0 {
 		t.Errorf("a reply leaves a follow-up due: %+v", due)
 	}
-	if msg := h.fail("update_outreach", map[string]any{"outreach_id": a.ID}); !strings.Contains(msg, "nothing to change") {
+	if msg := h.fail("save_outreach", map[string]any{"outreach_id": a.ID}); !strings.Contains(msg, "nothing to change") {
 		t.Errorf("empty update: %s", msg)
 	}
-	if msg := h.fail("update_outreach", map[string]any{"outreach_id": a.ID, "status": "ghosted"}); !strings.Contains(msg, "status") {
+	if msg := h.fail("save_outreach", map[string]any{"outreach_id": a.ID, "status": "ghosted"}); !strings.Contains(msg, "status") {
 		t.Errorf("bad status: %s", msg)
 	}
 

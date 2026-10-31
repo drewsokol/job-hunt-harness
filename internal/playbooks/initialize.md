@@ -39,7 +39,7 @@ Save each answer as you go with `remember`: one fact per memory, basis user_said
 
 Draft the profile in the first person, in markdown, with these "## " sections: Summary; Target roles and level; Location and work arrangement; Pay floor, and the target ask; Must-haves and deal-breakers; Strengths; Highlights; Gaps; Notes for the screener. Keep it short enough to read in a minute.
 
-Show the user the full text. Save it with `update_profile` only after they agree, with a one-line summary. For changes to an existing profile, use `edit_profile_section` for each section that changes, and show each change first.
+Show the user the full text. Save it with `update_profile` only after they agree, with a one-line summary. For changes to an existing profile, call `update_profile` with the heading of each section that changes, and show each change first.
 
 ## 5. Filters
 
@@ -47,7 +47,7 @@ Filters are cheap rules that run before you screen anything. They should drop wh
 
 Call `get_context` to see the current filters, if any. Draft new ones from the profile: title words to require and exclude, levels, where remote and on-site work is fine, employment types to exclude, keywords, the pay floor and title words to flag. Then:
 
-1. Call `preview_filters` and show the user the counts and the examples it returns.
+1. Call `set_filters` with dry_run set and show the user the counts and the examples it returns.
 2. If it drops jobs that look right, loosen the rule and preview again.
 3. Save with `set_filters` and a one-sentence rationale, after the user agrees.
 
@@ -55,13 +55,13 @@ Then decide where jhh searches beyond company boards. Call `list_sources`. Hacke
 
 ## 6. Companies
 
-jhh reads the job boards of companies the user chooses, on Greenhouse, Lever and Ashby. Suggest five to ten companies that fit the profile, and ask which to add. Add each one the user picks with `add_company`. If several boards match, ask which is the company's. Companies on other systems still come through search, or the user can share links and you can add those jobs with `add_jobs`.
+jhh reads the job boards of companies the user chooses, on Greenhouse, Lever and Ashby. Suggest five to ten companies that fit the profile, and ask which to add. Add each one the user picks with `set_company`. If several boards match, ask which is the company's. Companies on other systems still come through search, or the user can share links and you can add those jobs with `add_jobs`.
 
 ## 7. The first refresh and the calibration round
 
 1. Call `refresh_jobs`. It can take a few minutes.
 2. Screen the first batch, following the screen_new_jobs playbook (call `get_playbook` with name screen_new_jobs if you don't have it).
-3. Calibrate: pick five of the jobs you screened, with different ratings. Show each one's title, company and your rating with its reason, and ask the user how they would rate it. Where they disagree, ask why, and save the answer with `remember` (kind feedback or preference, basis user_said). If a disagreement shows the profile is wrong, offer an edit with `edit_profile_section`.
+3. Calibrate: pick five of the jobs you screened, with different ratings. Show each one's title, company and your rating with its reason, and ask the user how they would rate it. Where they disagree, ask why, and save the answer with `remember` (kind feedback or preference, basis user_said). If a disagreement shows the profile is wrong, offer an edit with `update_profile` (one section at a time).
 
 ## 8. Wrap up
 
