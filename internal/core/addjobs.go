@@ -9,11 +9,13 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/drewsokol/job-hunt-harness/internal/dedupe"
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
+	"github.com/drewsokol/job-hunt-harness/internal/utc"
 )
 
 // Limits on jobs an agent adds.
@@ -37,13 +39,28 @@ type AgentJob struct {
 	Pay            string
 	EmploymentType string
 	Notes          string // the agent's own, for the job's notes
+	// Status, when set, records an application the user made outside
+	// jhh: applied, interviewing, offer, rejected or withdrawn. The job
+	// goes straight to it instead of unscreened.
+	Status    string
+	AppliedAt string // RFC 3339, with Status; default now
+
+	appliedAt time.Time // AppliedAt, parsed
 }
+
+// ElsewhereStatuses are the statuses an application made outside jhh can
+// be recorded in.
+var ElsewhereStatuses = []string{"applied", "interviewing", "offer", "rejected", "withdrawn"}
 
 // AddedJob is what became of one AgentJob.
 type AddedJob struct {
 	JobID int64
-	// Existing means the job was already in jhh; its status is unchanged.
+	// Existing means the job was already in jhh; its status is unchanged,
+	// unless the job came with a Status.
 	Existing bool
+	// ByTitle means it matched an existing job by company and title alone,
+	// since it came with no link or description.
+	ByTitle bool
 	// FromBoard means the link was a Greenhouse, Lever or Ashby posting,
 	// which jhh read from the board itself instead of the agent's fields.
 	FromBoard bool
@@ -64,7 +81,9 @@ type boardRef struct {
 // job lands in unscreened whatever the filters say, since the agent chose
 // it, and the prefilter's decision is recorded for the screener to see.
 // Jobs the user adds (by is ActorUser) get origin "manual" and land in
-// review: they found the job themselves.
+// review: they found the job themselves. A job with a Status is an
+// application the user made elsewhere: it goes to that status, new or
+// not, and is marked applied elsewhere.
 func AddJobs(ctx context.Context, s *store.Store, srcs map[string]sources.Source, by store.Actor, jobs []AgentJob) ([]AddedJob, error) {
 	refs, err := checkAgentJobs(srcs, jobs)
 	if err != nil {
@@ -85,6 +104,24 @@ func AddJobs(ctx context.Context, s *store.Store, srcs map[string]sources.Source
 			companyID int64
 			in        store.PostingInput
 		)
+		if j.Status != "" && refs[i] == nil && j.URL == "" && strings.TrimSpace(j.Description) == "" {
+			// Nothing to dedupe by but the name and title: an exact match
+			// of both is the same job.
+			id, err := s.JobWithTitle(ctx, dedupe.CompanyKey(j.Company), dedupe.TitleKey(j.Title))
+			if err != nil {
+				return out, err
+			}
+			if id != 0 {
+				out[i].JobID, out[i].Existing, out[i].ByTitle = id, true, true
+				if err := recordElsewhere(ctx, s, by, id, j); err != nil {
+					return out, err
+				}
+				if err := appendAgentNote(ctx, s, by, id, j.Notes); err != nil {
+					return out, err
+				}
+				continue
+			}
+		}
 		if r := refs[i]; r != nil {
 			out[i].FromBoard = true
 			key := r.ref.Source + ":" + r.ref.Slug
@@ -120,15 +157,18 @@ func AddJobs(ctx context.Context, s *store.Store, srcs map[string]sources.Source
 			return out, err
 		}
 		out[i].JobID, out[i].Existing = id, !slices.Contains(res.NewJobs, id)
-		if !out[i].Existing {
+		switch {
+		case j.Status != "":
+			if err := recordElsewhere(ctx, s, by, id, j); err != nil {
+				return out, err
+			}
+		case !out[i].Existing:
 			if err := s.SetJobStatus(ctx, by, id, status); err != nil {
 				return out, err
 			}
 		}
-		if note := strings.TrimSpace(j.Notes); note != "" {
-			if err := s.UpdateApplication(ctx, by, id, store.ApplicationChange{AppendNote: note}); err != nil {
-				return out, err
-			}
+		if err := appendAgentNote(ctx, s, by, id, j.Notes); err != nil {
+			return out, err
 		}
 		touched[companyID] = true
 	}
@@ -147,6 +187,32 @@ func AddJobs(ctx context.Context, s *store.Store, srcs map[string]sources.Source
 		}
 	}
 	return out, nil
+}
+
+// recordElsewhere moves a job to the status of an application made
+// outside jhh, like update_application, and marks it applied elsewhere.
+// An applied date the job already has is kept.
+func recordElsewhere(ctx context.Context, s *store.Store, by store.Actor, id int64, j AgentJob) error {
+	cur, err := s.Job(ctx, id)
+	if err != nil {
+		return err
+	}
+	c := store.ApplicationChange{Status: store.JobStatus(j.Status)}
+	if cur.AppliedAt.IsZero() {
+		c.AppliedAt = &j.appliedAt
+	}
+	if err := s.UpdateApplication(ctx, by, id, c); err != nil {
+		return err
+	}
+	return s.MarkAppliedElsewhere(ctx, by, id)
+}
+
+// appendAgentNote adds the agent's note, if any, to a job's notes.
+func appendAgentNote(ctx context.Context, s *store.Store, by store.Actor, id int64, note string) error {
+	if note = strings.TrimSpace(note); note == "" {
+		return nil
+	}
+	return s.UpdateApplication(ctx, by, id, store.ApplicationChange{AppendNote: note})
 }
 
 // checkAgentJobs checks every job before any is stored, and finds the
@@ -199,6 +265,25 @@ func checkAgentJobs(srcs map[string]sources.Source, jobs []AgentJob) ([]*boardRe
 		}
 		if utf8.RuneCountInString(j.Notes) > maxNotesLen {
 			bad("notes", fmt.Sprintf("at most %d characters", maxNotesLen))
+		}
+		switch {
+		case j.Status == "" && j.AppliedAt != "":
+			bad("applied_at", "goes with status, for an application made elsewhere")
+		case j.Status == "":
+		case !slices.Contains(ElsewhereStatuses, j.Status):
+			bad("status", fmt.Sprintf("%q must be one of %s", j.Status, strings.Join(ElsewhereStatuses, ", ")))
+		case j.AppliedAt == "":
+			j.appliedAt = utc.Now()
+		default:
+			t, err := utc.Parse(j.AppliedAt)
+			switch {
+			case err != nil:
+				bad("applied_at", err.Error())
+			case t.After(utc.Now().Add(futureAllowance)):
+				bad("applied_at", "is in the future")
+			default:
+				j.appliedAt = t
+			}
 		}
 	}
 	if len(problems) > 0 {

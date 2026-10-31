@@ -37,11 +37,14 @@ type JobRow struct {
 	AppliedAt      time.Time
 	// AppliedUnconfirmed means an agent wasn't sure the user submitted.
 	AppliedUnconfirmed bool
-	CompanySuspect     bool   // the company's last fetch looked wrong
-	Notes              string // the user's and agents' notes
-	Description        string // only when asked for
-	Screening          *Screening
-	OpenFlags          []string // kinds of content flags waiting for review
+	// AppliedElsewhere means the user applied outside jhh, as add_jobs
+	// recorded with a status.
+	AppliedElsewhere bool
+	CompanySuspect   bool   // the company's last fetch looked wrong
+	Notes            string // the user's and agents' notes
+	Description      string // only when asked for
+	Screening        *Screening
+	OpenFlags        []string // kinds of content flags waiting for review
 }
 
 // Screening is an agent's fit rating of a job.
@@ -237,7 +240,7 @@ const jobRowColumns = `j.id, j.company_id, c.name, j.title, j.status, j.origin, 
 	CASE WHEN EXISTS (SELECT 1 FROM postings p WHERE p.job_id = j.id AND p.search = 0) THEN ''
 	     ELSE coalesce((SELECT p.source FROM postings p WHERE p.job_id = j.id AND p.search = 1 LIMIT 1), '') END,
 	coalesce(j.prefilter_score, 0), j.prefilter_reasons, j.first_seen_at, j.posted_at, j.closed_at, j.reposted_at, j.applied_at,
-	j.applied_unconfirmed, c.suspect, j.notes,
+	j.applied_unconfirmed, j.applied_elsewhere, c.suspect, j.notes,
 	sc.id, sc.fit, sc.reason, sc.gaps, sc.flags, sc.profile_version, sc.screened_by, sc.screened_at`
 
 func scanJobRows(rows *sql.Rows) ([]JobRow, error) {
@@ -254,7 +257,7 @@ func scanJobRows(rows *sql.Rows) ([]JobRow, error) {
 		if err := rows.Scan(&r.ID, &r.CompanyID, &r.Company, &r.Title, &status, &r.Origin, &r.Workplace, &locs,
 			&r.PayRaw, &pay, &r.EmploymentType, &r.URL, &r.PostingID, &r.Via,
 			&r.Score, &reasons, &first, &posted, &closed, &repost, &applied,
-			&r.AppliedUnconfirmed, &r.CompanySuspect, &r.Notes,
+			&r.AppliedUnconfirmed, &r.AppliedElsewhere, &r.CompanySuspect, &r.Notes,
 			&scID, &fit, &reason, &gaps, &flags, &scVersion, &by, &at, &r.Description); err != nil {
 			return nil, err
 		}
