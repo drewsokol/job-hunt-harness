@@ -563,6 +563,31 @@ Tool outputs are compact JSON written with the agent's context window in mind. D
 
 There are deliberately no delete tools in v1. Deleting is done in the UI, so an agent that goes wrong can't destroy data.
 
+#### Inbound outreach
+
+Much of a search's outreach starts on the other side: a recruiter writes on LinkedIn, by email or through a job site. The tracker was built for messages the user sent, so inbound threads ended up as notes. A thread now records who wrote first, what the user decided, and what pay was mentioned. The tools are `save_outreach` and `list_outreach` ([decision 0010](decisions/0010-fewer-tools.md)).
+
+- **New columns on `outreach`** (one migration; existing threads become `outbound`):
+
+  ```
+  outreach  + direction (inbound|outbound), decline_reason NULL, decline_note,
+              pay_min NULL, pay_max NULL, pay_currency NULL, pay_period NULL (year|hour), pay_note,
+              client_company NULL
+  ```
+- **`direction`**: `inbound` when they wrote first, `outbound` when the user did. Required on a new thread; the agent sets it on older threads as it learns which they were.
+- **`channel` stays the source**, a short free-text word as now. The descriptions suggest `linkedin_inmail`, `linkedin_message`, `linkedin_connection`, `email`, `job_site`, `phone`, `referral`, `event` and `other`, so threads can be filtered, but nothing older is rejected. A job site's name, like Indeed, goes in the note.
+- **`sent_at` is when the thread started**, whoever wrote: for an inbound thread, when their first message arrived. One column, so threads sort and filter the same way in both directions.
+- **Two new statuses:** `received` (inbound and not yet answered; a new inbound thread's default) and `declined` (the user passed). The full set is `received`, `sent`, `accepted`, `replied`, `scheduled`, `no_reply`, `declined`, `closed`. As now, any status can follow any other, so a mistake can be corrected. `open` in `list_outreach` covers every status but `declined` and `closed`, and so does finding a thread by person.
+- **Follow-ups:** a new inbound thread has no follow-up date unless one is given, since the next move is the user's. `whats_new` and the tracker summary count inbound threads still `received`, so an unanswered recruiter isn't forgotten. `followups_due` keeps meaning messages waiting on the other person whose date has come.
+- **Declining:** `decline_reason` is one of `contract`, `pay_below_floor`, `hybrid_or_onsite`, `wrong_role`, `level_too_low`, `no_details` (an unnamed client with no details), `suspicious` and `other`, and `decline_note` says more in the user's words. A reason is accepted only with status `declined`; declining without one is allowed, and the description asks for one.
+- **Pay a recruiter mentioned** is kept on the thread, apart from any listing's pay: `pay_min`, `pay_max` (either may be alone), `pay_currency` (ISO code, required with a number), `pay_period` (`year` by default, or `hour`) and `pay_note` for what numbers can't hold ("up to 220k plus options", "said there's flexibility"). The agent records only numbers the person stated, never an estimate.
+- **Agencies:** `company` is who the person works for, as now, so a recruiter's agency. `client_company` names the employer they're hiring for, or `undisclosed` when they won't say yet. Both can be set later with `save_outreach`, along with `job_id` once the role is known: a thread found by person or id can gain a job, a client, pay and a decline reason. `client_company` is the agent's record of what the person said, never taken from a listing, so it is returned outside `untrusted`.
+- **`list_outreach` filters** gain `direction`, `channel`, `decline_reason`, and `since` and `until` (on `sent_at`). Each thread in the result carries its direction, decline reason and note, client and pay. `get_job`'s threads carry the pay too, so pay quotes for two jobs can be compared next to each job's listing pay.
+- **The tracker summary's outreach counts** become `{"inbound": {status: n}, "outbound": {status: n}}`, plus inbound threads started in the last 7 and 30 days, inbound threads still `received`, and declined threads by reason.
+- **The dashboard's Outreach tab** shows each thread's direction, filters by it, offers the new statuses, asks for a reason when declining, and shows the pay mentioned. Its log form asks who wrote first.
+
+"Which recruiters reached out this month, and which did I decline and why?" is then one `list_outreach` call with `direction: inbound` and `since` set.
+
 #### Finding outreach threads
 
 Saving a thread returns its id, and changing one used to need it. An agent whose context is condensed loses the ids, and guessing the next number risks updating the wrong person. So every thread can be found again:
