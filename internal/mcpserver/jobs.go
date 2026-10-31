@@ -151,11 +151,15 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			Detector  string           `json:"detector"`
 			Untrusted untrustedExcerpt `json:"untrusted"`
 		}
-		type eventOut struct {
-			At    string          `json:"at"`
-			Actor string          `json:"actor"`
-			Kind  string          `json:"kind"`
-			Data  json.RawMessage `json:"data,omitempty"`
+		threads, err := core.ListOutreach(ctx, t.Store, core.OutreachFilter{JobID: in.JobID, Limit: 50})
+		if err != nil {
+			return nil, err
+		}
+		type threadOut struct {
+			ID         int64  `json:"outreach_id"`
+			Person     string `json:"person"`
+			Status     string `json:"status"`
+			FollowUpAt string `json:"follow_up_at,omitempty"`
 		}
 		out := struct {
 			jobOut
@@ -163,8 +167,12 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			Postings   []postingOut `json:"postings"`
 			Screenings []*fitOut    `json:"screening_history,omitempty"`
 			Flags      []flagOut    `json:"content_flag_details,omitempty"`
+			Outreach   []threadOut  `json:"outreach,omitempty"`
 			Timeline   []eventOut   `json:"timeline"`
 		}{jobOut: job(d.JobRow, true), Notes: d.Notes, Postings: []postingOut{}, Timeline: []eventOut{}}
+		for _, o := range threads.Outreach {
+			out.Outreach = append(out.Outreach, threadOut{o.ID, o.Person, o.Status, timeOrEmpty(o.FollowUpAt)})
+		}
 		for _, p := range d.Postings {
 			out.Postings = append(out.Postings, postingOut{p.ID, p.Source, p.Search, timeOrEmpty(p.FirstSeenAt), timeOrEmpty(p.ClosedAt),
 				untrustedPosting{p.Title, p.LocationRaw, p.URL}})
@@ -178,11 +186,7 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			out.Flags = append(out.Flags, flagOut{f.ID, f.Kind, f.Status, f.Detector, untrustedExcerpt{f.Excerpt}})
 		}
 		for _, e := range d.Events {
-			ev := eventOut{At: timeOrEmpty(e.At), Actor: string(e.Actor), Kind: e.Kind}
-			if string(e.Data) != "{}" {
-				ev.Data = e.Data
-			}
-			out.Timeline = append(out.Timeline, ev)
+			out.Timeline = append(out.Timeline, event(e))
 		}
 		return out, nil
 	})
@@ -309,4 +313,21 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			FlagID int64 `json:"flag_id"`
 		}{id}, err
 	})
+}
+
+// eventOut is one timeline event. OutreachID names the thread it's about.
+type eventOut struct {
+	At         string          `json:"at"`
+	Actor      string          `json:"actor"`
+	Kind       string          `json:"kind"`
+	OutreachID int64           `json:"outreach_id,omitempty"`
+	Data       json.RawMessage `json:"data,omitempty"`
+}
+
+func event(e store.Event) eventOut {
+	ev := eventOut{At: timeOrEmpty(e.At), Actor: string(e.Actor), Kind: e.Kind, OutreachID: e.OutreachID}
+	if string(e.Data) != "{}" {
+		ev.Data = e.Data
+	}
+	return ev
 }

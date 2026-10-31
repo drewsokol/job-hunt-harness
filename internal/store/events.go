@@ -44,9 +44,18 @@ func insertEvent(ctx context.Context, tx *sql.Tx, at string, by Actor, kind stri
 
 // JobEvents returns a job's timeline, oldest first.
 func (s *Store) JobEvents(ctx context.Context, jobID int64) ([]Event, error) {
+	return s.events(ctx, "job_id = ?", jobID)
+}
+
+// OutreachEvents returns an outreach thread's history, oldest first.
+func (s *Store) OutreachEvents(ctx context.Context, outreachID int64) ([]Event, error) {
+	return s.events(ctx, "outreach_id = ?", outreachID)
+}
+
+func (s *Store) events(ctx context.Context, where string, args ...any) ([]Event, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, at, actor, kind, job_id, outreach_id, contact_id, company_id, data
-		FROM events WHERE job_id = ? ORDER BY at, id`, jobID)
+		FROM events WHERE `+where+` ORDER BY at, id`, args...)
 	if err != nil {
 		return nil, err
 	}
