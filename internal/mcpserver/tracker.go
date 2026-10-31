@@ -98,6 +98,8 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 		PayNote       string  `json:"pay_note,omitempty" jsonschema:"what numbers can't hold, such as equity or flexibility"`
 		DeclineReason string  `json:"decline_reason,omitempty" jsonschema:"with status declined: contract, pay_below_floor, hybrid_or_onsite, wrong_role, level_too_low, no_details, suspicious or other"`
 		DeclineNote   string  `json:"decline_note,omitempty" jsonschema:"why, in the user's words"`
+		AddRefs       []refIn `json:"add_refs,omitempty" jsonschema:"links to the email threads about this thread"`
+		RemoveRefs    []int64 `json:"remove_refs,omitempty" jsonschema:"ids of links to remove"`
 	}
 	add(t, s, "save_outreach", writes, func(ctx context.Context, c call, in saveIn) (any, error) {
 		type saved struct {
@@ -108,16 +110,29 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			FollowUpAt string `json:"follow_up_at,omitempty"`
 		}
 		id := in.OutreachID
+		refs := refInputs(in.AddRefs)
+		if err := core.CheckRefs(refs, in.RemoveRefs); err != nil {
+			return nil, err
+		}
 		p := core.PayInput{Min: in.PayMin, Max: in.PayMax, Currency: in.PayCurrency, Period: in.PayPeriod, Note: in.PayNote}
 		if id == 0 && in.Find == nil {
 			if in.ClearFollowUp {
 				return nil, &core.InputError{Problems: []string{"clear_follow_up: a new thread has no date to clear; pass no_follow_up, or give outreach_id or find to change a thread"}}
 			}
+			if len(in.RemoveRefs) > 0 {
+				return nil, &core.InputError{Problems: []string{"remove_refs: a new thread has no links yet; to change a thread, give outreach_id or find"}}
+			}
 			l, err := core.LogOutreach(ctx, t.Store, c.by, core.OutreachInput{Person: in.Person, Channel: in.Channel, Company: in.Company,
 				Role: in.Role, JobID: in.JobID, Direction: in.Direction, Status: in.Status, SentAt: in.SentAt, FollowUpAt: in.FollowUpAt,
 				NoFollowUp: in.NoFollowUp, Note: in.Note, ClientCompany: in.ClientCompany, Pay: p,
 				DeclineReason: in.DeclineReason, DeclineNote: in.DeclineNote})
-			return saved{l.ID, true, l.ContactID, l.NewContact, timeOrEmpty(l.FollowUpAt)}, err
+			if err != nil {
+				return nil, err
+			}
+			if err := core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{OutreachID: l.ID}, refs, nil); err != nil {
+				return nil, err
+			}
+			return saved{l.ID, true, l.ContactID, l.NewContact, timeOrEmpty(l.FollowUpAt)}, nil
 		}
 		switch {
 		case id != 0 && in.Find != nil:
@@ -135,7 +150,15 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 		if !p.IsZero() {
 			u.Pay = &p
 		}
-		if err := core.UpdateOutreach(ctx, t.Store, c.by, id, u); err != nil {
+		if err := core.CheckRemovals(ctx, t.Store, store.RefTarget{OutreachID: id}, in.RemoveRefs); err != nil {
+			return nil, err
+		}
+		if u != (core.OutreachUpdate{}) || !core.HasRefs(refs, in.RemoveRefs) {
+			if err := core.UpdateOutreach(ctx, t.Store, c.by, id, u); err != nil {
+				return nil, err
+			}
+		}
+		if err := core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{OutreachID: id}, refs, in.RemoveRefs); err != nil {
 			return nil, err
 		}
 		return saved{ID: id}, nil
@@ -168,10 +191,15 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			for _, e := range p.History {
 				history = append(history, event(e))
 			}
+			refs, err := t.Store.Refs(ctx, store.RefTarget{OutreachID: in.OutreachID})
+			if err != nil {
+				return nil, err
+			}
 			return struct {
 				outreachOut
+				Refs    []refOut   `json:"refs,omitempty"`
 				History []eventOut `json:"history"`
-			}{outreach(p.Outreach)[0], history}, nil
+			}{outreach(p.Outreach)[0], refsOut(refs), history}, nil
 		}
 		return struct {
 			Total    int           `json:"total"`
@@ -212,10 +240,14 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 				sm.Outreach.InboundLast7, sm.Outreach.InboundLast30, sm.Outreach.Unanswered, sm.Outreach.DeclinedByReason,
 				v.InterviewsSoon, v.InterviewsPending}, nil
 		}
+		ivs, err := t.withRefs(ctx, interviews(v.Interviews, true))
+		if err != nil {
+			return nil, err
+		}
 		if in.View == "upcoming_interviews" {
 			return struct {
 				Interviews []interviewOut `json:"interviews"`
-			}{interviews(v.Interviews, true)}, nil
+			}{ivs}, nil
 		}
 		return struct {
 			Jobs          []jobOut       `json:"jobs,omitempty"`
@@ -223,7 +255,7 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			Outreach      []outreachOut  `json:"outreach,omitempty"`
 			OutreachTotal int            `json:"outreach_total,omitempty"`
 			Interviews    []interviewOut `json:"interviews,omitempty"`
-		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, interviews(v.Interviews, true)}, nil
+		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, ivs}, nil
 	})
 
 	type whatsNewIn struct {

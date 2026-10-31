@@ -34,6 +34,7 @@ const EVENTS = {
   job_merged: "Merged into another job", jobs_merged_in: "Other jobs merged in", job_unmerged: "Merge undone",
   job_split: "Postings split off", job_split_off: "Split off from another job", posting_closed: "Posting closed",
   interview_logged: "Interview logged", interview_updated: "Interview updated",
+  refs_changed: "Email links changed",
 };
 const STAGES = {
   recruiter_screen: "Recruiter screen", hiring_manager: "Hiring manager", technical: "Technical", system_design: "System design",
@@ -565,6 +566,14 @@ function detailsEl(j) {
   }
   if (d.interviews && d.interviews.length) {
     el.append(h("span", { class: "label" }, "Interviews"), h("ul", { class: "interviews" }, d.interviews.map(interviewEl)));
+  }
+  if (d.refs && d.refs.length) {
+    el.append(h("span", { class: "label" }, "Email"),
+      h("ul", { class: "postings" }, d.refs.map((r) => {
+        const url = safeURL(r.url);
+        const text = `${r.system}: ${r.ref}`;
+        return h("li", null, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, text) : text);
+      })));
   }
   el.append(h("label", { class: "notes-box" }, "Your notes",
     h("textarea", { id: `notes-${j.id}`, rows: "3", placeholder: "Recruiter name, referral, what you emphasized, interview dates",

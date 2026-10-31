@@ -382,9 +382,16 @@ func TestTriage(t *testing.T) {
 		t.Errorf("after undo: %s", row.Status)
 	}
 
-	// The detail has the whole description and the timeline.
+	// The detail has the whole description, the timeline and email links.
+	if err := f.s.ChangeRefs(context.Background(), store.Agent("test-agent"), store.RefTarget{JobID: backend},
+		[]store.NewRef{{System: "gmail", Ref: "thread-1", URL: "https://mail.example/thread-1"}, {System: "gmail", Ref: "thread-2"}}, nil); err != nil {
+		t.Fatal(err)
+	}
 	var d jobDetailJSON
 	f.ok("GET", fmt.Sprintf("/api/jobs/%d", backend), nil, &d)
+	if len(d.Refs) != 2 || d.Refs[0].URL != "https://mail.example/thread-1" || d.Refs[1].Ref != "thread-2" || d.Refs[1].URL != "" {
+		t.Errorf("refs: %+v", d.Refs)
+	}
 	if !strings.Contains(d.Description, "made-up software") || len(d.Postings) != 1 || len(d.Screenings) != 1 || len(d.Events) < 4 {
 		t.Errorf("detail: %d postings, %d screenings, %d events, description %q", len(d.Postings), len(d.Screenings), len(d.Events), d.Description)
 	}
