@@ -59,7 +59,9 @@ func migrations() ([]migration, error) {
 // migrate brings the database up to the latest schema. Several jhh
 // processes can start at once, so the work happens inside BEGIN EXCLUSIVE:
 // one process migrates while the others wait, then find nothing left to do.
-// Existing data is backed up first.
+// Existing data is backed up first. Foreign keys are off while migrations
+// run, so a migration can rebuild a table other tables point at (SQLite
+// can't change a CHECK in place), and they're checked before committing.
 func migrate(ctx context.Context, db *sql.DB, ms []migration, backupDir string, now time.Time) error {
 	latest := len(ms)
 
@@ -84,6 +86,12 @@ func migrate(ctx context.Context, db *sql.DB, ms []migration, backupDir string, 
 		return err
 	}
 	defer conn.Close()
+	// Outside a transaction, as SQLite requires; the connection goes back
+	// to the pool with foreign keys on again.
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA foreign_keys = ON")
 	if _, err := conn.ExecContext(ctx, "BEGIN EXCLUSIVE"); err != nil {
 		return fmt.Errorf("locking database for migration: %w", err)
 	}
@@ -103,6 +111,9 @@ func migrate(ctx context.Context, db *sql.DB, ms []migration, backupDir string, 
 			return fmt.Errorf("migration %s: %w", m.name, err)
 		}
 	}
+	if err := checkForeignKeys(ctx, conn); err != nil {
+		return err
+	}
 	// PRAGMA can't take a bound parameter; latest is a trusted integer.
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", latest)); err != nil {
 		return err
@@ -112,6 +123,27 @@ func migrate(ctx context.Context, db *sql.DB, ms []migration, backupDir string, 
 	}
 	committed = true
 	return nil
+}
+
+// checkForeignKeys fails if any row points at a row that doesn't exist.
+func checkForeignKeys(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var (
+			table, parent string
+			rowid         sql.NullInt64
+			fk            int
+		)
+		if err := rows.Scan(&table, &rowid, &parent, &fk); err != nil {
+			return err
+		}
+		return fmt.Errorf("migration left %s row %d pointing at a missing %s row", table, rowid.Int64, parent)
+	}
+	return rows.Err()
 }
 
 type querier interface {
