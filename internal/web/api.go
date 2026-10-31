@@ -721,6 +721,12 @@ type outreachJSON struct {
 	Status   string `json:"status"`
 	FollowUp string `json:"follow_up,omitempty"`
 	Note     string `json:"note,omitempty"`
+
+	Direction     string   `json:"direction"`
+	DeclineReason string   `json:"decline_reason,omitempty"`
+	DeclineNote   string   `json:"decline_note,omitempty"`
+	ClientCompany string   `json:"client_company,omitempty"`
+	Pay           *payJSON `json:"pay,omitempty"`
 }
 
 func (s *server) listOutreach(w http.ResponseWriter, r *http.Request) {
@@ -732,32 +738,38 @@ func (s *server) listOutreach(w http.ResponseWriter, r *http.Request) {
 	out := make([]outreachJSON, 0, len(os))
 	for _, o := range os {
 		out = append(out, outreachJSON{ID: o.ID, Person: o.Person, Role: o.Role, Company: o.Company, JobID: o.JobID, JobTitle: o.JobTitle,
-			Channel: o.Channel, Sent: timeText(o.SentAt), Status: o.Status, FollowUp: timeText(o.FollowUpAt), Note: o.Note})
+			Channel: o.Channel, Sent: timeText(o.SentAt), Status: o.Status, FollowUp: timeText(o.FollowUpAt), Note: o.Note,
+			Direction: o.Direction, DeclineReason: o.DeclineReason, DeclineNote: o.DeclineNote, ClientCompany: o.ClientCompany, Pay: payOf(o.Pay)})
 	}
 	writeJSON(w, http.StatusOK, struct {
-		Total    int            `json:"total"`
-		Statuses []string       `json:"statuses"`
-		Items    []outreachJSON `json:"items"`
-	}{total, store.OutreachStatuses, out})
+		Total          int            `json:"total"`
+		Statuses       []string       `json:"statuses"`
+		DeclineReasons []string       `json:"decline_reasons"`
+		Items          []outreachJSON `json:"items"`
+	}{total, store.OutreachStatuses, store.DeclineReasons, out})
 }
 
 func (s *server) logOutreach(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Person     string `json:"person"`
-		Role       string `json:"role"`
-		Company    string `json:"company"`
-		Channel    string `json:"channel"`
-		JobID      int64  `json:"job_id"`
-		SentAt     string `json:"sent_at"`
-		FollowUpAt string `json:"follow_up_at"`
-		Note       string `json:"note"`
+		Person     string   `json:"person"`
+		Role       string   `json:"role"`
+		Company    string   `json:"company"`
+		Channel    string   `json:"channel"`
+		JobID      int64    `json:"job_id"`
+		SentAt     string   `json:"sent_at"`
+		FollowUpAt string   `json:"follow_up_at"`
+		Note       string   `json:"note"`
+		Direction  string   `json:"direction"`
+		Client     string   `json:"client_company"`
+		Pay        *payJSON `json:"pay"`
 	}
 	if err := decode(r, &in); err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	o, err := core.LogOutreach(r.Context(), s.Store, by, core.OutreachInput{Person: in.Person, Role: in.Role, Company: in.Company,
-		Channel: in.Channel, JobID: in.JobID, SentAt: in.SentAt, FollowUpAt: in.FollowUpAt, NoFollowUp: in.FollowUpAt == "", Note: in.Note})
+		Channel: in.Channel, JobID: in.JobID, SentAt: in.SentAt, FollowUpAt: in.FollowUpAt, NoFollowUp: in.FollowUpAt == "", Note: in.Note,
+		Direction: in.Direction, ClientCompany: in.Client, Pay: in.Pay.input()})
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -770,17 +782,27 @@ func (s *server) logOutreach(w http.ResponseWriter, r *http.Request) {
 func (s *server) updateOutreach(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	var in struct {
-		Status        string `json:"status"`
-		FollowUpAt    string `json:"follow_up_at"`
-		ClearFollowUp bool   `json:"clear_follow_up"`
-		Note          string `json:"note"`
+		Status        string   `json:"status"`
+		FollowUpAt    string   `json:"follow_up_at"`
+		ClearFollowUp bool     `json:"clear_follow_up"`
+		Note          string   `json:"note"`
+		Direction     string   `json:"direction"`
+		DeclineReason string   `json:"decline_reason"`
+		DeclineNote   string   `json:"decline_note"`
+		Client        string   `json:"client_company"`
+		Pay           *payJSON `json:"pay"`
 	}
 	if err == nil {
 		err = decode(r, &in)
 	}
 	if err == nil {
-		err = core.UpdateOutreach(r.Context(), s.Store, by, id,
-			core.OutreachUpdate{Status: in.Status, FollowUpAt: in.FollowUpAt, ClearFollowUp: in.ClearFollowUp, Note: in.Note})
+		u := core.OutreachUpdate{Status: in.Status, FollowUpAt: in.FollowUpAt, ClearFollowUp: in.ClearFollowUp, Note: in.Note,
+			Direction: in.Direction, DeclineReason: in.DeclineReason, DeclineNote: in.DeclineNote, ClientCompany: in.Client}
+		if in.Pay != nil {
+			p := in.Pay.input()
+			u.Pay = &p
+		}
+		err = core.UpdateOutreach(r.Context(), s.Store, by, id, u)
 	}
 	if err != nil {
 		s.fail(w, r, err)
