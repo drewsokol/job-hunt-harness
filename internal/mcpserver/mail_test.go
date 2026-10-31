@@ -33,6 +33,7 @@ type handledReply struct {
 		Action    string `json:"action"`
 		Job       int64  `json:"job"`
 		Outreach  int64  `json:"outreach_id"`
+		Interview int64  `json:"interview_id"`
 		At        string `json:"handled_at"`
 		By        string `json:"handled_by"`
 	} `json:"handled"`
@@ -233,5 +234,81 @@ func TestEmailRefs(t *testing.T) {
 	h.call("list_outreach", map[string]any{"outreach_id": thread.ID}, &th)
 	if th.Status == "replied" || strings.Contains(th.Note, "Made-up reply.") {
 		t.Errorf("a refused call changed the thread: %+v", th)
+	}
+}
+
+// An interview takes links to email threads like a thread does, and a
+// handled message can name the interview it touched.
+func TestInterviewEmail(t *testing.T) {
+	h := newHarness(t, Deps{})
+	job := addTestJob(h)
+	var iv struct {
+		ID int64 `json:"interview_id"`
+	}
+	h.call("save_interview", map[string]any{"job_id": job, "stage": "recruiter_screen", "scheduled_at": time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339),
+		"add_refs": []any{map[string]any{"system": "gmail", "ref": "invite-1", "url": "https://mail.example/invite-1"}}}, &iv)
+
+	type withRefs struct {
+		Interviews []struct {
+			ID   int64 `json:"interview_id"`
+			Refs []struct {
+				ID  int64  `json:"id"`
+				Ref string `json:"ref"`
+			} `json:"refs"`
+		} `json:"interviews"`
+	}
+	var j withRefs
+	h.call("get_job", map[string]any{"job_id": job}, &j)
+	if len(j.Interviews) != 1 || len(j.Interviews[0].Refs) != 1 || j.Interviews[0].Refs[0].Ref != "invite-1" {
+		t.Fatalf("get_job interview refs: %+v", j)
+	}
+	var up withRefs
+	h.call("get_tracker", map[string]any{"view": "upcoming_interviews"}, &up)
+	if len(up.Interviews) != 1 || len(up.Interviews[0].Refs) != 1 {
+		t.Errorf("upcoming interview refs: %+v", up)
+	}
+
+	// Links alone need no other change; a link that isn't the interview's
+	// stops the call before anything is saved.
+	h.call("save_interview", map[string]any{"interview_id": iv.ID, "add_refs": []any{map[string]any{"system": "gmail", "ref": "invite-2"}}}, nil)
+	h.call("update_application", map[string]any{"job_id": job, "add_refs": []any{map[string]any{"system": "gmail", "ref": "app-1"}}}, nil)
+	var jr refsReply
+	h.call("get_job", map[string]any{"job_id": job}, &jr)
+	if msg := h.fail("save_interview", map[string]any{"interview_id": iv.ID, "status": "cancelled", "remove_refs": []int64{jr.Refs[0].ID}}); !strings.Contains(msg, "remove_refs") {
+		t.Errorf("removing the job's link from the interview: %s", msg)
+	}
+	j = withRefs{}
+	h.call("get_job", map[string]any{"job_id": job}, &j)
+	if len(j.Interviews[0].Refs) != 2 {
+		t.Fatalf("after adding a second link: %+v", j)
+	}
+	h.call("save_interview", map[string]any{"interview_id": iv.ID, "remove_refs": []int64{j.Interviews[0].Refs[0].ID}}, nil)
+	var status struct {
+		Interviews []struct {
+			Status string `json:"status"`
+			Refs   []struct {
+				Ref string `json:"ref"`
+			} `json:"refs"`
+		} `json:"interviews"`
+	}
+	h.call("get_job", map[string]any{"job_id": job}, &status)
+	if status.Interviews[0].Status != "scheduled" || len(status.Interviews[0].Refs) != 1 || status.Interviews[0].Refs[0].Ref != "invite-2" {
+		t.Errorf("after removing a link: %+v", status)
+	}
+	if msg := h.fail("save_interview", map[string]any{"job_id": job, "stage": "technical", "scheduled_at": time.Now().UTC().Add(96 * time.Hour).Format(time.RFC3339), "remove_refs": []int64{1}}); !strings.Contains(msg, "remove_refs") {
+		t.Errorf("remove_refs on a new interview: %s", msg)
+	}
+
+	// Marking a message against the interview, and a missing interview.
+	h.call("handled_messages", map[string]any{"system": "gmail", "mark": []any{
+		map[string]any{"message_id": "m-invite", "action": "logged the recruiter screen", "interview_id": iv.ID}}}, nil)
+	var r handledReply
+	h.call("handled_messages", map[string]any{"system": "gmail", "check": []string{"m-invite"}}, &r)
+	if len(r.Handled) != 1 || r.Handled[0].Interview != iv.ID {
+		t.Errorf("handled with an interview: %+v", r)
+	}
+	if msg := h.fail("handled_messages", map[string]any{"system": "gmail", "mark": []any{
+		map[string]any{"message_id": "m-x", "action": "x", "interview_id": 999}}}); !strings.Contains(msg, "interview_id") {
+		t.Errorf("marking with a missing interview: %s", msg)
 	}
 }

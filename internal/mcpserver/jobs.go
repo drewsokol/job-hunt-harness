@@ -186,6 +186,9 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			return nil, err
 		}
 		out.Refs = refsOut(refs)
+		if out.Interviews, err = t.withRefs(ctx, out.Interviews); err != nil {
+			return nil, err
+		}
 		for _, p := range d.Postings {
 			out.Postings = append(out.Postings, postingOut{p.ID, p.Source, p.Search, timeOrEmpty(p.FirstSeenAt), timeOrEmpty(p.ClosedAt),
 				untrustedPosting{p.Title, p.LocationRaw, p.URL}})

@@ -240,10 +240,14 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 				sm.Outreach.InboundLast7, sm.Outreach.InboundLast30, sm.Outreach.Unanswered, sm.Outreach.DeclinedByReason,
 				v.InterviewsSoon, v.InterviewsPending}, nil
 		}
+		ivs, err := t.withRefs(ctx, interviews(v.Interviews, true))
+		if err != nil {
+			return nil, err
+		}
 		if in.View == "upcoming_interviews" {
 			return struct {
 				Interviews []interviewOut `json:"interviews"`
-			}{interviews(v.Interviews, true)}, nil
+			}{ivs}, nil
 		}
 		return struct {
 			Jobs          []jobOut       `json:"jobs,omitempty"`
@@ -251,7 +255,7 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			Outreach      []outreachOut  `json:"outreach,omitempty"`
 			OutreachTotal int            `json:"outreach_total,omitempty"`
 			Interviews    []interviewOut `json:"interviews,omitempty"`
-		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, interviews(v.Interviews, true)}, nil
+		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, ivs}, nil
 	})
 
 	type whatsNewIn struct {

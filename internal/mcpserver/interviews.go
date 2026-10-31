@@ -30,6 +30,7 @@ type interviewOut struct {
 	DebriefNotes    string              `json:"debrief_notes,omitempty"`
 	Recorded        bool                `json:"recorded,omitempty"`
 	RecordingTool   string              `json:"recording_tool,omitempty"`
+	Refs            []refOut            `json:"refs,omitempty"`
 	Updated         string              `json:"updated_at"`
 	Untrusted       *struct {
 		Company  string `json:"company,omitempty"`
@@ -55,6 +56,24 @@ func interviews(ivs []store.Interview, withJob bool) []interviewOut {
 	return out
 }
 
+// withRefs adds each interview's links to email threads.
+func (t *tools) withRefs(ctx context.Context, out []interviewOut) ([]interviewOut, error) {
+	ids := make([]int64, 0, len(out))
+	for _, v := range out {
+		ids = append(ids, v.ID)
+	}
+	refs, err := t.Store.InterviewRefs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if rs := refs[out[i].ID]; len(rs) > 0 {
+			out[i].Refs = refsOut(rs)
+		}
+	}
+	return out, nil
+}
+
 func (t *tools) addInterviewTools(s *mcp.Server) {
 	type saveIn struct {
 		InterviewID     int64               `json:"interview_id,omitempty" jsonschema:"an interview to change; leave out to log a new one"`
@@ -74,14 +93,34 @@ func (t *tools) addInterviewTools(s *mcp.Server) {
 		DebriefNotes    string              `json:"debrief_notes,omitempty" jsonschema:"replaces the debrief notes"`
 		Recorded        *bool               `json:"recorded,omitempty" jsonschema:"whether the user recorded it"`
 		RecordingTool   string              `json:"recording_tool,omitempty"`
+		AddRefs         []refIn             `json:"add_refs,omitempty" jsonschema:"links to the email threads about this interview"`
+		RemoveRefs      []int64             `json:"remove_refs,omitempty" jsonschema:"ids of links to remove"`
 	}
 	add(t, s, "save_interview", writes, func(ctx context.Context, c call, in saveIn) (any, error) {
-		saved, err := core.SaveInterview(ctx, t.Store, c.by, in.InterviewID, core.InterviewInput{
+		refs := refInputs(in.AddRefs)
+		if err := core.CheckRefs(refs, in.RemoveRefs); err != nil {
+			return nil, err
+		}
+		if in.InterviewID == 0 && len(in.RemoveRefs) > 0 {
+			return nil, &core.InputError{Problems: []string{"remove_refs: a new interview has no links yet; to change one, give interview_id"}}
+		}
+		if err := core.CheckRemovals(ctx, t.Store, store.RefTarget{InterviewID: in.InterviewID}, in.RemoveRefs); err != nil {
+			return nil, err
+		}
+		change := core.InterviewInput{
 			JobID: in.JobID, OutreachID: in.OutreachID, Stage: in.Stage, ScheduledAt: in.ScheduledAt, DurationMinutes: in.DurationMinutes,
 			Interviewers: in.Interviewers, Medium: in.Medium, Joining: in.Joining, Status: in.Status, Outcome: in.Outcome,
 			NextStepAt: in.NextStepAt, ClearNextStep: in.ClearNextStep, PrepNotes: in.PrepNotes, DebriefNotes: in.DebriefNotes,
-			Recorded: in.Recorded, RecordingTool: in.RecordingTool})
-		if err != nil {
+			Recorded: in.Recorded, RecordingTool: in.RecordingTool}
+		// Links alone change nothing else about an interview.
+		saved := store.InterviewSaved{ID: in.InterviewID}
+		if in.InterviewID == 0 || !change.IsZero() || !core.HasRefs(refs, in.RemoveRefs) {
+			var err error
+			if saved, err = core.SaveInterview(ctx, t.Store, c.by, in.InterviewID, change); err != nil {
+				return nil, err
+			}
+		}
+		if err := core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{InterviewID: saved.ID}, refs, in.RemoveRefs); err != nil {
 			return nil, err
 		}
 		out := struct {

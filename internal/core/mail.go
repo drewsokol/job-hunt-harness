@@ -49,6 +49,7 @@ func checkMailID(field, id string) []string {
 type MarkInput struct {
 	MessageID, Action string
 	JobID, OutreachID int64
+	InterviewID       int64
 }
 
 // HandledInput is a handled_messages call.
@@ -98,7 +99,7 @@ func HandledMessages(ctx context.Context, s *store.Store, by store.Actor, in Han
 		if n := utf8.RuneCountInString(action); n == 0 || n > maxActionLen || strings.ContainsAny(action, "\r\n") {
 			problems = append(problems, fmt.Sprintf("%s.action: what you did, in one line of up to %d characters, such as \"marked the job rejected\"", field, maxActionLen))
 		}
-		marks = append(marks, store.NewHandled{MessageID: m.MessageID, Action: action, JobID: m.JobID, OutreachID: m.OutreachID})
+		marks = append(marks, store.NewHandled{MessageID: m.MessageID, Action: action, JobID: m.JobID, OutreachID: m.OutreachID, InterviewID: m.InterviewID})
 	}
 	var through time.Time
 	if in.CheckedThrough != "" {

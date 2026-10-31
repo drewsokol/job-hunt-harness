@@ -44,6 +44,13 @@ type InterviewInput struct {
 	RecordingTool     string
 }
 
+// IsZero reports whether in changes nothing.
+func (in InterviewInput) IsZero() bool {
+	return in.JobID == 0 && in.OutreachID == 0 && in.Stage == "" && in.ScheduledAt == "" && in.DurationMinutes == 0 &&
+		in.Interviewers == nil && in.Medium == "" && in.Joining == "" && in.Status == "" && in.Outcome == "" &&
+		in.NextStepAt == "" && !in.ClearNextStep && in.PrepNotes == "" && in.DebriefNotes == "" && in.Recorded == nil && in.RecordingTool == ""
+}
+
 // SaveInterview logs an interview (id 0) or changes one.
 func SaveInterview(ctx context.Context, s *store.Store, by store.Actor, id int64, in InterviewInput) (store.InterviewSaved, error) {
 	var problems []string

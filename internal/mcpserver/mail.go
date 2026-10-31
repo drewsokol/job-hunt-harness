@@ -69,6 +69,7 @@ func (t *tools) addMailTools(s *mcp.Server) {
 		Action     string `json:"action" jsonschema:"what you did, in one line, such as marked the job rejected"`
 		JobID      int64  `json:"job_id,omitempty"`
 		OutreachID int64  `json:"outreach_id,omitempty"`
+		Interview  int64  `json:"interview_id,omitempty"`
 	}
 	type handledIn struct {
 		System         string   `json:"system" jsonschema:"where the mail lives, such as gmail or outlook"`
@@ -79,7 +80,7 @@ func (t *tools) addMailTools(s *mcp.Server) {
 	add(t, s, "handled_messages", writes, func(ctx context.Context, c call, in handledIn) (any, error) {
 		marks := make([]core.MarkInput, 0, len(in.Mark))
 		for _, m := range in.Mark {
-			marks = append(marks, core.MarkInput{MessageID: m.MessageID, Action: m.Action, JobID: m.JobID, OutreachID: m.OutreachID})
+			marks = append(marks, core.MarkInput{MessageID: m.MessageID, Action: m.Action, JobID: m.JobID, OutreachID: m.OutreachID, InterviewID: m.Interview})
 		}
 		r, err := core.HandledMessages(ctx, t.Store, c.by, core.HandledInput{System: in.System, Check: in.Check, Mark: marks, CheckedThrough: in.CheckedThrough})
 		if err != nil {

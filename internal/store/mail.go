@@ -24,6 +24,7 @@ type HandledMessage struct {
 type NewHandled struct {
 	MessageID, Action string
 	JobID, OutreachID int64
+	InterviewID       int64
 }
 
 // HandledMessages returns which of ids, in system, were already handled.
@@ -75,7 +76,7 @@ func (s *Store) MarkHandled(ctx context.Context, by Actor, system string, ms []N
 	err = s.write(ctx, func(tx *sql.Tx) error {
 		added, existing = 0, nil
 		for _, m := range ms {
-			if err := targetExists(ctx, tx, RefTarget{JobID: m.JobID, OutreachID: m.OutreachID}); err != nil {
+			if err := targetExists(ctx, tx, RefTarget{JobID: m.JobID, OutreachID: m.OutreachID, InterviewID: m.InterviewID}); err != nil {
 				return err
 			}
 		}
@@ -86,9 +87,9 @@ func (s *Store) MarkHandled(ctx context.Context, by Actor, system string, ms []N
 		now := s.stamp()
 		for _, m := range ms {
 			res, err := tx.ExecContext(ctx, `
-				INSERT INTO handled_messages (system, message_id, action, job_id, outreach_id, handled_at, handled_by)
-				VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-				system, m.MessageID, m.Action, nullID(m.JobID), nullID(m.OutreachID), now, by)
+				INSERT INTO handled_messages (system, message_id, action, job_id, outreach_id, interview_id, handled_at, handled_by)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+				system, m.MessageID, m.Action, nullID(m.JobID), nullID(m.OutreachID), nullID(m.InterviewID), now, by)
 			if err != nil {
 				return err
 			}
@@ -128,10 +129,13 @@ func (s *Store) SetMailCheck(ctx context.Context, by Actor, system string, throu
 }
 
 // RefTarget is what a link to an email thread belongs to: one of a job
-// (its application) or an outreach thread.
+// (its application), an outreach thread or an interview.
 type RefTarget struct {
-	JobID, OutreachID int64
+	JobID, OutreachID, InterviewID int64
 }
+
+// refOwner matches a link to exactly its target.
+const refOwner = "coalesce(job_id, 0) = ? AND coalesce(outreach_id, 0) = ? AND coalesce(interview_id, 0) = ?"
 
 // Ref is a link to an email thread.
 type Ref struct {
@@ -147,8 +151,11 @@ type NewRef struct {
 // Refs returns a target's links, oldest first.
 func (s *Store) Refs(ctx context.Context, t RefTarget) ([]Ref, error) {
 	where, id := "job_id = ?", t.JobID
-	if t.OutreachID != 0 {
+	switch {
+	case t.OutreachID != 0:
 		where, id = "outreach_id = ?", t.OutreachID
+	case t.InterviewID != 0:
+		where, id = "interview_id = ?", t.InterviewID
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT id, system, ref, coalesce(url, '') FROM external_refs WHERE "+where+" ORDER BY id", id)
 	if err != nil {
@@ -176,8 +183,7 @@ func (s *Store) ChangeRefs(ctx context.Context, by Actor, t RefTarget, add []New
 		now := s.stamp()
 		removed := 0
 		for _, id := range remove {
-			res, err := tx.ExecContext(ctx, "DELETE FROM external_refs WHERE id = ? AND coalesce(job_id, 0) = ? AND coalesce(outreach_id, 0) = ?",
-				id, t.JobID, t.OutreachID)
+			res, err := tx.ExecContext(ctx, "DELETE FROM external_refs WHERE id = ? AND "+refOwner, id, t.JobID, t.OutreachID, t.InterviewID)
 			if err != nil {
 				return err
 			}
@@ -189,9 +195,9 @@ func (s *Store) ChangeRefs(ctx context.Context, by Actor, t RefTarget, add []New
 		added := 0
 		for _, r := range add {
 			res, err := tx.ExecContext(ctx, `
-				INSERT INTO external_refs (job_id, outreach_id, system, ref, url, created_at, created_by)
-				VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-				nullID(t.JobID), nullID(t.OutreachID), r.System, r.Ref, nullString(r.URL), now, by)
+				INSERT INTO external_refs (job_id, outreach_id, interview_id, system, ref, url, created_at, created_by)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+				nullID(t.JobID), nullID(t.OutreachID), nullID(t.InterviewID), r.System, r.Ref, nullString(r.URL), now, by)
 			if err != nil {
 				return err
 			}
@@ -202,10 +208,18 @@ func (s *Store) ChangeRefs(ctx context.Context, by Actor, t RefTarget, add []New
 		if added == 0 && removed == 0 {
 			return nil
 		}
-		refs := eventRefs{JobID: t.JobID, OutreachID: t.OutreachID}
-		if t.OutreachID != 0 {
+		// The event goes on the job's timeline too, when the thread or
+		// interview is about one.
+		refs := eventRefs{JobID: t.JobID, OutreachID: t.OutreachID, InterviewID: t.InterviewID}
+		for _, o := range []struct {
+			id    int64
+			table string
+		}{{t.OutreachID, "outreach"}, {t.InterviewID, "interviews"}} {
+			if o.id == 0 {
+				continue
+			}
 			var job sql.NullInt64
-			if err := tx.QueryRowContext(ctx, "SELECT job_id FROM outreach WHERE id = ?", t.OutreachID).Scan(&job); err != nil {
+			if err := tx.QueryRowContext(ctx, "SELECT job_id FROM "+o.table+" WHERE id = ?", o.id).Scan(&job); err != nil {
 				return err
 			}
 			refs.JobID = job.Int64
@@ -215,12 +229,40 @@ func (s *Store) ChangeRefs(ctx context.Context, by Actor, t RefTarget, add []New
 	})
 }
 
-// RefsBelong checks that each link id is one of the job's or thread's.
+// InterviewRefs returns the links of each interview in ids, oldest first.
+func (s *Store) InterviewRefs(ctx context.Context, ids []int64) (map[int64][]Ref, error) {
+	out := map[int64][]Ref{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT interview_id, id, system, ref, coalesce(url, '') FROM external_refs WHERE interview_id IN ("+
+		placeholders(len(ids))+") ORDER BY id", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			iv int64
+			r  Ref
+		)
+		if err := rows.Scan(&iv, &r.ID, &r.System, &r.Ref, &r.URL); err != nil {
+			return nil, err
+		}
+		out[iv] = append(out[iv], r)
+	}
+	return out, rows.Err()
+}
+
+// RefsBelong checks that each link id is the target's.
 func (s *Store) RefsBelong(ctx context.Context, t RefTarget, ids []int64) error {
 	for _, id := range ids {
 		var one int
-		err := s.db.QueryRowContext(ctx, "SELECT 1 FROM external_refs WHERE id = ? AND coalesce(job_id, 0) = ? AND coalesce(outreach_id, 0) = ?",
-			id, t.JobID, t.OutreachID).Scan(&one)
+		err := s.db.QueryRowContext(ctx, "SELECT 1 FROM external_refs WHERE id = ? AND "+refOwner, id, t.JobID, t.OutreachID, t.InterviewID).Scan(&one)
 		if errNoRows(err) {
 			return fmt.Errorf("remove_refs: no link %d here: %w", id, ErrNotFound)
 		}
@@ -231,12 +273,12 @@ func (s *Store) RefsBelong(ctx context.Context, t RefTarget, ids []int64) error 
 	return nil
 }
 
-// targetExists checks that the job and thread named exist.
+// targetExists checks that the job, thread and interview named exist.
 func targetExists(ctx context.Context, tx *sql.Tx, t RefTarget) error {
 	for _, c := range []struct {
 		id          int64
 		table, name string
-	}{{t.JobID, "jobs", "job"}, {t.OutreachID, "outreach", "outreach"}} {
+	}{{t.JobID, "jobs", "job"}, {t.OutreachID, "outreach", "outreach"}, {t.InterviewID, "interviews", "interview"}} {
 		if c.id == 0 {
 			continue
 		}
