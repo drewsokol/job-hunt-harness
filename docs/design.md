@@ -626,6 +626,28 @@ Saving a thread returns its id, and changing one used to need it. An agent whose
 - **`get_job`** lists the job's threads, and its timeline events about a thread carry `outreach_id`.
 - **`get_tracker`'s summary** counts threads by status. `followups_due` and `stale` already return threads with their ids.
 
+#### Contacts
+
+A contact is created the first time the user writes to someone, or someone writes to them, and is reused by name and company. Contacts matter beyond any one thread: a recruiter who covers several roles, or one who offered to keep the user in mind. So contacts get a few more fields and two tools ([decision 0010](decisions/0010-fewer-tools.md)).
+
+- **New columns on `contacts`** (the existing `title`, `company_name`, `relationship`, `source`, `why`, `profile_url`, `email` and `notes` stay):
+
+  ```
+  contacts  + org_type NULL (agency|employer|other), warmth NULL (cold|warm|advocate),
+              phone, tags_json (short lowercase words), re_engage_after NULL
+  ```
+- **`org_type`** says whether the contact's company is a recruiting agency or the employer itself, which tells the agent whose roles they bring. `relationship` keeps saying who they are to the user (recruiter, hiring manager, referral and so on).
+- **`warmth`**: `cold` (no real exchange yet), `warm` (a real exchange), `advocate` (actively helping: a referral, an introduction, a promise to pass the user's name on).
+- **`re_engage_after`** is when to get back in touch, for a contact who said "I'll keep you in mind" or "come back in the spring". `get_tracker`'s `followups_due` lists contacts whose date has come, after the threads, and `whats_new` counts them.
+- **`save_contact(contact_id?, name?, ...fields)`** creates a contact (`name` required; the same name at the same company is reused, as `save_outreach` does) or changes one by id. Tags are replaced as a whole list. Every change writes an event naming the fields changed, never their values, since contacts hold other people's details.
+- **`list_contacts`** finds contacts by `name` or `company` (part of it, any case), `org_type`, `warmth`, `relationship`, `tag`, `re_engage` (`due` or `set`), and when they were last in touch (`since`, `until`, on their newest thread), most recently in touch first, 20 to a page. Each comes with its id, fields, thread count and last thread date. Given `contact_id` alone, it returns that contact in full with every thread (ids and statuses) and the jobs those threads are about.
+- **Untrusted:** a contact's fields are the agent's record, like outreach notes, except `company_name` when it was taken from a job's listing, which comes inside `untrusted` as in `list_outreach`. Job titles always do.
+- **Privacy:** contacts are other people's details: names, emails, phone numbers. They stay in the local database like everything else, are never logged, and the events about them name the fields changed, not their values.
+- **The dashboard's Outreach tab** shows a thread's contact with these fields, and a list of contacts due to get back in touch to.
+
+"Who has offered to keep me in mind?" is then `list_contacts` with `re_engage: set`, or a tag the agent uses for it.
+
+### Prompts
 
 The server also sends a short `instructions` string when an MCP client connects: what jhh is, "if the user asks to initialize or set up, call `get_playbook('initialize')`", and "call `get_context` before judging fit". Many clients pass this to the model even when they ignore prompts, which is what makes "just ask your agent" work across different agents.
 
