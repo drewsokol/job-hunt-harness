@@ -10,11 +10,11 @@ import (
 )
 
 // TestFindingOutreach checks that a thread can be found again without
-// remembering the id log_outreach returned.
+// remembering the id save_outreach returned.
 func TestFindingOutreach(t *testing.T) {
 	src := &board{boards: map[string][]sources.Posting{"exampleco": {posting("1", "Senior Backend Engineer")}}}
 	h := newHarness(t, Deps{Sources: map[string]sources.Source{"fake": src}})
-	h.call("add_company", map[string]any{"name": "Exampleco"}, nil)
+	h.call("set_company", map[string]any{"name": "Exampleco"}, nil)
 	var filters map[string]any
 	if err := json.Unmarshal([]byte(engineersRemoteInUS), &filters); err != nil {
 		t.Fatal(err)
@@ -36,10 +36,10 @@ func TestFindingOutreach(t *testing.T) {
 		ID int64 `json:"outreach_id"`
 	}
 	var aboutJob, general, other logged
-	h.call("log_outreach", map[string]any{"person": "Alex Example", "channel": "linkedin", "job_id": job, "sent_at": daysAgo(20)}, &aboutJob)
-	h.call("log_outreach", map[string]any{"person": "Alex Example", "channel": "email", "company": "Exampleco", "sent_at": daysAgo(10), "no_follow_up": true}, &general)
+	h.call("save_outreach", map[string]any{"person": "Alex Example", "channel": "linkedin", "job_id": job, "sent_at": daysAgo(20)}, &aboutJob)
+	h.call("save_outreach", map[string]any{"person": "Alex Example", "channel": "email", "company": "Exampleco", "sent_at": daysAgo(10), "no_follow_up": true}, &general)
 	longNote := strings.Repeat("Met at a made-up meetup. ", 20)
-	h.call("log_outreach", map[string]any{"person": "Sam Sample", "channel": "email", "company": "Made-Up Labs", "sent_at": daysAgo(5), "note": longNote}, &other)
+	h.call("save_outreach", map[string]any{"person": "Sam Sample", "channel": "email", "company": "Made-Up Labs", "sent_at": daysAgo(5), "note": longNote}, &other)
 
 	type thread struct {
 		ID        int64  `json:"outreach_id"`
@@ -114,38 +114,41 @@ func TestFindingOutreach(t *testing.T) {
 
 	// By person: two open threads with Alex, so nothing changes, and the
 	// error lists both ids without quoting a company.
-	msg := h.fail("update_outreach", map[string]any{"person": "alex example", "status": "replied"})
+	msg := h.fail("save_outreach", map[string]any{"find": map[string]any{"person": "alex example"}, "status": "replied"})
 	if !strings.Contains(msg, fmt.Sprint(aboutJob.ID)) || !strings.Contains(msg, fmt.Sprint(general.ID)) || strings.Contains(msg, "Exampleco") {
 		t.Errorf("two matches: %s", msg)
 	}
 	if l := find(map[string]any{"status": []string{"replied"}}); l.Total != 0 {
 		t.Errorf("an ambiguous update changed %s", ids(l))
 	}
-	if msg := h.fail("update_outreach", map[string]any{"person": "Nobody Made-Up", "status": "replied"}); !strings.Contains(msg, "no open outreach thread") {
+	if msg := h.fail("save_outreach", map[string]any{"find": map[string]any{"person": "Nobody Made-Up"}, "status": "replied"}); !strings.Contains(msg, "no open outreach thread") {
 		t.Errorf("no match: %s", msg)
 	}
-	if msg := h.fail("update_outreach", map[string]any{"person": "Alex", "status": "replied"}); !strings.Contains(msg, "no open outreach thread") {
+	if msg := h.fail("save_outreach", map[string]any{"find": map[string]any{"person": "Alex"}, "status": "replied"}); !strings.Contains(msg, "no open outreach thread") {
 		t.Errorf("part of a name matched: %s", msg)
 	}
-	if msg := h.fail("update_outreach", map[string]any{"outreach_id": general.ID, "person": "Alex Example", "status": "closed"}); !strings.Contains(msg, "not both") {
+	if msg := h.fail("save_outreach", map[string]any{"outreach_id": general.ID, "find": map[string]any{"person": "Alex Example"}, "status": "closed"}); !strings.Contains(msg, "not both") {
 		t.Errorf("id and person: %s", msg)
 	}
-	if msg := h.fail("update_outreach", map[string]any{"status": "closed"}); !strings.Contains(msg, "list_outreach") {
-		t.Errorf("neither id nor person: %s", msg)
+	if msg := h.fail("save_outreach", map[string]any{"status": "closed"}); !strings.Contains(msg, "outreach_id or find") {
+		t.Errorf("a status without a thread: %s", msg)
+	}
+	if msg := h.fail("save_outreach", map[string]any{"outreach_id": general.ID, "person": "Someone Else", "status": "closed"}); !strings.Contains(msg, "set when it's logged") {
+		t.Errorf("a new thread's fields on a change: %s", msg)
 	}
 
 	// The job narrows it to one.
 	var updated struct {
 		ID int64 `json:"outreach_id"`
 	}
-	h.call("update_outreach", map[string]any{"person": "ALEX EXAMPLE", "job_id": job, "status": "replied"}, &updated)
+	h.call("save_outreach", map[string]any{"find": map[string]any{"person": "ALEX EXAMPLE", "job_id": job}, "status": "replied"}, &updated)
 	if updated.ID != aboutJob.ID {
 		t.Errorf("updated %d; want %d", updated.ID, aboutJob.ID)
 	}
 	// Closed threads don't count, so once the other one is closed the
 	// person alone is enough; a closed thread is reached only by its id.
-	h.call("update_outreach", map[string]any{"outreach_id": general.ID, "status": "closed"}, nil)
-	h.call("update_outreach", map[string]any{"person": "Alex Example", "company": "exampleco", "status": "scheduled", "note": "A call on Friday."}, &updated)
+	h.call("save_outreach", map[string]any{"outreach_id": general.ID, "status": "closed"}, nil)
+	h.call("save_outreach", map[string]any{"find": map[string]any{"person": "Alex Example", "company": "exampleco"}, "status": "scheduled", "note": "A call on Friday."}, &updated)
 	if updated.ID != aboutJob.ID {
 		t.Errorf("updated %d; want %d", updated.ID, aboutJob.ID)
 	}

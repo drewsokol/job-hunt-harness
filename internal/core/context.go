@@ -94,9 +94,9 @@ func GetSetupState(ctx context.Context, s *store.Store) (SetupState, error) {
 	}
 	missing(st.ResumeVersion == 0, "resume: no resume text yet; ask whether there's one you can read, then call set_resume_text")
 	missing(st.ProfileVersion == 0, "profile: no profile yet; interview the user, draft it, and save it with update_profile once they agree")
-	missing(st.FiltersVersion == 0, "filters: none set; draft them, run preview_filters, show the user the effect, then set_filters")
+	missing(st.FiltersVersion == 0, "filters: none set; draft them, run set_filters with dry_run, show the user the effect, then save them with set_filters")
 	missing(st.FiltersVersion != 0 && st.SearchesOn == 0 && st.Counts.BoardCompanies == 0,
-		"sources: no search source is on and no company boards are read, so refresh finds nothing; turn one on with set_source (list_sources shows them), or add companies with add_company")
+		"sources: no search source is on and no company boards are read, so refresh finds nothing; turn one on with set_source (list_sources shows them), or add companies with set_company")
 	missing(st.Counts.LastRefreshAt.IsZero(), "refresh: jobs were never fetched; call refresh_jobs")
 	missing(st.Counts.Screenings == 0, "screening: no job has been screened yet; follow the screen_new_jobs playbook")
 	return st, nil

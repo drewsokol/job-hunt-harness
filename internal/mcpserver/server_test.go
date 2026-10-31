@@ -129,13 +129,13 @@ func TestProfileAndMemories(t *testing.T) {
 	if saved.Version != 1 || !strings.Contains(saved.Diff, "+ A made-up backend engineer.") {
 		t.Errorf("first save: %+v", saved)
 	}
-	h.call("edit_profile_section", map[string]any{
+	h.call("update_profile", map[string]any{
 		"heading": "Highlights", "content": "- Led a made-up migration.", "mode": "append", "summary": "Added the migration",
 	}, &saved)
 	if saved.Version != 2 || saved.Diff != "+ - Led a made-up migration.\n" {
 		t.Errorf("section edit: %+v", saved)
 	}
-	if msg := h.fail("edit_profile_section", map[string]any{"heading": "Gaps", "content": "x", "mode": "merge", "summary": "s"}); !strings.Contains(msg, `mode: "merge" must be replace or append`) {
+	if msg := h.fail("update_profile", map[string]any{"heading": "Gaps", "content": "x", "mode": "merge", "summary": "s"}); !strings.Contains(msg, `mode: "merge" must be replace or append`) {
 		t.Errorf("bad mode: %s", msg)
 	}
 
@@ -151,7 +151,7 @@ func TestProfileAndMemories(t *testing.T) {
 	if msg := h.fail("remember", map[string]any{"content": "x", "kind": "hunch", "basis": "user_said"}); !strings.Contains(msg, `kind: "hunch" must be one of`) {
 		t.Errorf("bad kind: %s", msg)
 	}
-	h.call("forget", map[string]any{"id": mem.ID, "reason": "Repeats memory 1."}, nil)
+	h.call("update_memory", map[string]any{"id": mem.ID, "archive": "Repeats memory 1."}, nil)
 
 	var ctxOut struct {
 		Profile struct {
@@ -180,7 +180,7 @@ func TestProfileAndMemories(t *testing.T) {
 	if msg := h.fail("set_resume_text", map[string]any{"text": "made-up resume", "source": "upload"}); !strings.Contains(msg, "source:") {
 		t.Errorf("bad source: %s", msg)
 	}
-	if msg := h.fail("forget", map[string]any{"id": 999, "reason": "gone"}); !strings.Contains(msg, "no memory 999") {
+	if msg := h.fail("update_memory", map[string]any{"id": 999, "archive": "gone"}); !strings.Contains(msg, "no memory 999") {
 		t.Errorf("missing memory: %s", msg)
 	}
 	if msg := h.fail("remember", map[string]any{"content": "x", "kind": "fact", "basis": "user_said", "colour": "red"}); !strings.Contains(msg, "colour") {

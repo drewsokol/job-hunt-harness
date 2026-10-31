@@ -218,29 +218,22 @@ func (t *tools) addManageTools(s *mcp.Server) {
 		return out, nil
 	})
 
-	type previewIn struct {
-		Filters map[string]any `json:"filters" jsonschema:"the whole filters object, as get_context returns it"`
-	}
-	add(t, s, "preview_filters", reads, func(ctx context.Context, _ call, in previewIn) (any, error) {
-		f, err := parseFilters(in.Filters)
-		if err != nil {
-			return nil, err
-		}
-		p, err := core.PreviewFilters(ctx, t.Store, f)
-		if err != nil {
-			return nil, err
-		}
-		return preview(p), nil
-	})
-
 	type setIn struct {
 		Filters   map[string]any `json:"filters" jsonschema:"the whole filters object; it replaces the active one"`
-		Rationale string         `json:"rationale" jsonschema:"one sentence: why the filters are changing"`
+		Rationale string         `json:"rationale,omitempty" jsonschema:"one sentence: why the filters are changing; needed to save"`
+		DryRun    bool           `json:"dry_run,omitempty" jsonschema:"show the effect without saving"`
 	}
 	add(t, s, "set_filters", writes, func(ctx context.Context, c call, in setIn) (any, error) {
 		f, err := parseFilters(in.Filters)
 		if err != nil {
 			return nil, err
+		}
+		if in.DryRun {
+			p, err := core.PreviewFilters(ctx, t.Store, f)
+			if err != nil {
+				return nil, err
+			}
+			return preview(p), nil
 		}
 		version, p, o, err := core.SetFilters(ctx, t.Store, c.by, f, in.Rationale)
 		if err != nil {
@@ -330,11 +323,31 @@ func (t *tools) addManageTools(s *mcp.Server) {
 		}{out}, nil
 	})
 
-	type addCompanyIn struct {
-		Name  string `json:"name"`
-		Where string `json:"where,omitempty" jsonschema:"a board slug, source:slug (greenhouse:exampleco) or a link to one of the company's postings; default: guess slugs from the name"`
+	type setCompanyIn struct {
+		CompanyID int64  `json:"company_id,omitempty" jsonschema:"a company jhh has: turn reading its board on or off with enabled"`
+		Enabled   *bool  `json:"enabled,omitempty" jsonschema:"with company_id"`
+		Name      string `json:"name,omitempty" jsonschema:"a company to add"`
+		Where     string `json:"where,omitempty" jsonschema:"with name: a board slug, source:slug (greenhouse:exampleco) or a link to one of the company's postings; default: guess slugs from the name"`
 	}
-	add(t, s, "add_company", writes, func(ctx context.Context, c call, in addCompanyIn) (any, error) {
+	add(t, s, "set_company", writes, func(ctx context.Context, c call, in setCompanyIn) (any, error) {
+		switch {
+		case in.CompanyID != 0 && (in.Name != "" || in.Where != ""):
+			return nil, &core.InputError{Problems: []string{"company_id: give company_id and enabled for a company jhh has, or name (and where) to add one, not both"}}
+		case in.CompanyID != 0:
+			if in.Enabled == nil {
+				return nil, &core.InputError{Problems: []string{"enabled: say whether to read the company's board"}}
+			}
+			cm, err := t.Store.Company(ctx, in.CompanyID)
+			if err != nil {
+				return nil, err
+			}
+			if cm.Source == "none" {
+				return nil, &core.InputError{Problems: []string{"company_id: this company has no board to read; search found it"}}
+			}
+			return ok(t.Store.SetCompanyEnabled(ctx, c.by, in.CompanyID, *in.Enabled))
+		case in.Enabled != nil:
+			return nil, &core.InputError{Problems: []string{"enabled: goes with company_id; a company being added is read from the start"}}
+		}
 		name := strings.TrimSpace(in.Name)
 		if name == "" || len(name) > 200 {
 			return nil, &core.InputError{Problems: []string{"name: the company's name, 1 to 200 characters"}}
@@ -379,18 +392,4 @@ func (t *tools) addManageTools(s *mcp.Server) {
 		return res, nil
 	})
 
-	type enabledIn struct {
-		CompanyID int64 `json:"company_id"`
-		Enabled   bool  `json:"enabled"`
-	}
-	add(t, s, "set_company_enabled", writes, func(ctx context.Context, c call, in enabledIn) (any, error) {
-		cm, err := t.Store.Company(ctx, in.CompanyID)
-		if err != nil {
-			return nil, err
-		}
-		if cm.Source == "none" {
-			return nil, &core.InputError{Problems: []string{"company_id: this company has no board to read; search found it"}}
-		}
-		return ok(t.Store.SetCompanyEnabled(ctx, c.by, in.CompanyID, in.Enabled))
-	})
 }

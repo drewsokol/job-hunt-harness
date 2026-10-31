@@ -19,7 +19,7 @@ Rate jobs that passed the user's filters, so the user only reads the ones worth 
    - **stretch**: worth applying to, but with clear gaps.
    - **no**: a deal-breaker, or the wrong role. Say which.
 5. For each job write:
-   - **reason**: at most two sentences, specific to this posting. Where it fits, name the highlight from the profile to lead with ("lead with the billing migration"). A job found on Hacker News is one employer's ad and can name several roles (joined with " · ") or none in its title; rate the best-fitting role, name it in the reason, and say how the ad asks people to apply. If the ad links to the company's Greenhouse, Lever or Ashby board, offer to add the company with `add_company`.
+   - **reason**: at most two sentences, specific to this posting. Where it fits, name the highlight from the profile to lead with ("lead with the billing migration"). A job found on Hacker News is one employer's ad and can name several roles (joined with " · ") or none in its title; rate the best-fitting role, name it in the reason, and say how the ad asks people to apply. If the ad links to the company's Greenhouse, Lever or Ashby board, offer to add the company with `set_company`.
    - **gaps**: honest, and checked against the Gaps section and the claim_limit memories. Never present something the user can't claim as a strength.
    - **flags**: short labels for things the user asked to see, and for pay not posted or below the floor, or a location that is unclear.
 6. Save each page's ratings with one `record_screening` call before moving on.

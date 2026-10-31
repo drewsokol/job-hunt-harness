@@ -23,7 +23,7 @@ func TestOutputSizes(t *testing.T) {
 	}
 	src := &board{boards: map[string][]sources.Posting{"exampleco": ps}}
 	h := newHarness(t, Deps{Sources: map[string]sources.Source{"fake": src}})
-	h.call("add_company", map[string]any{"name": "Exampleco"}, nil)
+	h.call("set_company", map[string]any{"name": "Exampleco"}, nil)
 	var filters map[string]any
 	if err := json.Unmarshal([]byte(engineersRemoteInUS), &filters); err != nil {
 		t.Fatal(err)
