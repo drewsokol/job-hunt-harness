@@ -1,4 +1,4 @@
--- 0006: contacts beyond any one thread (docs/design.md, "Contacts").
+-- 0008: contacts beyond any one thread (docs/design.md, "Contacts").
 
 -- Whether the contact's company is a recruiting agency or the employer.
 ALTER TABLE contacts ADD COLUMN org_type TEXT CHECK (org_type IN ('agency', 'employer', 'other'));

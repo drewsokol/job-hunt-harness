@@ -81,23 +81,25 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 		Person        string  `json:"person,omitempty" jsonschema:"new thread: who the user is talking to"`
 		Direction     string  `json:"direction,omitempty" jsonschema:"inbound (they wrote first) or outbound (the user did); required on a new thread"`
 		Channel       string  `json:"channel,omitempty" jsonschema:"new thread: linkedin_inmail, linkedin_message, linkedin_connection, email, job_site, phone, referral, event or other"`
-		Company       string  `json:"company,omitempty" jsonschema:"new thread: who the person works for (a recruiter's agency); default: the job's company"`
+		Company       string  `json:"company,omitempty" jsonschema:"new thread: who the person works for; default: the job's company"`
 		JobID         int64   `json:"job_id,omitempty" jsonschema:"the job it's about; a change can set it once the role is known"`
 		Role          string  `json:"role,omitempty" jsonschema:"new thread: the person's job title"`
-		SentAt        string  `json:"sent_at,omitempty" jsonschema:"new thread: when it started, whoever wrote; UTC, RFC 3339; default now"`
+		SentAt        string  `json:"sent_at,omitempty" jsonschema:"new thread: when it started; UTC, RFC 3339; default now"`
 		NoFollowUp    bool    `json:"no_follow_up,omitempty" jsonschema:"new thread: no follow-up date"`
-		Status        string  `json:"status,omitempty" jsonschema:"received, sent, accepted, replied, scheduled, no_reply, declined or closed; a new thread's default is received (inbound) or sent (outbound)"`
-		FollowUpAt    string  `json:"follow_up_at,omitempty" jsonschema:"UTC, RFC 3339; a new outbound thread's default is a week after sent_at, an inbound one has none"`
+		Status        string  `json:"status,omitempty" jsonschema:"received, sent, accepted, replied, scheduled, no_reply, declined or closed"`
+		FollowUpAt    string  `json:"follow_up_at,omitempty" jsonschema:"UTC, RFC 3339"`
 		ClearFollowUp bool    `json:"clear_follow_up,omitempty" jsonschema:"change: remove the follow-up date"`
 		Note          string  `json:"note,omitempty" jsonschema:"a new thread's note, or a line added to it"`
-		ClientCompany string  `json:"client_company,omitempty" jsonschema:"the employer an agency recruiter is hiring for, as they said, or undisclosed"`
-		PayMin        float64 `json:"pay_min,omitempty" jsonschema:"pay the person stated, never an estimate; any pay field replaces the thread's pay"`
+		ClientCompany string  `json:"client_company,omitempty" jsonschema:"an agency recruiter's employer, or undisclosed"`
+		PayMin        float64 `json:"pay_min,omitempty" jsonschema:"any pay field replaces the thread's pay"`
 		PayMax        float64 `json:"pay_max,omitempty"`
 		PayCurrency   string  `json:"pay_currency,omitempty" jsonschema:"ISO code such as USD; needed with an amount"`
 		PayPeriod     string  `json:"pay_period,omitempty" jsonschema:"year (the default) or hour"`
 		PayNote       string  `json:"pay_note,omitempty" jsonschema:"what numbers can't hold, such as equity or flexibility"`
 		DeclineReason string  `json:"decline_reason,omitempty" jsonschema:"with status declined: contract, pay_below_floor, hybrid_or_onsite, wrong_role, level_too_low, no_details, suspicious or other"`
 		DeclineNote   string  `json:"decline_note,omitempty" jsonschema:"why, in the user's words"`
+		AddRefs       []refIn `json:"add_refs,omitempty" jsonschema:"links to the email threads about this thread"`
+		RemoveRefs    []int64 `json:"remove_refs,omitempty" jsonschema:"ids of links to remove"`
 	}
 	add(t, s, "save_outreach", writes, func(ctx context.Context, c call, in saveIn) (any, error) {
 		type saved struct {
@@ -108,16 +110,29 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			FollowUpAt string `json:"follow_up_at,omitempty"`
 		}
 		id := in.OutreachID
+		refs := refInputs(in.AddRefs)
+		if err := core.CheckRefs(refs, in.RemoveRefs); err != nil {
+			return nil, err
+		}
 		p := core.PayInput{Min: in.PayMin, Max: in.PayMax, Currency: in.PayCurrency, Period: in.PayPeriod, Note: in.PayNote}
 		if id == 0 && in.Find == nil {
 			if in.ClearFollowUp {
 				return nil, &core.InputError{Problems: []string{"clear_follow_up: a new thread has no date to clear; pass no_follow_up, or give outreach_id or find to change a thread"}}
 			}
+			if len(in.RemoveRefs) > 0 {
+				return nil, &core.InputError{Problems: []string{"remove_refs: a new thread has no links yet; to change a thread, give outreach_id or find"}}
+			}
 			l, err := core.LogOutreach(ctx, t.Store, c.by, core.OutreachInput{Person: in.Person, Channel: in.Channel, Company: in.Company,
 				Role: in.Role, JobID: in.JobID, Direction: in.Direction, Status: in.Status, SentAt: in.SentAt, FollowUpAt: in.FollowUpAt,
 				NoFollowUp: in.NoFollowUp, Note: in.Note, ClientCompany: in.ClientCompany, Pay: p,
 				DeclineReason: in.DeclineReason, DeclineNote: in.DeclineNote})
-			return saved{l.ID, true, l.ContactID, l.NewContact, timeOrEmpty(l.FollowUpAt)}, err
+			if err != nil {
+				return nil, err
+			}
+			if err := core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{OutreachID: l.ID}, refs, nil); err != nil {
+				return nil, err
+			}
+			return saved{l.ID, true, l.ContactID, l.NewContact, timeOrEmpty(l.FollowUpAt)}, nil
 		}
 		switch {
 		case id != 0 && in.Find != nil:
@@ -135,7 +150,15 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 		if !p.IsZero() {
 			u.Pay = &p
 		}
-		if err := core.UpdateOutreach(ctx, t.Store, c.by, id, u); err != nil {
+		if err := core.CheckRemovals(ctx, t.Store, store.RefTarget{OutreachID: id}, in.RemoveRefs); err != nil {
+			return nil, err
+		}
+		if u != (core.OutreachUpdate{}) || !core.HasRefs(refs, in.RemoveRefs) {
+			if err := core.UpdateOutreach(ctx, t.Store, c.by, id, u); err != nil {
+				return nil, err
+			}
+		}
+		if err := core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{OutreachID: id}, refs, in.RemoveRefs); err != nil {
 			return nil, err
 		}
 		return saved{ID: id}, nil
@@ -168,10 +191,15 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			for _, e := range p.History {
 				history = append(history, event(e))
 			}
+			refs, err := t.Store.Refs(ctx, store.RefTarget{OutreachID: in.OutreachID})
+			if err != nil {
+				return nil, err
+			}
 			return struct {
 				outreachOut
+				Refs    []refOut   `json:"refs,omitempty"`
 				History []eventOut `json:"history"`
-			}{outreach(p.Outreach)[0], history}, nil
+			}{outreach(p.Outreach)[0], refsOut(refs), history}, nil
 		}
 		return struct {
 			Total    int           `json:"total"`
@@ -181,7 +209,7 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 	})
 
 	type trackerIn struct {
-		View string `json:"view,omitempty" jsonschema:"summary (the default), applied, followups_due or stale"`
+		View string `json:"view,omitempty" jsonschema:"summary (the default), applied, followups_due, stale or upcoming_interviews"`
 	}
 	add(t, s, "get_tracker", reads, func(ctx context.Context, _ call, in trackerIn) (any, error) {
 		v, err := core.Tracker(ctx, t.Store, in.View)
@@ -205,18 +233,31 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 				InboundLast30 int                       `json:"inbound_last_30_days"`
 				Unanswered    int                       `json:"unanswered_inbound"`
 				Declined      map[string]int            `json:"declined_by_reason"`
+				Soon          int                       `json:"interviews_next_7_days"`
+				Pending       int                       `json:"interviews_awaiting_outcome"`
 			}{sm.Unscreened, sm.ToReview, sm.Applications, sm.AppliedLast7, sm.Interviewing, sm.Offers,
 				sm.FollowUpsDue, sm.OpenFlags, sm.SuspectFeeds, timeOrEmpty(sm.LastRefreshAt), sm.Outreach.ByDirection,
-				sm.Outreach.InboundLast7, sm.Outreach.InboundLast30, sm.Outreach.Unanswered, sm.Outreach.DeclinedByReason}, nil
+				sm.Outreach.InboundLast7, sm.Outreach.InboundLast30, sm.Outreach.Unanswered, sm.Outreach.DeclinedByReason,
+				v.InterviewsSoon, v.InterviewsPending}, nil
+		}
+		ivs, err := t.withRefs(ctx, interviews(v.Interviews, true))
+		if err != nil {
+			return nil, err
+		}
+		if in.View == "upcoming_interviews" {
+			return struct {
+				Interviews []interviewOut `json:"interviews"`
+			}{ivs}, nil
 		}
 		return struct {
-			Jobs          []jobOut      `json:"jobs,omitempty"`
-			JobsTotal     int           `json:"jobs_total,omitempty"`
-			Outreach      []outreachOut `json:"outreach,omitempty"`
-			OutreachTotal int           `json:"outreach_total,omitempty"`
-			Contacts      []contactOut  `json:"contacts_to_re_engage,omitempty"`
-			ContactsTotal int           `json:"contacts_to_re_engage_total,omitempty"`
-		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, contacts(v.Contacts, true), v.ContactsTotal}, nil
+			Jobs          []jobOut       `json:"jobs,omitempty"`
+			JobsTotal     int            `json:"jobs_total,omitempty"`
+			Outreach      []outreachOut  `json:"outreach,omitempty"`
+			OutreachTotal int            `json:"outreach_total,omitempty"`
+			Interviews    []interviewOut `json:"interviews,omitempty"`
+			Contacts      []contactOut   `json:"contacts_to_re_engage,omitempty"`
+			ContactsTotal int            `json:"contacts_to_re_engage_total,omitempty"`
+		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, ivs, contacts(v.Contacts, true), v.ContactsTotal}, nil
 	})
 
 	type whatsNewIn struct {

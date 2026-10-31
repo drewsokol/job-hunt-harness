@@ -216,7 +216,7 @@ func TestDoctorReportsDatabase(t *testing.T) {
 	code := doctor(context.Background(), outW)
 	outW.Close()
 	<-done
-	if code != 0 || !strings.Contains(out.String(), "schema v6, integrity ok") {
+	if code != 0 || !strings.Contains(out.String(), "schema v8, integrity ok") {
 		t.Errorf("doctor exit %d, output:\n%s", code, out.String())
 	}
 }
