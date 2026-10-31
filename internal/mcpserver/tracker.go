@@ -180,7 +180,9 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			JobsTotal     int           `json:"jobs_total,omitempty"`
 			Outreach      []outreachOut `json:"outreach,omitempty"`
 			OutreachTotal int           `json:"outreach_total,omitempty"`
-		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal}, nil
+			Contacts      []contactOut  `json:"contacts_to_re_engage,omitempty"`
+			ContactsTotal int           `json:"contacts_to_re_engage_total,omitempty"`
+		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, contacts(v.Contacts, true), v.ContactsTotal}, nil
 	})
 
 	type whatsNewIn struct {
@@ -202,12 +204,13 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			NewJobsTotal        int           `json:"new_jobs_total"`
 			FollowUpsDue        []outreachOut `json:"follow_ups_due"`
 			FollowUpsTotal      int           `json:"follow_ups_due_total"`
+			ReEngageDue         int           `json:"contacts_to_re_engage"`
 			ChangedApplications []jobOut      `json:"applications_closed_or_reposted"`
 			OpenFlags           int           `json:"content_flags_to_review"`
 			Suspect             []companyRef  `json:"suspect_feeds"`
 			Paused              []string      `json:"search_sources_off,omitempty"`
 			LastRefresh         string        `json:"last_refresh,omitempty"`
-		}{timeOrEmpty(r.Since), timeOrEmpty(r.Now), jobs(r.NewJobs), r.NewJobsTotal, outreach(r.FollowUpsDue), r.FollowUpsTotal,
+		}{timeOrEmpty(r.Since), timeOrEmpty(r.Now), jobs(r.NewJobs), r.NewJobsTotal, outreach(r.FollowUpsDue), r.FollowUpsTotal, r.ReEngageDue,
 			jobs(r.ChangedApplications), r.OpenFlags, suspect, r.PausedSearches, timeOrEmpty(r.LastRefreshAt)}, nil
 	})
 }

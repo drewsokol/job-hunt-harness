@@ -288,6 +288,9 @@ type TrackerView struct {
 	JobsTotal     int
 	Outreach      []store.Outreach
 	OutreachTotal int
+	// Contacts are those due to get back in touch with (followups_due).
+	Contacts      []store.Contact
+	ContactsTotal int
 }
 
 // Tracker returns a view of the applications and outreach.
@@ -306,6 +309,9 @@ func Tracker(ctx context.Context, s *store.Store, view string) (TrackerView, err
 		v.Jobs, v.JobsTotal, err = s.Applications(ctx, 0, trackerPage)
 	case "followups_due":
 		v.Outreach, v.OutreachTotal, err = s.ListOutreach(ctx, store.OutreachQuery{DueBy: now, Limit: trackerPage})
+		if err == nil {
+			v.Contacts, v.ContactsTotal, err = s.ListContacts(ctx, store.ContactQuery{ReEngageDueBy: now, Limit: trackerPage})
+		}
 	case "stale":
 		v.Jobs, v.JobsTotal, err = s.StaleApplications(ctx, now.Add(-StaleApplication), 0, trackerPage)
 		if err == nil {
@@ -324,6 +330,7 @@ type WhatsNewReport struct {
 	NewJobsTotal        int
 	FollowUpsDue        []store.Outreach
 	FollowUpsTotal      int
+	ReEngageDue         int            // contacts whose date to get back in touch has come
 	ChangedApplications []store.JobRow // closed or reposted
 	OpenFlags           int
 	Suspect             []store.Company
@@ -355,6 +362,9 @@ func WhatsNew(ctx context.Context, s *store.Store, by store.Actor, since string)
 		return r, err
 	}
 	if r.FollowUpsDue, r.FollowUpsTotal, err = s.ListOutreach(ctx, store.OutreachQuery{DueBy: r.Now, Limit: whatsNewPage}); err != nil {
+		return r, err
+	}
+	if _, r.ReEngageDue, err = s.ListContacts(ctx, store.ContactQuery{ReEngageDueBy: r.Now}); err != nil {
 		return r, err
 	}
 	if r.ChangedApplications, _, err = s.ChangedApplications(ctx, r.Since, trackerPage); err != nil {

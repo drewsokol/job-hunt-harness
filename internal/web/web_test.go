@@ -504,6 +504,27 @@ func TestAddJobAndOutreach(t *testing.T) {
 	if code := f.do("PATCH", fmt.Sprintf("/api/outreach/%d", out.Items[0].ID), map[string]any{"status": "ghosted"}, nil); code != http.StatusBadRequest {
 		t.Errorf("an unknown status: status %d", code)
 	}
+
+	// The thread's contact, and the contacts due to get back in touch with.
+	warm, past := "warm", time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	tags := []string{"platform"}
+	if _, err := core.SaveContact(context.Background(), f.s, store.Agent("test-agent"), out.Items[0].ContactID,
+		core.ContactInput{Warmth: &warm, Tags: &tags, ReEngageAfter: &past}); err != nil {
+		t.Fatal(err)
+	}
+	var withContacts struct {
+		Items       []outreachJSON         `json:"items"`
+		Contacts    map[string]contactJSON `json:"contacts"`
+		ContactsDue []contactJSON          `json:"contacts_due"`
+	}
+	f.ok("GET", "/api/outreach", nil, &withContacts)
+	c := withContacts.Contacts[fmt.Sprint(withContacts.Items[0].ContactID)]
+	if c.Name != "Sam Example" || c.Warmth != "warm" || len(c.Tags) != 1 || c.Tags[0] != "platform" {
+		t.Errorf("thread's contact: %+v", c)
+	}
+	if len(withContacts.ContactsDue) != 1 || withContacts.ContactsDue[0].Name != "Sam Example" {
+		t.Errorf("contacts due: %+v", withContacts.ContactsDue)
+	}
 }
 
 func TestProfilePage(t *testing.T) {
