@@ -23,7 +23,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - [x] Fewer tools ([decision 0010](decisions/0010-fewer-tools.md)): `save_outreach`, archiving with `update_memory`, section edits with `update_profile`, `set_filters` dry runs, `set_company` (33 tools down to 28)
 - [ ] Inbound outreach: who wrote first, received and declined statuses with a reason, the pay a recruiter quoted, an agency's client
 - [ ] Interviews: `save_interview`, upcoming interviews in the tracker, a job moves to interviewing when its first interview is logged
-- [ ] Handled email: links from threads, jobs and interviews to email threads, and a record of which messages the agent has already handled (`handled_messages`)
+- [x] Handled email: links from threads, jobs and interviews to email threads, and a record of which messages the agent has already handled (`handled_messages`)
 - [ ] Contacts: organization type, warmth, tags and a date to get back in touch; `list_contacts` and `save_contact`
 - [ ] Applications made elsewhere: `add_jobs` records a job the user applied to outside jhh, in its status, so a later reply has somewhere to go
 - [ ] Later, once there are offers to compare: offer details (base, bonus, equity, sign-on, deadline) and a comparison across jobs
