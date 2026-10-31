@@ -32,6 +32,7 @@ type Outreach struct {
 	Status     string
 	FollowUpAt time.Time
 	Note       string
+	UpdatedAt  time.Time
 }
 
 // NewOutreach is a message to log. A contact with the same name at the
@@ -204,15 +205,23 @@ func (s *Store) UpdateOutreach(ctx context.Context, by Actor, id int64, c Outrea
 	})
 }
 
-// OutreachQuery selects outreach for ListOutreach.
+// OutreachQuery selects outreach for ListOutreach. Every field set must
+// match.
 type OutreachQuery struct {
+	ID           int64
+	Statuses     []string
+	Person       string // part of the contact's name, in any case
+	Company      string // part of the contact's company, in any case
+	JobID        int64
 	DueBy        time.Time // waiting threads with a follow-up date by then
 	QuietSince   time.Time // waiting threads sent before then with no follow-up date
+	FollowUpSet  bool      // threads with a follow-up date
+	FollowUpNone bool      // threads without one
 	Offset       int
 	Limit        int
-	NewestFirst  bool
+	NewestFirst  bool // by when the message was sent
+	ChangedFirst bool // by when the thread last changed
 	WaitingOnly  bool
-	FollowUpOnly bool
 }
 
 // ListOutreach returns outreach, follow-ups due soonest first, and how
@@ -221,6 +230,30 @@ func (s *Store) ListOutreach(ctx context.Context, q OutreachQuery) ([]Outreach, 
 	where, args := []string{"1"}, []any{}
 	if q.WaitingOnly || !q.DueBy.IsZero() || !q.QuietSince.IsZero() {
 		where = append(where, "o.status IN "+outreachWaiting)
+	}
+	if q.ID != 0 {
+		where, args = append(where, "o.id = ?"), append(args, q.ID)
+	}
+	if len(q.Statuses) > 0 {
+		where = append(where, "o.status IN ("+strings.TrimSuffix(strings.Repeat("?, ", len(q.Statuses)), ", ")+")")
+		for _, st := range q.Statuses {
+			args = append(args, st)
+		}
+	}
+	if q.Person != "" {
+		where, args = append(where, "instr(lower(ct.name), lower(?)) > 0"), append(args, q.Person)
+	}
+	if q.Company != "" {
+		where, args = append(where, "instr(lower(coalesce(ct.company_name, '')), lower(?)) > 0"), append(args, q.Company)
+	}
+	if q.JobID != 0 {
+		where, args = append(where, "o.job_id = ?"), append(args, q.JobID)
+	}
+	if q.FollowUpSet {
+		where = append(where, "o.follow_up_at IS NOT NULL")
+	}
+	if q.FollowUpNone {
+		where = append(where, "o.follow_up_at IS NULL")
 	}
 	if !q.DueBy.IsZero() {
 		where = append(where, "o.follow_up_at IS NOT NULL AND o.follow_up_at <= ?")
@@ -237,36 +270,70 @@ func (s *Store) ListOutreach(ctx context.Context, q OutreachQuery) ([]Outreach, 
 		return nil, 0, err
 	}
 	order := "o.follow_up_at IS NULL, o.follow_up_at, o.sent_at"
-	if q.NewestFirst {
+	switch {
+	case q.ChangedFirst:
+		order = "o.updated_at DESC"
+	case q.NewestFirst:
 		order = "o.sent_at DESC"
 	}
+	out, err := s.outreach(ctx, from+" ORDER BY "+order+", o.id LIMIT ? OFFSET ?", append(args, q.Limit, q.Offset)...)
+	return out, total, err
+}
+
+// OpenThreads returns the threads not closed whose contact is named person
+// (in any case), at a company with company's key when company isn't empty,
+// and about jobID when it isn't 0.
+func (s *Store) OpenThreads(ctx context.Context, person, company string, jobID int64) ([]Outreach, error) {
+	where, args := "lower(ct.name) = lower(?) AND o.status <> 'closed'", []any{person}
+	if jobID != 0 {
+		where, args = where+" AND o.job_id = ?", append(args, jobID)
+	}
+	all, err := s.outreach(ctx, `FROM outreach o JOIN contacts ct ON ct.id = o.contact_id LEFT JOIN jobs j ON j.id = o.job_id
+		WHERE `+where+" ORDER BY o.sent_at, o.id", args...)
+	if err != nil || company == "" {
+		return all, err
+	}
+	key := dedupe.CompanyKey(company)
+	var out []Outreach
+	for _, o := range all {
+		if dedupe.CompanyKey(o.Company) == key {
+			out = append(out, o)
+		}
+	}
+	return out, nil
+}
+
+// outreach runs a query of outreach joined to contacts (ct) and jobs (j).
+func (s *Store) outreach(ctx context.Context, from string, args ...any) ([]Outreach, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT o.id, ct.id, ct.name, coalesce(ct.title, ''), coalesce(ct.company_name, ''), coalesce(o.job_id, 0), coalesce(j.title, ''),
-		       o.channel, o.sent_at, o.status, o.follow_up_at, o.note `+from+`
-		ORDER BY `+order+`, o.id LIMIT ? OFFSET ?`, append(args, q.Limit, q.Offset)...)
+		       o.channel, o.sent_at, o.status, o.follow_up_at, o.note, o.updated_at `+from, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	defer rows.Close()
 	var out []Outreach
 	for rows.Next() {
 		var (
-			o            Outreach
-			sent, follow sql.NullString
+			o                     Outreach
+			sent, follow, updated sql.NullString
 		)
 		if err := rows.Scan(&o.ID, &o.ContactID, &o.Person, &o.Role, &o.Company, &o.JobID, &o.JobTitle,
-			&o.Channel, &sent, &o.Status, &follow, &o.Note); err != nil {
-			return nil, 0, err
+			&o.Channel, &sent, &o.Status, &follow, &o.Note, &updated); err != nil {
+			return nil, err
 		}
 		if o.SentAt, err = parseTime(sent); err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		if o.FollowUpAt, err = parseTime(follow); err != nil {
-			return nil, 0, err
+			return nil, err
+		}
+		if o.UpdatedAt, err = parseTime(updated); err != nil {
+			return nil, err
 		}
 		out = append(out, o)
 	}
-	return out, total, rows.Err()
+	return out, rows.Err()
 }
 
 // TrackerSummary is the summary strip: where the search stands.
@@ -281,6 +348,9 @@ type TrackerSummary struct {
 	OpenFlags     int
 	SuspectFeeds  int
 	LastRefreshAt time.Time
+	// OutreachByStatus counts outreach threads by status; every status is
+	// present.
+	OutreachByStatus map[string]int
 }
 
 // Tracker counts where the search stands at now.
@@ -307,8 +377,29 @@ func (s *Store) Tracker(ctx context.Context, now time.Time) (TrackerSummary, err
 	if err != nil {
 		return t, err
 	}
-	t.LastRefreshAt, err = parseTime(refresh)
-	return t, err
+	if t.LastRefreshAt, err = parseTime(refresh); err != nil {
+		return t, err
+	}
+	t.OutreachByStatus = map[string]int{}
+	for _, st := range OutreachStatuses {
+		t.OutreachByStatus[st] = 0
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT status, count(*) FROM outreach GROUP BY status")
+	if err != nil {
+		return t, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			st string
+			n  int
+		)
+		if err := rows.Scan(&st, &n); err != nil {
+			return t, err
+		}
+		t.OutreachByStatus[st] = n
+	}
+	return t, rows.Err()
 }
 
 // Applications returns the jobs the user applied to and hasn't heard a

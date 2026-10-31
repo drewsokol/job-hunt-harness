@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,6 +27,8 @@ const (
 	maxOutreachNote   = 2_000
 	futureAllowance   = time.Hour
 	maxFollowUpFuture = 366 * 24 * time.Hour
+	outreachPage      = 20
+	maxOutreachPage   = 50
 )
 
 // OutreachInput is a message the user sent, as an agent reports it.
@@ -144,6 +147,135 @@ func UpdateOutreach(ctx context.Context, s *store.Store, by store.Actor, id int6
 		return &InputError{Problems: problems}
 	}
 	return inputIfNotFound(s.UpdateOutreach(ctx, by, id, c), fmt.Sprintf("outreach_id: no outreach %d", id))
+}
+
+// OutreachFilter selects outreach threads, as an agent asks for them.
+// Every field given must match.
+type OutreachFilter struct {
+	ID       int64    // one thread, with its history; nothing else may be set
+	Statuses []string // outreach statuses, or "open" for all but closed
+	Person   string   // part of the person's name
+	Company  string   // part of the company's name
+	JobID    int64
+	FollowUp string // due, set or none
+	Limit    int
+	Cursor   string // from the previous page's Next
+}
+
+// OutreachFollowUps are the follow_up filters ListOutreach takes.
+var OutreachFollowUps = []string{"due", "set", "none"}
+
+// OutreachPage is a page of threads. Next is the cursor for the following
+// page, or empty on the last one. History is set only for one thread
+// asked for by id: every event about it, oldest first.
+type OutreachPage struct {
+	Outreach []store.Outreach
+	Total    int
+	Next     string
+	History  []store.Event
+}
+
+// ListOutreach finds outreach threads, most recently changed first, so an
+// agent can find a thread's id again.
+func ListOutreach(ctx context.Context, s *store.Store, in OutreachFilter) (OutreachPage, error) {
+	var problems []string
+	q := store.OutreachQuery{ID: in.ID, Person: strings.TrimSpace(in.Person), Company: strings.TrimSpace(in.Company),
+		JobID: in.JobID, ChangedFirst: true}
+	if in.ID != 0 && (len(in.Statuses) > 0 || q.Person != "" || q.Company != "" || in.JobID != 0 || in.FollowUp != "" || in.Cursor != "") {
+		problems = append(problems, "outreach_id: give it alone for one thread, or leave it out to filter")
+	}
+	for _, st := range in.Statuses {
+		switch {
+		case st == "open":
+			for _, o := range store.OutreachStatuses {
+				if o != "closed" && !slices.Contains(q.Statuses, o) {
+					q.Statuses = append(q.Statuses, o)
+				}
+			}
+		case slices.Contains(store.OutreachStatuses, st):
+			if !slices.Contains(q.Statuses, st) {
+				q.Statuses = append(q.Statuses, st)
+			}
+		default:
+			problems = append(problems, fmt.Sprintf("status: %q must be open or one of %s", st, strings.Join(store.OutreachStatuses, ", ")))
+		}
+	}
+	switch in.FollowUp {
+	case "":
+	case "due":
+		q.DueBy = utc.Now()
+	case "set":
+		q.FollowUpSet = true
+	case "none":
+		q.FollowUpNone = true
+	default:
+		problems = append(problems, fmt.Sprintf("follow_up: %q must be one of %s", in.FollowUp, strings.Join(OutreachFollowUps, ", ")))
+	}
+	q.Limit = in.Limit
+	if q.Limit <= 0 {
+		q.Limit = outreachPage
+	}
+	if q.Limit > maxOutreachPage {
+		problems = append(problems, fmt.Sprintf("limit: at most %d at a time", maxOutreachPage))
+	}
+	if in.Cursor != "" {
+		n, err := strconv.Atoi(in.Cursor)
+		if err != nil || n < 0 {
+			problems = append(problems, "cursor: pass the next value from the previous page unchanged")
+		}
+		q.Offset = n
+	}
+	if len(problems) > 0 {
+		return OutreachPage{}, &InputError{Problems: problems}
+	}
+	os, total, err := s.ListOutreach(ctx, q)
+	if err != nil {
+		return OutreachPage{}, err
+	}
+	page := OutreachPage{Outreach: os, Total: total}
+	if in.ID != 0 {
+		if total == 0 {
+			return page, &InputError{Problems: []string{fmt.Sprintf("outreach_id: no outreach %d", in.ID)}}
+		}
+		page.History, err = s.OutreachEvents(ctx, in.ID)
+		return page, err
+	}
+	if q.Offset+len(os) < total {
+		page.Next = strconv.Itoa(q.Offset + len(os))
+	}
+	return page, nil
+}
+
+// FindThread returns the one open thread with the person named exactly
+// (in any case), narrowed by company and job when given. It never guesses:
+// when none or several match, the error says so and lists the candidates'
+// ids, so the agent can pick one. The candidates' companies are left out
+// of the error, since they can come from a listing.
+func FindThread(ctx context.Context, s *store.Store, person, company string, jobID int64) (int64, error) {
+	person, company = strings.TrimSpace(person), strings.TrimSpace(company)
+	if person == "" {
+		return 0, &InputError{Problems: []string{"outreach_id: give the thread's id, or the person it's with (list_outreach finds ids)"}}
+	}
+	os, err := s.OpenThreads(ctx, person, company, jobID)
+	if err != nil {
+		return 0, err
+	}
+	switch len(os) {
+	case 1:
+		return os[0].ID, nil
+	case 0:
+		return 0, &InputError{Problems: []string{"person: no open outreach thread matches; check the name with list_outreach, and reopen a closed thread by its outreach_id"}}
+	}
+	ids := make([]string, 0, len(os))
+	for _, o := range os {
+		c := fmt.Sprintf("%d (sent %s", o.ID, o.SentAt.Format("2006-01-02"))
+		if o.JobID != 0 {
+			c += fmt.Sprintf(", job %d", o.JobID)
+		}
+		ids = append(ids, c+")")
+	}
+	return 0, &InputError{Problems: []string{fmt.Sprintf("person: %d open threads match, so nothing was changed; pass outreach_id, one of %s (list_outreach shows them)",
+		len(os), strings.Join(ids, ", "))}}
 }
 
 // TrackerViews are the views get_tracker offers.
