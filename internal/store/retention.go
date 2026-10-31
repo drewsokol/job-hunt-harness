@@ -60,6 +60,7 @@ func (s *Store) Prune(ctx context.Context) (PruneOutcome, error) {
 			WHERE closed_at IS NOT NULL AND closed_at < ? AND status IN ('new', 'filtered_out', 'unscreened') AND notes = ''
 			  AND NOT EXISTS (SELECT 1 FROM screenings s WHERE s.job_id = j.id)
 			  AND NOT EXISTS (SELECT 1 FROM outreach o WHERE o.job_id = j.id)
+			  AND NOT EXISTS (SELECT 1 FROM interviews i WHERE i.job_id = j.id)
 			  AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.evidence_job_id = j.id)`, cutoff)
 		if err != nil {
 			return err

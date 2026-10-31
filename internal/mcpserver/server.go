@@ -15,7 +15,7 @@ import (
 
 // instructions is sent to every client on connect. Many clients pass it to
 // the model even when they ignore MCP prompts.
-const instructions = `jhh (Job Hunt Harness) is a local job search tool. It fetches jobs from public company job boards, The Muse, Himalayas and Hacker News's monthly "Who is hiring?" threads, filters them with rules, and tracks applications and outreach. You, the agent, do the judgment: interviewing the user, writing their profile and filters, and screening jobs for fit.
+const instructions = `jhh (Job Hunt Harness) is a local job search tool. It fetches jobs from public company job boards, The Muse, Himalayas and Hacker News's monthly "Who is hiring?" threads, filters them with rules, and tracks applications, outreach and interviews. You, the agent, do the judgment: interviewing the user, writing their profile and filters, and screening jobs for fit.
 
 All times sent to or returned by jhh are UTC (RFC 3339, for example 2026-10-18T14:00:00Z). Convert the user's local times to UTC before calling a tool.
 
@@ -57,6 +57,7 @@ func New(d Deps) *mcp.Server {
 	t.addJobTools(s)
 	t.addManageTools(s)
 	t.addTrackerTools(s)
+	t.addInterviewTools(s)
 	t.addMailTools(s)
 	t.addDashboardTools(s)
 	t.addPlaybooks(s)

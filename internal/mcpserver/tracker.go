@@ -209,7 +209,7 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 	})
 
 	type trackerIn struct {
-		View string `json:"view,omitempty" jsonschema:"summary (the default), applied, followups_due or stale"`
+		View string `json:"view,omitempty" jsonschema:"summary (the default), applied, followups_due, stale or upcoming_interviews"`
 	}
 	add(t, s, "get_tracker", reads, func(ctx context.Context, _ call, in trackerIn) (any, error) {
 		v, err := core.Tracker(ctx, t.Store, in.View)
@@ -233,16 +233,25 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 				InboundLast30 int                       `json:"inbound_last_30_days"`
 				Unanswered    int                       `json:"unanswered_inbound"`
 				Declined      map[string]int            `json:"declined_by_reason"`
+				Soon          int                       `json:"interviews_next_7_days"`
+				Pending       int                       `json:"interviews_awaiting_outcome"`
 			}{sm.Unscreened, sm.ToReview, sm.Applications, sm.AppliedLast7, sm.Interviewing, sm.Offers,
 				sm.FollowUpsDue, sm.OpenFlags, sm.SuspectFeeds, timeOrEmpty(sm.LastRefreshAt), sm.Outreach.ByDirection,
-				sm.Outreach.InboundLast7, sm.Outreach.InboundLast30, sm.Outreach.Unanswered, sm.Outreach.DeclinedByReason}, nil
+				sm.Outreach.InboundLast7, sm.Outreach.InboundLast30, sm.Outreach.Unanswered, sm.Outreach.DeclinedByReason,
+				v.InterviewsSoon, v.InterviewsPending}, nil
+		}
+		if in.View == "upcoming_interviews" {
+			return struct {
+				Interviews []interviewOut `json:"interviews"`
+			}{interviews(v.Interviews, true)}, nil
 		}
 		return struct {
-			Jobs          []jobOut      `json:"jobs,omitempty"`
-			JobsTotal     int           `json:"jobs_total,omitempty"`
-			Outreach      []outreachOut `json:"outreach,omitempty"`
-			OutreachTotal int           `json:"outreach_total,omitempty"`
-		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal}, nil
+			Jobs          []jobOut       `json:"jobs,omitempty"`
+			JobsTotal     int            `json:"jobs_total,omitempty"`
+			Outreach      []outreachOut  `json:"outreach,omitempty"`
+			OutreachTotal int            `json:"outreach_total,omitempty"`
+			Interviews    []interviewOut `json:"interviews,omitempty"`
+		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, interviews(v.Interviews, true)}, nil
 	})
 
 	type whatsNewIn struct {

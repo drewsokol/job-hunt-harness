@@ -31,10 +31,6 @@ func (s *Store) HandledMessages(ctx context.Context, system string, ids []string
 	return handledMessages(ctx, s.db, system, ids)
 }
 
-type rowsQuerier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
 func handledMessages(ctx context.Context, q rowsQuerier, system string, ids []string) ([]HandledMessage, error) {
 	if len(ids) == 0 {
 		return nil, nil

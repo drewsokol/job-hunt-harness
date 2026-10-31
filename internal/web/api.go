@@ -389,6 +389,7 @@ type jobJSON struct {
 	OpenFlags          []string           `json:"open_flags,omitempty"`
 	Prefilter          []prefilter.Reason `json:"prefilter,omitempty"`
 	Notes              string             `json:"notes,omitempty"`
+	NextInterview      *interviewJSON     `json:"next_interview,omitempty"`
 }
 
 // asker computes suggested asks for a page of jobs.
@@ -456,6 +457,10 @@ func (s *server) listJobs(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		jobs = append(jobs, a.job(row))
 	}
+	if err := s.withNextInterviews(r.Context(), jobs); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, struct {
 		Total int       `json:"total"`
 		Jobs  []jobJSON `json:"jobs"`
@@ -468,6 +473,7 @@ type jobDetailJSON struct {
 	Postings    []postingJSON   `json:"postings"`
 	Screenings  []screeningJSON `json:"screenings"`
 	ContentFlag []flagJSON      `json:"content_flags"`
+	Interviews  []interviewJSON `json:"interviews"`
 	Refs        []refJSON       `json:"refs"`
 	Events      []eventJSON     `json:"events"`
 }
@@ -552,6 +558,10 @@ func (s *server) getJob(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, e := range d.Events {
 		out.Events = append(out.Events, eventJSON{Kind: e.Kind, At: timeText(e.At), Actor: string(e.Actor), Data: e.Data})
+	}
+	if out.Interviews, err = s.jobInterviews(r.Context(), id); err != nil {
+		s.fail(w, r, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
