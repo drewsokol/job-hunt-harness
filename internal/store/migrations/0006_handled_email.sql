@@ -1,4 +1,4 @@
--- 0005: email the agent has handled (docs/design.md, "Email the agent has
+-- 0006: email the agent has handled (docs/design.md, "Email the agent has
 -- handled"). jhh keeps ids, links and the agent's one-line note of what it
 -- did: never a message's text, subject or addresses.
 
