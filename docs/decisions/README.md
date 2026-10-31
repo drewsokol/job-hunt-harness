@@ -15,3 +15,4 @@ Add a new numbered file for each decision. Don't rewrite old records: when a dec
 | [0007](0007-source-settings.md) | Sources are turned on and set up per source, not in the filters; keys are entered only in the dashboard | Accepted; keys set aside by 0008, restored as optional by 0009 |
 | [0008](0008-free-sources-only.md) | Ship only sources that are free to use; drop Adzuna and the planned key storage | Accepted; key storage superseded by 0009 |
 | [0009](0009-optional-keys.md) | A free source may take an optional key, entered only in the dashboard (Himalayas) | Accepted |
+| [0010](0010-fewer-tools.md) | One tool per kind of record, not one per verb; stay under 35 tools | Accepted |
