@@ -293,6 +293,17 @@ City duplicates are common, but so are separate openings with the same title, an
 
 Grouping is a link between rows, not a merge, so **merge** and **split** are available as UI actions and tool actions to fix mistakes. Openings that have the same title but a different description are separate jobs, shown together in one row in the UI ("2 openings with this title") to keep the list short. All of this replaces `also_ids` and `seen.json`.
 
+### Applications made elsewhere
+
+Some applications happen outside jhh: one-click applies on a job site, or roles applied to before jhh was set up. When a reply or a rejection arrives for one, it needs a job to land on. `add_jobs` already adds a job from what the agent read; it now also records where the user stands with it, so no new tool is needed.
+
+- **`add_jobs` takes `status` and `applied_at` on each job.** `status` is one of `applied`, `interviewing`, `offer`, `rejected` or `withdrawn`; `applied_at` defaults to now and, as everywhere, is UTC. Such a job is stored with `origin = external` and goes straight to that status, so it never waits in `unscreened`. The prefilter still records its reasons, without moving it, as for any agent's job. Without `status`, `add_jobs` works as before.
+- **Dedupe first.** The ladder runs as usual (posting ID, opening ID, canonical URL, fingerprint). With no link and no description to fingerprint, as is common for an old application, a job at the same company (its name key) with the same normalized title is taken as the same job. That is exact after normalizing ("Sr." and "Senior" match; a different title doesn't), never a fuzzy guess; a near miss becomes a new job, which `merge_jobs` can join if it was the same role. A matched job moves to the given status, with `applied_at` set if it had none, and the result says it matched.
+- **The status change is recorded** like any `update_application`: an event with the agent's name, so the job's timeline shows the application, and later the rejection, interview or offer.
+- **Untrusted:** the title and company the agent gives are treated as listing text, as for any `add_jobs` job.
+- **Retention:** these jobs have a status the user set, so the rule that deletes closed jobs nobody touched never applies to them.
+- **The dashboard** shows them in Applied or Archive like any other application, marked "applied elsewhere".
+
 ### Refresh
 
 - Fetches companies concurrently (8 at a time, using `errgroup` with a limit), with a 30-second timeout per request and a User-Agent of `job-hunt-harness/<version> (+repo URL)`.
