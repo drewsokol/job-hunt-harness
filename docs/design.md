@@ -523,6 +523,29 @@ ui_tokens      hash (SHA-256 of the token), kind(login|session), created_at, exp
 
 The **suggested ask** is `min + ask_percentile × (max − min)` of the job's yearly pay range, rounded to $5k. It is shown only when the currency matches the pay floor's and exactly one such range is posted: with one range per location, picking one would be a guess. The original tracker hard-coded 85%; it is now the `ask_percentile` setting (default 0.85).
 
+### Interviews
+
+Interview details used to live in a job's notes, where nothing could list what's coming up. An interview is now a record of its own:
+
+```
+interviews  id, job_id NULL, outreach_id NULL (at least one is set),
+            stage(recruiter_screen|hiring_manager|technical|system_design|panel|product|final|other),
+            scheduled_at, duration_minutes NULL, interviewers_json ([{name, role}]),
+            medium(video|phone|onsite|other), joining (link, meeting id, passcode, or address, as text),
+            status(scheduled|completed|cancelled|no_show), outcome(pending|advanced|rejected|offer),
+            next_step_at NULL, prep_notes, debrief_notes, recorded, recording_tool,
+            created_*, updated_*
+```
+
+- **One tool, `save_interview`** ([decision 0010](decisions/0010-fewer-tools.md)). Without `interview_id` it logs an interview, which needs `stage`, `scheduled_at` and a `job_id` or `outreach_id` (a recruiter screen can come before there's a job). With `interview_id` it changes one. Every change writes an event, with the job and thread, naming the fields changed; the event records old and new times for a reschedule, but never the `joining` text or the notes.
+- **Rescheduling is a new `scheduled_at`**, not a status, so the interview keeps one record and its history shows the moves. `cancelled` and `no_show` end it; `completed` is set after it happens, with `outcome` (`pending` until the user hears back).
+- **Logging an interview moves the job to `interviewing`** when the job is in `review` or `applied` (or earlier), with the event naming the interview. A job already `interviewing` or `offer` stays; a `rejected` or `withdrawn` job doesn't move, and the result says so. Nothing else is automatic: an interview's outcome never changes the job's status. Ending the process stays the user's call, through `update_application`.
+- **`next_step_at`** is when the user expects to hear ("a decision by Monday"), and `get_tracker`'s `followups_due` view lists completed interviews whose `next_step_at` has passed with the outcome still `pending`.
+- **Finding them:** `get_job` lists a job's interviews, with ids, newest first. `get_tracker` gains the view `upcoming_interviews`: scheduled interviews in the next 14 days, soonest first, each with its job, stage, time, interviewers and `joining`. The summary counts interviews in the next 7 days and completed ones still pending. "What interviews do I have this week, with links?" is one call.
+- **Untrusted:** a job's title and company come inside `untrusted` as everywhere else. Interviewers, `joining` and the notes are the agent's record of what the user or an email said, like outreach notes, and are returned as is. The `joining` text can hold a meeting passcode, so it is never logged or written to an event.
+- **The dashboard** shows a job's next interview on its row in Applied, and the job's interviews, with their joining details, in its detail. Interviews are logged by the agent; the dashboard only shows them for now.
+- **Pay to compare offers** waits until there are offers to compare (see the roadmap). Until then a job's listing pay and the pay a recruiter mentioned on its threads (see "Inbound outreach") are both in `get_job`.
+
 ## 5. MCP surface
 
 ### Tools
