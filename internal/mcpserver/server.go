@@ -59,6 +59,7 @@ func New(d Deps) *mcp.Server {
 	t.addTrackerTools(s)
 	t.addInterviewTools(s)
 	t.addMailTools(s)
+	t.addContactTools(s)
 	t.addDashboardTools(s)
 	t.addPlaybooks(s)
 	return s

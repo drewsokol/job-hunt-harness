@@ -81,17 +81,17 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 		Person        string  `json:"person,omitempty" jsonschema:"new thread: who the user is talking to"`
 		Direction     string  `json:"direction,omitempty" jsonschema:"inbound (they wrote first) or outbound (the user did); required on a new thread"`
 		Channel       string  `json:"channel,omitempty" jsonschema:"new thread: linkedin_inmail, linkedin_message, linkedin_connection, email, job_site, phone, referral, event or other"`
-		Company       string  `json:"company,omitempty" jsonschema:"new thread: who the person works for (a recruiter's agency); default: the job's company"`
+		Company       string  `json:"company,omitempty" jsonschema:"new thread: who the person works for; default: the job's company"`
 		JobID         int64   `json:"job_id,omitempty" jsonschema:"the job it's about; a change can set it once the role is known"`
 		Role          string  `json:"role,omitempty" jsonschema:"new thread: the person's job title"`
-		SentAt        string  `json:"sent_at,omitempty" jsonschema:"new thread: when it started, whoever wrote; UTC, RFC 3339; default now"`
+		SentAt        string  `json:"sent_at,omitempty" jsonschema:"new thread: when it started; UTC, RFC 3339; default now"`
 		NoFollowUp    bool    `json:"no_follow_up,omitempty" jsonschema:"new thread: no follow-up date"`
-		Status        string  `json:"status,omitempty" jsonschema:"received, sent, accepted, replied, scheduled, no_reply, declined or closed; a new thread's default is received (inbound) or sent (outbound)"`
-		FollowUpAt    string  `json:"follow_up_at,omitempty" jsonschema:"UTC, RFC 3339; a new outbound thread's default is a week after sent_at, an inbound one has none"`
+		Status        string  `json:"status,omitempty" jsonschema:"received, sent, accepted, replied, scheduled, no_reply, declined or closed"`
+		FollowUpAt    string  `json:"follow_up_at,omitempty" jsonschema:"UTC, RFC 3339"`
 		ClearFollowUp bool    `json:"clear_follow_up,omitempty" jsonschema:"change: remove the follow-up date"`
 		Note          string  `json:"note,omitempty" jsonschema:"a new thread's note, or a line added to it"`
-		ClientCompany string  `json:"client_company,omitempty" jsonschema:"the employer an agency recruiter is hiring for, as they said, or undisclosed"`
-		PayMin        float64 `json:"pay_min,omitempty" jsonschema:"pay the person stated, never an estimate; any pay field replaces the thread's pay"`
+		ClientCompany string  `json:"client_company,omitempty" jsonschema:"an agency recruiter's employer, or undisclosed"`
+		PayMin        float64 `json:"pay_min,omitempty" jsonschema:"any pay field replaces the thread's pay"`
 		PayMax        float64 `json:"pay_max,omitempty"`
 		PayCurrency   string  `json:"pay_currency,omitempty" jsonschema:"ISO code such as USD; needed with an amount"`
 		PayPeriod     string  `json:"pay_period,omitempty" jsonschema:"year (the default) or hour"`
@@ -255,7 +255,9 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			Outreach      []outreachOut  `json:"outreach,omitempty"`
 			OutreachTotal int            `json:"outreach_total,omitempty"`
 			Interviews    []interviewOut `json:"interviews,omitempty"`
-		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, ivs}, nil
+			Contacts      []contactOut   `json:"contacts_to_re_engage,omitempty"`
+			ContactsTotal int            `json:"contacts_to_re_engage_total,omitempty"`
+		}{jobs(v.Jobs), v.JobsTotal, outreach(v.Outreach), v.OutreachTotal, ivs, contacts(v.Contacts, true), v.ContactsTotal}, nil
 	})
 
 	type whatsNewIn struct {
@@ -277,13 +279,14 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			NewJobsTotal        int           `json:"new_jobs_total"`
 			FollowUpsDue        []outreachOut `json:"follow_ups_due"`
 			FollowUpsTotal      int           `json:"follow_ups_due_total"`
+			ReEngageDue         int           `json:"contacts_to_re_engage"`
 			Unanswered          int           `json:"unanswered_inbound"`
 			ChangedApplications []jobOut      `json:"applications_closed_or_reposted"`
 			OpenFlags           int           `json:"content_flags_to_review"`
 			Suspect             []companyRef  `json:"suspect_feeds"`
 			Paused              []string      `json:"search_sources_off,omitempty"`
 			LastRefresh         string        `json:"last_refresh,omitempty"`
-		}{timeOrEmpty(r.Since), timeOrEmpty(r.Now), jobs(r.NewJobs), r.NewJobsTotal, outreach(r.FollowUpsDue), r.FollowUpsTotal, r.UnansweredInbound,
+		}{timeOrEmpty(r.Since), timeOrEmpty(r.Now), jobs(r.NewJobs), r.NewJobsTotal, outreach(r.FollowUpsDue), r.FollowUpsTotal, r.ReEngageDue, r.UnansweredInbound,
 			jobs(r.ChangedApplications), r.OpenFlags, suspect, r.PausedSearches, timeOrEmpty(r.LastRefreshAt)}, nil
 	})
 }

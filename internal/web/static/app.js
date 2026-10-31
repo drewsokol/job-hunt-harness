@@ -860,6 +860,35 @@ async function updateOutreach(o, patch, msg, back) {
   reload();
 }
 
+const WARMTH = { cold: "Cold", warm: "Warm", advocate: "Advocate" };
+const ORG_TYPE = { agency: "Agency", employer: "Employer", other: "Other" };
+
+// contactLine shows what jhh knows about a contact beyond the thread: how
+// warm they are, who they are to the user, how to reach them, and tags.
+function contactLine(c) {
+  if (!c) return null;
+  const url = safeURL(c.profile_url || "");
+  const parts = [
+    c.warmth ? pill(c.warmth === "advocate" ? "st-ok" : c.warmth === "warm" ? "st-applied" : "st-idle", WARMTH[c.warmth] || c.warmth) : null,
+    c.org_type ? h("span", null, ORG_TYPE[c.org_type] || c.org_type) : null,
+    c.relationship ? h("span", null, c.relationship.replaceAll("_", " ")) : null,
+    c.email ? h("span", { class: "mono" }, c.email) : null,
+    c.phone ? h("span", { class: "mono" }, c.phone) : null,
+    url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, "Profile") : null,
+    ...(c.tags || []).map((t) => h("span", { class: "tag" }, `#${t}`)),
+  ].filter(Boolean);
+  return parts.length ? h("div", { class: "meta" }, parts) : null;
+}
+
+function reEngageRow(c) {
+  return h("li", null, h("span", { class: "company" }, c.name),
+    h("span", null, [c.role, c.company].filter(Boolean).join(", ")),
+    h("span", { class: "meta" }, `get back in touch since ${fmtDate(c.re_engage_after)}`,
+      c.last_thread_at ? ` · last in touch ${fmtDate(c.last_thread_at)}` : ""),
+    contactLine(c),
+    c.why ? h("p", { class: "reason" }, c.why) : null);
+}
+
 function outreachRow(o) {
   const cls = ["replied", "accepted", "scheduled"].includes(o.status) ? "st-ok" : ["no_reply", "declined", "closed"].includes(o.status) ? "st-idle"
     : o.status === "received" ? "st-warn" : "st-applied";
@@ -874,6 +903,7 @@ function outreachRow(o) {
       h("div", { class: "meta" }, h("span", null, o.direction === "inbound" ? "They wrote first" : "You wrote first"),
         h("span", null, channelName(o.channel)), h("span", { class: "mono" }, fmtDate(o.sent)),
         o.job_id ? h("span", null, `#${o.job_id} ${o.job_title}`) : null),
+      contactLine(o.contact_id && state.outreach.contacts ? state.outreach.contacts[o.contact_id] : null),
       o.pay ? h("p", { class: "reason" }, `Pay mentioned: ${payText(o.pay)}`) : null,
       declined ? h("p", { class: "reason" }, `Declined: ${declined}`) : null,
       o.note ? h("p", { class: "reason mynote" }, o.note) : null,
@@ -913,10 +943,14 @@ function viewOutreach() {
     h("button", { class: "chip", type: "button", "aria-pressed": String(state.outDir === k), onclick: () => { state.outDir = k; render(); } }, label));
   const toolbar = h("div", { class: "toolbar" }, h("div", { class: "chips" }, chips),
     h("button", { class: "btn primary", type: "button", onclick: () => toggleForm("outreach") }, state.form === "outreach" ? "Close" : "Log outreach"));
+  const dueContacts = (state.outreach && state.outreach.contacts_due) || [];
+  const reEngage = dueContacts.length ? h("section", { class: "panel" }, h("h2", null, `Get back in touch · ${dueContacts.length}`),
+    h("p", { class: "hint" }, "People whose date to get back in touch has come. Your agent sets it with save_contact."),
+    h("ul", { class: "memories" }, dueContacts.map(reEngageRow))) : null;
   if (!items.length && all.length) {
-    return [toolbar, state.form === "outreach" ? outreachForm() : null, empty("No threads this way", "Try another filter above.")].filter(Boolean);
+    return [toolbar, state.form === "outreach" ? outreachForm() : null, reEngage, empty("No threads this way", "Try another filter above.")].filter(Boolean);
   }
-  return [toolbar, state.form === "outreach" ? outreachForm() : null,
+  return [toolbar, state.form === "outreach" ? outreachForm() : null, reEngage,
     items.length ? h("div", { class: "list" }, items.map(outreachRow))
       : empty("No outreach logged", "Log a message you sent or a recruiter who wrote to you, or tell your agent about it.")].filter(Boolean);
 }

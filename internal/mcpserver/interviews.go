@@ -77,10 +77,10 @@ func (t *tools) withRefs(ctx context.Context, out []interviewOut) ([]interviewOu
 func (t *tools) addInterviewTools(s *mcp.Server) {
 	type saveIn struct {
 		InterviewID     int64               `json:"interview_id,omitempty" jsonschema:"an interview to change; leave out to log a new one"`
-		JobID           int64               `json:"job_id,omitempty" jsonschema:"the job it's for; a new interview needs job_id, outreach_id or both"`
+		JobID           int64               `json:"job_id,omitempty" jsonschema:"the job it's for"`
 		OutreachID      int64               `json:"outreach_id,omitempty" jsonschema:"the outreach thread it came from"`
 		Stage           string              `json:"stage,omitempty" jsonschema:"new interview: recruiter_screen, hiring_manager, technical, system_design, panel, product, final or other"`
-		ScheduledAt     string              `json:"scheduled_at,omitempty" jsonschema:"new interview: when it starts, UTC, RFC 3339; a new time reschedules it"`
+		ScheduledAt     string              `json:"scheduled_at,omitempty" jsonschema:"when it starts, UTC, RFC 3339"`
 		DurationMinutes int                 `json:"duration_minutes,omitempty"`
 		Interviewers    []store.Interviewer `json:"interviewers,omitempty" jsonschema:"who the user meets, as name and role; replaces the list"`
 		Medium          string              `json:"medium,omitempty" jsonschema:"video, phone, onsite or other (the default)"`

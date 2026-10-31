@@ -349,6 +349,9 @@ type TrackerView struct {
 	JobsTotal     int
 	Outreach      []store.Outreach
 	OutreachTotal int
+	// Contacts are those due to get back in touch with (followups_due).
+	Contacts      []store.Contact
+	ContactsTotal int
 	// Interviews are upcoming, or, for followups_due, completed ones
 	// still pending after their next step was expected.
 	Interviews []store.Interview
@@ -379,6 +382,9 @@ func Tracker(ctx context.Context, s *store.Store, view string) (TrackerView, err
 		if err == nil {
 			v.Interviews, err = s.ListInterviews(ctx, store.InterviewQuery{NextStepBy: now, Limit: trackerPage})
 		}
+		if err == nil {
+			v.Contacts, v.ContactsTotal, err = s.ListContacts(ctx, store.ContactQuery{ReEngageDueBy: now, Limit: trackerPage})
+		}
 	case "upcoming_interviews":
 		v.Interviews, err = s.ListInterviews(ctx, store.InterviewQuery{Status: "scheduled", From: now, To: now.Add(UpcomingInterviews),
 			SoonestFirst: true, Limit: trackerPage})
@@ -400,6 +406,7 @@ type WhatsNewReport struct {
 	NewJobsTotal        int
 	FollowUpsDue        []store.Outreach
 	FollowUpsTotal      int
+	ReEngageDue         int            // contacts whose date to get back in touch has come
 	UnansweredInbound   int            // inbound threads still received
 	ChangedApplications []store.JobRow // closed or reposted
 	OpenFlags           int
@@ -432,6 +439,9 @@ func WhatsNew(ctx context.Context, s *store.Store, by store.Actor, since string)
 		return r, err
 	}
 	if r.FollowUpsDue, r.FollowUpsTotal, err = s.ListOutreach(ctx, store.OutreachQuery{DueBy: r.Now, Limit: whatsNewPage}); err != nil {
+		return r, err
+	}
+	if _, r.ReEngageDue, err = s.ListContacts(ctx, store.ContactQuery{ReEngageDueBy: r.Now}); err != nil {
 		return r, err
 	}
 	if r.ChangedApplications, _, err = s.ChangedApplications(ctx, r.Since, trackerPage); err != nil {

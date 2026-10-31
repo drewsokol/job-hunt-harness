@@ -337,6 +337,7 @@ func (s *Store) UpdateOutreach(ctx context.Context, by Actor, id int64, c Outrea
 // match.
 type OutreachQuery struct {
 	ID           int64
+	ContactID    int64
 	Statuses     []string
 	Person       string // part of the contact's name, in any case
 	Company      string // part of the contact's company, in any case
@@ -366,6 +367,9 @@ func (s *Store) ListOutreach(ctx context.Context, q OutreachQuery) ([]Outreach, 
 	}
 	if q.ID != 0 {
 		where, args = append(where, "o.id = ?"), append(args, q.ID)
+	}
+	if q.ContactID != 0 {
+		where, args = append(where, "o.contact_id = ?"), append(args, q.ContactID)
 	}
 	if len(q.Statuses) > 0 {
 		where = append(where, "o.status IN ("+strings.TrimSuffix(strings.Repeat("?, ", len(q.Statuses)), ", ")+")")
