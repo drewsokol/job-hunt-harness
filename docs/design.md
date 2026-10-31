@@ -646,6 +646,29 @@ The server also sends a short `instructions` string when an MCP client connects:
 
 `jhh://profile` (markdown), `jhh://memories` and `jhh://filters` (JSON). Support for resources varies between MCP clients, so everything in them is also available through `get_context`.
 
+### Email the agent has handled
+
+An agent with email access reads recruiters' messages, replies and rejections, and records them in jhh. It can't tell which messages it already handled once they leave the inbox, for example when a mail rule files them under a label, so a scan either misses mail or handles it twice. jhh keeps two small records for this. It holds **only ids, links and the agent's one-line note** of what it did: never a message's text, subject or addresses.
+
+```
+handled_messages  system, message_id (PRIMARY KEY together), action, job_id NULL, outreach_id NULL,
+                  interview_id NULL, handled_at, handled_by
+mail_checks       system PK, checked_through, updated_at, updated_by
+external_refs     id, job_id NULL, outreach_id NULL, interview_id NULL (exactly one is set),
+                  system, ref, url NULL, created_*
+```
+
+- **`system`** names where the mail lives, as a short word (`gmail`, `outlook`, `other`). `message_id` is that system's id for one message, not its thread: a thread gains messages, and each new one still needs handling.
+- **One tool, `handled_messages(system, check?, mark?, checked_through?)`** ([decision 0010](decisions/0010-fewer-tools.md)):
+  - `check`: up to 100 message ids. Returns the ones already handled, each with its action, the job, thread or interview it touched, and when.
+  - `mark`: up to 100 `{message_id, action, job_id?, outreach_id?, interview_id?}`. `action` is a short phrase (at most 200 characters), such as "logged an inbound thread" or "marked the job rejected". Marking a message twice keeps the first record and says so.
+  - `checked_through`: the time the agent has read everything up to, for this system. Every call returns the stored one, so the next scan can search from there.
+
+  "Has this email already been handled?" is one call. The agent's playbooks say to check a batch before acting on it and mark each message after.
+- **Links to email threads:** `save_outreach`, `save_interview` and `update_application` take `add_refs: [{system, ref, url?}]` and `remove_refs: [id]`, so a thread, an interview or an application can point at the email thread about it. `ref` is the system's id, and `url` an `https` link to open it, checked as such; the dashboard shows it as a link and nothing fetches it. `get_job`, one thread from `list_outreach`, and interviews return their refs with ids.
+- **Untrusted:** ids and links are the agent's record, returned as is. Since they come from mail written by others, the dashboard only ever shows them as text and links, never as markup.
+- **Retention:** these rows are tiny, and they're kept as long as the jobs and threads they point to. A message whose job was deleted keeps its row, since it was still handled.
+
 ## 6. Web UI
 
 The UI is a window onto the data the agent works with, not a separate app. It is there to read and triage, make quick edits, watch the agent work, and undo changes. Anything that involves judgment (screening, writing the profile, tuning filters) is done by asking the agent. Where it helps, the UI shows the phrase to say, for example an empty To review tab reads: "Ask your agent: screen new jobs".
