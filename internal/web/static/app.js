@@ -30,6 +30,7 @@ const EVENTS = {
   outreach_updated: "Outreach updated", injection_reported: "Text aimed at an AI reported", content_flag_reviewed: "Content flag reviewed",
   job_merged: "Merged into another job", jobs_merged_in: "Other jobs merged in", job_unmerged: "Merge undone",
   job_split: "Postings split off", job_split_off: "Split off from another job", posting_closed: "Posting closed",
+  refs_changed: "Email links changed",
 };
 
 const state = {
@@ -546,6 +547,14 @@ function detailsEl(j) {
         const url = safeURL(p.url);
         return h("li", null, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, titleText(p)) : titleText(p),
           p.location ? ` · ${p.location}` : "", ` · ${p.source}`, p.closed ? ` · closed ${fmtDate(p.closed)}` : "");
+      })));
+  }
+  if (d.refs && d.refs.length) {
+    el.append(h("span", { class: "label" }, "Email"),
+      h("ul", { class: "postings" }, d.refs.map((r) => {
+        const url = safeURL(r.url);
+        const text = `${r.system}: ${r.ref}`;
+        return h("li", null, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, text) : text);
       })));
   }
   el.append(h("label", { class: "notes-box" }, "Your notes",

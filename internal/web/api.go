@@ -468,7 +468,16 @@ type jobDetailJSON struct {
 	Postings    []postingJSON   `json:"postings"`
 	Screenings  []screeningJSON `json:"screenings"`
 	ContentFlag []flagJSON      `json:"content_flags"`
+	Refs        []refJSON       `json:"refs"`
 	Events      []eventJSON     `json:"events"`
+}
+
+// refJSON is a link to the email thread about an application. The agent
+// wrote it from mail others sent, so the page shows it as text and a link.
+type refJSON struct {
+	System string `json:"system"`
+	Ref    string `json:"ref"`
+	URL    string `json:"url,omitempty"`
 }
 
 type postingJSON struct {
@@ -522,7 +531,15 @@ func (s *server) getJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := jobDetailJSON{jobJSON: a.job(d.JobRow), Description: d.Description,
-		Postings: []postingJSON{}, Screenings: []screeningJSON{}, ContentFlag: []flagJSON{}, Events: []eventJSON{}}
+		Postings: []postingJSON{}, Screenings: []screeningJSON{}, ContentFlag: []flagJSON{}, Refs: []refJSON{}, Events: []eventJSON{}}
+	refs, err := s.Store.Refs(r.Context(), store.RefTarget{JobID: id})
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	for _, ref := range refs {
+		out.Refs = append(out.Refs, refJSON{System: ref.System, Ref: ref.Ref, URL: webURL(ref.URL)})
+	}
 	for _, p := range d.Postings {
 		out.Postings = append(out.Postings, postingJSON{ID: p.ID, Source: sources.SearchTitle(p.Source), Title: p.Title, Location: p.LocationRaw,
 			URL: webURL(p.URL), Closed: timeText(p.ClosedAt)})

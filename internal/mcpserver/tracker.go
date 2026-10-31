@@ -82,6 +82,8 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 		FollowUpAt    string  `json:"follow_up_at,omitempty" jsonschema:"UTC, RFC 3339; a new thread's default is a week after sent_at"`
 		ClearFollowUp bool    `json:"clear_follow_up,omitempty" jsonschema:"change: remove the follow-up date"`
 		Note          string  `json:"note,omitempty" jsonschema:"a new thread's note, or a line added to it"`
+		AddRefs       []refIn `json:"add_refs,omitempty" jsonschema:"links to the email threads about this thread"`
+		RemoveRefs    []int64 `json:"remove_refs,omitempty" jsonschema:"ids of links to remove"`
 	}
 	add(t, s, "save_outreach", writes, func(ctx context.Context, c call, in saveIn) (any, error) {
 		type saved struct {
@@ -92,13 +94,26 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			FollowUpAt string `json:"follow_up_at,omitempty"`
 		}
 		id := in.OutreachID
+		refs := refInputs(in.AddRefs)
+		if err := core.CheckRefs(refs, in.RemoveRefs); err != nil {
+			return nil, err
+		}
 		if id == 0 && in.Find == nil {
 			if in.Status != "" || in.ClearFollowUp {
 				return nil, &core.InputError{Problems: []string{"status: a new thread starts as sent; to change a thread, give outreach_id or find"}}
 			}
+			if len(in.RemoveRefs) > 0 {
+				return nil, &core.InputError{Problems: []string{"remove_refs: a new thread has no links yet; to change a thread, give outreach_id or find"}}
+			}
 			l, err := core.LogOutreach(ctx, t.Store, c.by, core.OutreachInput{Person: in.Person, Channel: in.Channel, Company: in.Company,
 				Role: in.Role, JobID: in.JobID, SentAt: in.SentAt, FollowUpAt: in.FollowUpAt, NoFollowUp: in.NoFollowUp, Note: in.Note})
-			return saved{l.ID, true, l.ContactID, l.NewContact, timeOrEmpty(l.FollowUpAt)}, err
+			if err != nil {
+				return nil, err
+			}
+			if err := core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{OutreachID: l.ID}, refs, nil); err != nil {
+				return nil, err
+			}
+			return saved{l.ID, true, l.ContactID, l.NewContact, timeOrEmpty(l.FollowUpAt)}, nil
 		}
 		switch {
 		case id != 0 && in.Find != nil:
@@ -111,8 +126,13 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 				return nil, err
 			}
 		}
-		if err := core.UpdateOutreach(ctx, t.Store, c.by, id, core.OutreachUpdate{
-			Status: in.Status, FollowUpAt: in.FollowUpAt, ClearFollowUp: in.ClearFollowUp, Note: in.Note}); err != nil {
+		if in.Status != "" || in.FollowUpAt != "" || in.ClearFollowUp || in.Note != "" || !core.HasRefs(refs, in.RemoveRefs) {
+			if err := core.UpdateOutreach(ctx, t.Store, c.by, id, core.OutreachUpdate{
+				Status: in.Status, FollowUpAt: in.FollowUpAt, ClearFollowUp: in.ClearFollowUp, Note: in.Note}); err != nil {
+				return nil, err
+			}
+		}
+		if err := core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{OutreachID: id}, refs, in.RemoveRefs); err != nil {
 			return nil, err
 		}
 		return saved{ID: id}, nil
@@ -139,10 +159,15 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			for _, e := range p.History {
 				history = append(history, event(e))
 			}
+			refs, err := t.Store.Refs(ctx, store.RefTarget{OutreachID: in.OutreachID})
+			if err != nil {
+				return nil, err
+			}
 			return struct {
 				outreachOut
+				Refs    []refOut   `json:"refs,omitempty"`
 				History []eventOut `json:"history"`
-			}{outreach(p.Outreach)[0], history}, nil
+			}{outreach(p.Outreach)[0], refsOut(refs), history}, nil
 		}
 		return struct {
 			Total    int           `json:"total"`

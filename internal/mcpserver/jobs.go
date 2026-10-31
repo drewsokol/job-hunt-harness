@@ -168,11 +168,17 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			Screenings []*fitOut    `json:"screening_history,omitempty"`
 			Flags      []flagOut    `json:"content_flag_details,omitempty"`
 			Outreach   []threadOut  `json:"outreach,omitempty"`
+			Refs       []refOut     `json:"refs,omitempty"`
 			Timeline   []eventOut   `json:"timeline"`
 		}{jobOut: job(d.JobRow, true), Notes: d.Notes, Postings: []postingOut{}, Timeline: []eventOut{}}
 		for _, o := range threads.Outreach {
 			out.Outreach = append(out.Outreach, threadOut{o.ID, o.Person, o.Status, timeOrEmpty(o.FollowUpAt)})
 		}
+		refs, err := t.Store.Refs(ctx, store.RefTarget{JobID: in.JobID})
+		if err != nil {
+			return nil, err
+		}
+		out.Refs = refsOut(refs)
 		for _, p := range d.Postings {
 			out.Postings = append(out.Postings, postingOut{p.ID, p.Source, p.Search, timeOrEmpty(p.FirstSeenAt), timeOrEmpty(p.ClosedAt),
 				untrustedPosting{p.Title, p.LocationRaw, p.URL}})
@@ -229,11 +235,22 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		AppliedAt  string  `json:"applied_at,omitempty" jsonschema:"UTC, RFC 3339; defaults to now when the status becomes applied"`
 		Notes      *string `json:"notes,omitempty" jsonschema:"replaces the job's notes"`
 		AppendNote string  `json:"append_note,omitempty" jsonschema:"adds a line to the notes"`
+		AddRefs    []refIn `json:"add_refs,omitempty" jsonschema:"links to the email threads about the application"`
+		RemoveRefs []int64 `json:"remove_refs,omitempty" jsonschema:"ids of links to remove"`
 	}
 	add(t, s, "update_application", writes, func(ctx context.Context, c call, in applicationIn) (any, error) {
-		return ok(core.UpdateApplication(ctx, t.Store, c.by, in.JobID, core.ApplicationInput{
-			Status: in.Status, AppliedAt: in.AppliedAt, Notes: in.Notes, AppendNote: in.AppendNote,
-		}))
+		refs := refInputs(in.AddRefs)
+		if err := core.CheckRefs(refs, in.RemoveRefs); err != nil {
+			return nil, err
+		}
+		if in.Status != "" || in.AppliedAt != "" || in.Notes != nil || in.AppendNote != "" || !core.HasRefs(refs, in.RemoveRefs) {
+			if err := core.UpdateApplication(ctx, t.Store, c.by, in.JobID, core.ApplicationInput{
+				Status: in.Status, AppliedAt: in.AppliedAt, Notes: in.Notes, AppendNote: in.AppendNote,
+			}); err != nil {
+				return nil, err
+			}
+		}
+		return ok(core.ChangeRefs(ctx, t.Store, c.by, store.RefTarget{JobID: in.JobID}, refs, in.RemoveRefs))
 	})
 
 	type agentJobIn struct {
