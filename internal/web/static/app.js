@@ -14,8 +14,11 @@ const STATUS = {
 };
 const PIPELINE = ["applied", "interviewing", "offer", "rejected", "withdrawn", "skipped", "review"];
 const FIT = { strong: "Strong fit", good: "Good fit", stretch: "Stretch", no: "Not a fit" };
-const CHANNELS = ["LinkedIn connection", "LinkedIn message", "Email", "Referral ask", "Call", "Recruiter reply"];
-const OUT_STATUS = { sent: "Sent", accepted: "Accepted", replied: "Replied", scheduled: "Scheduled", no_reply: "No reply", closed: "Closed" };
+const CHANNELS = [["linkedin_message", "LinkedIn message"], ["linkedin_inmail", "LinkedIn InMail"], ["linkedin_connection", "LinkedIn connection"],
+  ["email", "Email"], ["job_site", "Job site"], ["phone", "Phone"], ["referral", "Referral"], ["event", "Event"], ["other", "Other"]];
+const OUT_STATUS = { received: "Received", sent: "Sent", accepted: "Accepted", replied: "Replied", scheduled: "Scheduled", no_reply: "No reply", declined: "Declined", closed: "Closed" };
+const DECLINE_REASON = { contract: "Contract role", pay_below_floor: "Pay too low", hybrid_or_onsite: "Hybrid or on-site", wrong_role: "Wrong role",
+  level_too_low: "Level too low", no_details: "No details", suspicious: "Looked suspicious", other: "Other" };
 const FLAG_KIND = {
   canary: "This posting checks for AI-written applications",
   hostile: "Instructions aimed at an AI",
@@ -39,7 +42,7 @@ const state = {
   info: null, lists: {}, outreach: null, profile: null, sources: null,
   details: new Map(), open: new Set(),
   selected: 0, picked: new Set(),
-  form: null, formError: "", outreachFor: null, keyFor: null, keyError: "",
+  form: null, formError: "", outreachFor: null, keyFor: null, keyError: "", outDir: "all", declining: null,
   visited: null, askApplied: null,
   pending: false, undo: null, live: false,
 };
@@ -746,14 +749,23 @@ function outreachForm() {
   return h("form", { class: "panel", onsubmit: submitOutreach },
     h("h2", null, "Log outreach"),
     h("div", { class: "form-grid" },
+      // Who wrote first decides the default: the user follows up on their own messages, and answers inbound ones.
+      field("Who wrote first", { tag: "select", name: "direction", required: true,
+        onchange: (e) => { const f = e.target.form.elements.follow_up; f.value = e.target.value === "outbound" ? plusDays(7) : ""; },
+        options: [h("option", { value: "outbound" }, "I did"), h("option", { value: "inbound" }, "They did")] }),
       field("Person", { name: "person", required: true }),
       field("Their role", { name: "role", placeholder: "Hiring manager, recruiter…" }),
-      field("Company", { name: "company", value: pre ? pre.company : "", placeholder: "Taken from the role if empty" }),
-      field("Channel", { tag: "select", name: "channel", options: CHANNELS.map((c) => h("option", { value: c.toLowerCase() }, c)) }),
-      field("Sent on", { name: "sent", type: "date", value: today(), max: today() }),
+      field("Company", { name: "company", value: pre ? pre.company : "", placeholder: "Their employer or agency; the role's if empty" }),
+      field("Hiring for", { name: "client_company", placeholder: "An agency's client, or undisclosed" }),
+      field("Channel", { tag: "select", name: "channel", options: CHANNELS.map(([v, label]) => h("option", { value: v }, label)) }),
+      field("Started on", { name: "sent", type: "date", value: today(), max: today() }),
       field("Follow up on", { name: "follow_up", type: "date", value: plusDays(7) }),
+      field("Pay they mentioned, from", { name: "pay_min", type: "number", min: "0", step: "any", placeholder: "120000" }),
+      field("to", { name: "pay_max", type: "number", min: "0", step: "any" }),
+      field("Currency", { name: "pay_currency", value: "USD", maxlength: "3", placeholder: "USD" }),
+      field("Per", { tag: "select", name: "pay_period", options: [h("option", { value: "year" }, "Year"), h("option", { value: "hour" }, "Hour")] }),
       field("Related role", { tag: "select", name: "job_id", options: jobOpts }, true),
-      field("Note", { tag: "textarea", name: "note", rows: "2", placeholder: "What you sent or asked for" }, true)),
+      field("Note", { tag: "textarea", name: "note", rows: "2", placeholder: "What was said or asked for" }, true)),
     state.formError ? h("p", { class: "form-error" }, state.formError) : null,
     h("div", { class: "form-actions" },
       h("button", { class: "btn quiet", type: "button", onclick: () => toggleForm("outreach") }, "Cancel"),
@@ -763,8 +775,12 @@ function outreachForm() {
 async function submitOutreach(e) {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(e.target).entries());
-  const body = { person: f.person, role: f.role, company: f.company, channel: f.channel, note: f.note,
-    job_id: f.job_id ? Number(f.job_id) : 0, sent_at: f.sent ? dayToUTC(f.sent) : "", follow_up_at: f.follow_up ? dayToUTC(f.follow_up) : "" };
+  const body = { person: f.person, role: f.role, company: f.company, channel: f.channel, note: f.note, direction: f.direction,
+    client_company: f.client_company, job_id: f.job_id ? Number(f.job_id) : 0, sent_at: f.sent ? dayToUTC(f.sent) : "",
+    follow_up_at: f.follow_up ? dayToUTC(f.follow_up) : "" };
+  if (f.pay_min || f.pay_max) {
+    body.pay = { min: Number(f.pay_min) || 0, max: Number(f.pay_max) || 0, currency: f.pay_currency, period: f.pay_period };
+  }
   try {
     await api("POST", "/api/outreach", body);
     state.form = null;
@@ -783,7 +799,19 @@ async function submitOutreach(e) {
 // channelName shows a channel as the form lists it ("LinkedIn message");
 // agents can log others, which are shown as they wrote them.
 function channelName(c) {
-  return CHANNELS.find((name) => name.toLowerCase() === c) || c[0].toUpperCase() + c.slice(1);
+  const known = CHANNELS.find(([v]) => v === c);
+  if (known) return known[1];
+  const s = c.replace(/_/g, " ");
+  return s[0].toUpperCase() + s.slice(1);
+}
+
+// payText shows pay a person mentioned: "USD 120,000–150,000 a year".
+function payText(p) {
+  if (!p) return "";
+  const n = (v) => v.toLocaleString();
+  const range = p.min && p.max ? `${n(p.min)}–${n(p.max)}` : p.min ? `from ${n(p.min)}` : p.max ? `up to ${n(p.max)}` : "";
+  const amount = range ? `${p.currency} ${range} a${p.period === "hour" ? "n hour" : " year"}` : "";
+  return [amount, p.note].filter(Boolean).join("; ");
 }
 
 const waiting = (o) => o.status === "sent" || o.status === "accepted";
@@ -798,33 +826,64 @@ async function updateOutreach(o, patch, msg, back) {
 }
 
 function outreachRow(o) {
-  const cls = ["replied", "accepted", "scheduled"].includes(o.status) ? "st-ok" : ["no_reply", "closed"].includes(o.status) ? "st-idle" : "st-applied";
+  const cls = ["replied", "accepted", "scheduled"].includes(o.status) ? "st-ok" : ["no_reply", "declined", "closed"].includes(o.status) ? "st-idle"
+    : o.status === "received" ? "st-warn" : "st-applied";
   const opts = (state.outreach.statuses || Object.keys(OUT_STATUS)).map((k) => h("option", { value: k, selected: k === o.status }, OUT_STATUS[k] || k));
+  const declined = o.status === "declined"
+    ? [DECLINE_REASON[o.decline_reason] || (o.decline_reason ? o.decline_reason : "No reason given"), o.decline_note].filter(Boolean).join(": ") : "";
   return h("article", { class: "row" },
     h("div", { class: "row-main" },
       h("div", { class: "row-head" }, h("span", { class: "company" }, o.person),
-        h("span", null, [o.role, o.company].filter(Boolean).join(", ")),
+        h("span", null, [o.role, o.company].filter(Boolean).join(", ") + (o.client_company ? ` · hiring for ${o.client_company}` : "")),
         pill(cls, OUT_STATUS[o.status] || o.status), due(o) ? pill("st-warn", "Follow up") : null),
-      h("div", { class: "meta" }, h("span", null, channelName(o.channel)), h("span", { class: "mono" }, fmtDate(o.sent)),
+      h("div", { class: "meta" }, h("span", null, o.direction === "inbound" ? "They wrote first" : "You wrote first"),
+        h("span", null, channelName(o.channel)), h("span", { class: "mono" }, fmtDate(o.sent)),
         o.job_id ? h("span", null, `#${o.job_id} ${o.job_title}`) : null),
-      o.note ? h("p", { class: "reason mynote" }, o.note) : null),
+      o.pay ? h("p", { class: "reason" }, `Pay mentioned: ${payText(o.pay)}`) : null,
+      declined ? h("p", { class: "reason" }, `Declined: ${declined}`) : null,
+      o.note ? h("p", { class: "reason mynote" }, o.note) : null,
+      state.declining === o.id ? declineForm(o) : null),
     h("div", { class: "actions" },
       h("label", { class: "inline" }, "Follow up",
         h("input", { type: "date", value: dayOf(o.follow_up), min: dayOf(o.sent) || null, "aria-label": `Follow-up date for ${o.person}`,
           onchange: (e) => updateOutreach(o, e.target.value ? { follow_up_at: dayToUTC(e.target.value) } : { clear_follow_up: true },
             e.target.value ? "Follow-up date saved." : "Follow-up cleared.", o.follow_up ? { follow_up_at: o.follow_up } : { clear_follow_up: true }) })),
-      h("select", { class: "compact", "aria-label": `Status of the message to ${o.person}`,
-        onchange: (e) => updateOutreach(o, { status: e.target.value }, `Marked ${(OUT_STATUS[e.target.value] || e.target.value).toLowerCase()}.`, { status: o.status }) }, opts)));
+      h("select", { class: "compact", "aria-label": `Status of the thread with ${o.person}`,
+        onchange: (e) => {
+          if (e.target.value === "declined") { state.declining = o.id; render(); return; } // ask why first
+          updateOutreach(o, { status: e.target.value }, `Marked ${(OUT_STATUS[e.target.value] || e.target.value).toLowerCase()}.`, { status: o.status });
+        } }, opts)));
+}
+
+// declineForm asks why the user passed on a thread before marking it declined.
+function declineForm(o) {
+  const reasons = (state.outreach.decline_reasons || Object.keys(DECLINE_REASON)).map((k) => h("option", { value: k }, DECLINE_REASON[k] || k));
+  return h("form", { class: "inline-form", onsubmit: (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target).entries());
+    state.declining = null;
+    updateOutreach(o, { status: "declined", decline_reason: f.reason, decline_note: f.why }, "Marked declined.", { status: o.status });
+  } },
+    h("label", { class: "inline" }, "Why", h("select", { class: "compact", name: "reason" }, h("option", { value: "" }, "No reason"), reasons)),
+    h("input", { name: "why", placeholder: "In your words (optional)", maxlength: "2000", "aria-label": `Why you declined ${o.person}` }),
+    h("button", { class: "btn primary", type: "submit" }, "Decline"),
+    h("button", { class: "btn quiet", type: "button", onclick: () => { state.declining = null; render(); } }, "Cancel"));
 }
 
 function viewOutreach() {
-  const items = ((state.outreach && state.outreach.items) || []).slice()
-    .sort((a, b) => (due(b) - due(a)) || b.sent.localeCompare(a.sent));
-  const toolbar = h("div", { class: "toolbar" }, h("span", { class: "sub" }, "Connection requests, messages, referral asks and recruiter threads."),
+  const all = (state.outreach && state.outreach.items) || [];
+  const items = all.filter((o) => state.outDir === "all" || o.direction === state.outDir)
+    .sort((a, b) => (due(b) - due(a)) || (b.status === "received") - (a.status === "received") || b.sent.localeCompare(a.sent));
+  const chips = [["all", "All"], ["inbound", "They wrote first"], ["outbound", "You wrote first"]].map(([k, label]) =>
+    h("button", { class: "chip", type: "button", "aria-pressed": String(state.outDir === k), onclick: () => { state.outDir = k; render(); } }, label));
+  const toolbar = h("div", { class: "toolbar" }, h("div", { class: "chips" }, chips),
     h("button", { class: "btn primary", type: "button", onclick: () => toggleForm("outreach") }, state.form === "outreach" ? "Close" : "Log outreach"));
+  if (!items.length && all.length) {
+    return [toolbar, state.form === "outreach" ? outreachForm() : null, empty("No threads this way", "Try another filter above.")].filter(Boolean);
+  }
   return [toolbar, state.form === "outreach" ? outreachForm() : null,
     items.length ? h("div", { class: "list" }, items.map(outreachRow))
-      : empty("No outreach logged", "Log a connection request or message and set a follow-up date, or tell your agent who you wrote to.")].filter(Boolean);
+      : empty("No outreach logged", "Log a message you sent or a recruiter who wrote to you, or tell your agent about it.")].filter(Boolean);
 }
 
 /* ---------- profile ---------- */

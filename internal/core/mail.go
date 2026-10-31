@@ -154,6 +154,15 @@ func ChangeRefs(ctx context.Context, s *store.Store, by store.Actor, t store.Ref
 	return notFoundInput(s.ChangeRefs(ctx, by, t, refs, remove))
 }
 
+// CheckRemovals checks that every link to remove belongs to the job or
+// thread, before anything else in the call is saved.
+func CheckRemovals(ctx context.Context, s *store.Store, t store.RefTarget, remove []int64) error {
+	if len(remove) == 0 {
+		return nil
+	}
+	return notFoundInput(s.RefsBelong(ctx, t, remove))
+}
+
 // CheckRefs checks links before anything else in a call is saved.
 func CheckRefs(add []RefInput, remove []int64) error {
 	if _, problems := checkRefs(add, remove); len(problems) > 0 {

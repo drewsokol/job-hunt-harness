@@ -50,10 +50,9 @@ func TestHandledMessages(t *testing.T) {
 	var thread struct {
 		ID int64 `json:"outreach_id"`
 	}
-	h.call("save_outreach", map[string]any{"person": "Sam Sample", "channel": "email", "company": "Made-Up Labs"}, &thread)
+	h.call("save_outreach", map[string]any{"direction": "outbound", "person": "Sam Sample", "channel": "email", "company": "Made-Up Labs"}, &thread)
 
 	var r handledReply
-	r = handledReply{}
 	h.call("handled_messages", map[string]any{"system": "gmail", "check": []string{"m1", "m2"}}, &r)
 	if len(r.Handled) != 0 || r.Marked != 0 || r.CheckedThrough != "" {
 		t.Fatalf("fresh check: %+v", r)
@@ -128,7 +127,6 @@ func TestHandledMessages(t *testing.T) {
 	if len(r.Handled) != 0 {
 		t.Errorf("a refused call marked m9: %+v", r)
 	}
-
 }
 
 type refsReply struct {
@@ -151,7 +149,6 @@ func TestEmailRefs(t *testing.T) {
 	}}, nil)
 	h.call("update_application", map[string]any{"job_id": job, "add_refs": []any{map[string]any{"system": "gmail", "ref": "thread-1", "url": "https://mail.example/thread-1"}}}, nil)
 	var j refsReply
-	j = refsReply{}
 	h.call("get_job", map[string]any{"job_id": job}, &j)
 	if len(j.Refs) != 2 || j.Refs[0].URL != "https://mail.example/thread-1" || j.Refs[1].Ref != "thread-2" || j.Refs[1].URL != "" {
 		t.Fatalf("get_job refs: %+v", j)
@@ -167,10 +164,9 @@ func TestEmailRefs(t *testing.T) {
 	var thread struct {
 		ID int64 `json:"outreach_id"`
 	}
-	h.call("save_outreach", map[string]any{"person": "Sam Sample", "channel": "email", "job_id": job,
+	h.call("save_outreach", map[string]any{"direction": "outbound", "person": "Sam Sample", "channel": "email", "job_id": job,
 		"add_refs": []any{map[string]any{"system": "outlook", "ref": "conv-9", "url": "https://mail.example/conv-9"}}}, &thread)
 	var one refsReply
-	one = refsReply{}
 	h.call("list_outreach", map[string]any{"outreach_id": thread.ID}, &one)
 	if len(one.Refs) != 1 || one.Refs[0].Ref != "conv-9" {
 		t.Fatalf("one thread refs: %+v", one)
@@ -207,8 +203,35 @@ func TestEmailRefs(t *testing.T) {
 	if status.Status != "applied" {
 		t.Errorf("status = %q after a refused call, want applied", status.Status)
 	}
-	if msg := h.fail("save_outreach", map[string]any{"person": "Sam Sample", "channel": "email", "remove_refs": []int64{1}}); !strings.Contains(msg, "remove_refs") {
+	if msg := h.fail("save_outreach", map[string]any{"direction": "outbound", "person": "Sam Sample", "channel": "email", "remove_refs": []int64{1}}); !strings.Contains(msg, "remove_refs") {
 		t.Errorf("remove_refs on a new thread: %s", msg)
 	}
 
+	// A link that isn't the target's stops the whole call before anything
+	// is saved, so a retry doesn't repeat the note or the status event.
+	one = refsReply{}
+	h.call("save_outreach", map[string]any{"outreach_id": thread.ID, "add_refs": []any{map[string]any{"system": "outlook", "ref": "conv-10"}}}, nil)
+	h.call("list_outreach", map[string]any{"outreach_id": thread.ID}, &one)
+	if msg := h.fail("update_application", map[string]any{"job_id": job, "status": "rejected", "append_note": "Made-up note.", "remove_refs": []int64{one.Refs[0].ID}}); !strings.Contains(msg, "remove_refs") {
+		t.Errorf("removing the thread's link from the job: %s", msg)
+	}
+	var after struct {
+		Status string `json:"status"`
+		Notes  string `json:"notes"`
+	}
+	h.call("get_job", map[string]any{"job_id": job}, &after)
+	if after.Status != "applied" || strings.Contains(after.Notes, "Made-up note.") {
+		t.Errorf("a refused call saved: %+v", after)
+	}
+	if msg := h.fail("save_outreach", map[string]any{"outreach_id": thread.ID, "status": "replied", "note": "Made-up reply.", "remove_refs": []int64{j.Refs[0].ID}}); !strings.Contains(msg, "remove_refs") {
+		t.Errorf("removing the job's link from the thread: %s", msg)
+	}
+	var th struct {
+		Status string `json:"status"`
+		Note   string `json:"note"`
+	}
+	h.call("list_outreach", map[string]any{"outreach_id": thread.ID}, &th)
+	if th.Status == "replied" || strings.Contains(th.Note, "Made-up reply.") {
+		t.Errorf("a refused call changed the thread: %+v", th)
+	}
 }

@@ -156,10 +156,12 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			return nil, err
 		}
 		type threadOut struct {
-			ID         int64  `json:"outreach_id"`
-			Person     string `json:"person"`
-			Status     string `json:"status"`
-			FollowUpAt string `json:"follow_up_at,omitempty"`
+			ID         int64   `json:"outreach_id"`
+			Person     string  `json:"person"`
+			Status     string  `json:"status"`
+			FollowUpAt string  `json:"follow_up_at,omitempty"`
+			Direction  string  `json:"direction"`
+			Pay        *payOut `json:"pay,omitempty"`
 		}
 		out := struct {
 			jobOut
@@ -172,7 +174,7 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			Timeline   []eventOut   `json:"timeline"`
 		}{jobOut: job(d.JobRow, true), Notes: d.Notes, Postings: []postingOut{}, Timeline: []eventOut{}}
 		for _, o := range threads.Outreach {
-			out.Outreach = append(out.Outreach, threadOut{o.ID, o.Person, o.Status, timeOrEmpty(o.FollowUpAt)})
+			out.Outreach = append(out.Outreach, threadOut{o.ID, o.Person, o.Status, timeOrEmpty(o.FollowUpAt), o.Direction, pay(o.Pay)})
 		}
 		refs, err := t.Store.Refs(ctx, store.RefTarget{JobID: in.JobID})
 		if err != nil {
@@ -241,6 +243,9 @@ func (t *tools) addJobTools(s *mcp.Server) {
 	add(t, s, "update_application", writes, func(ctx context.Context, c call, in applicationIn) (any, error) {
 		refs := refInputs(in.AddRefs)
 		if err := core.CheckRefs(refs, in.RemoveRefs); err != nil {
+			return nil, err
+		}
+		if err := core.CheckRemovals(ctx, t.Store, store.RefTarget{JobID: in.JobID}, in.RemoveRefs); err != nil {
 			return nil, err
 		}
 		if in.Status != "" || in.AppliedAt != "" || in.Notes != nil || in.AppendNote != "" || !core.HasRefs(refs, in.RemoveRefs) {

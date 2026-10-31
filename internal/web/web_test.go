@@ -489,7 +489,7 @@ func TestAddJobAndOutreach(t *testing.T) {
 	}
 
 	sent := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339)
-	f.ok("POST", "/api/outreach", map[string]any{"person": "Sam Example", "role": "Recruiter", "channel": "email",
+	f.ok("POST", "/api/outreach", map[string]any{"direction": "outbound", "person": "Sam Example", "role": "Recruiter", "channel": "email",
 		"job_id": added.ID, "sent_at": sent, "follow_up_at": time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)}, nil)
 	var out struct {
 		Items []outreachJSON `json:"items"`
@@ -510,6 +510,31 @@ func TestAddJobAndOutreach(t *testing.T) {
 	}
 	if code := f.do("PATCH", fmt.Sprintf("/api/outreach/%d", out.Items[0].ID), map[string]any{"status": "ghosted"}, nil); code != http.StatusBadRequest {
 		t.Errorf("an unknown status: status %d", code)
+	}
+
+	// A recruiter wrote first: no follow-up, and the pay they mentioned.
+	f.ok("POST", "/api/outreach", map[string]any{"direction": "inbound", "person": "Riley Recruiter", "company": "Made-Up Talent",
+		"client_company": "undisclosed", "channel": "linkedin_inmail", "sent_at": sent,
+		"pay": map[string]any{"min": 90, "max": 110, "currency": "USD", "period": "hour"}}, nil)
+	f.ok("GET", "/api/outreach", nil, &out)
+	var in outreachJSON
+	for _, o := range out.Items {
+		if o.Direction == "inbound" {
+			in = o
+		}
+	}
+	if in.Status != "received" || in.FollowUp != "" || in.ClientCompany != "undisclosed" || in.Pay == nil || in.Pay.Period != "hour" || in.Pay.Max != 110 {
+		t.Fatalf("inbound thread: %+v", in)
+	}
+	f.ok("PATCH", fmt.Sprintf("/api/outreach/%d", in.ID), map[string]any{"status": "declined", "decline_reason": "contract", "decline_note": "Made-up reason."}, nil)
+	f.ok("GET", "/api/outreach", nil, &out)
+	for _, o := range out.Items {
+		if o.ID == in.ID && (o.Status != "declined" || o.DeclineReason != "contract" || o.DeclineNote != "Made-up reason.") {
+			t.Errorf("declined: %+v", o)
+		}
+	}
+	if code := f.do("PATCH", fmt.Sprintf("/api/outreach/%d", out.Items[0].ID), map[string]any{"status": "replied", "decline_reason": "contract"}, nil); code != http.StatusBadRequest {
+		t.Errorf("a decline reason without declining: status %d", code)
 	}
 }
 

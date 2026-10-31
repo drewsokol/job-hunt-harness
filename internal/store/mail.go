@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/utc"
@@ -220,6 +219,22 @@ func (s *Store) ChangeRefs(ctx context.Context, by Actor, t RefTarget, add []New
 	})
 }
 
+// RefsBelong checks that each link id is one of the job's or thread's.
+func (s *Store) RefsBelong(ctx context.Context, t RefTarget, ids []int64) error {
+	for _, id := range ids {
+		var one int
+		err := s.db.QueryRowContext(ctx, "SELECT 1 FROM external_refs WHERE id = ? AND coalesce(job_id, 0) = ? AND coalesce(outreach_id, 0) = ?",
+			id, t.JobID, t.OutreachID).Scan(&one)
+		if errNoRows(err) {
+			return fmt.Errorf("remove_refs: no link %d here: %w", id, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // targetExists checks that the job and thread named exist.
 func targetExists(ctx context.Context, tx *sql.Tx, t RefTarget) error {
 	for _, c := range []struct {
@@ -232,7 +247,7 @@ func targetExists(ctx context.Context, tx *sql.Tx, t RefTarget) error {
 		var one int
 		err := tx.QueryRowContext(ctx, "SELECT 1 FROM "+c.table+" WHERE id = ?", c.id).Scan(&one)
 		if errNoRows(err) {
-			return fmt.Errorf("%s_id: no %s %d: %w", strings.TrimSuffix(c.name, "s"), c.name, c.id, ErrNotFound)
+			return fmt.Errorf("%s_id: no %s %d: %w", c.name, c.name, c.id, ErrNotFound)
 		}
 		if err != nil {
 			return err
