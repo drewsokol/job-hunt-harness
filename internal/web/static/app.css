@@ -134,6 +134,8 @@ button.btn.quiet { border-color: transparent; color: var(--muted); background: t
 button.btn.danger { color: var(--bad-fg); }
 button.btn:disabled { opacity: 0.5; cursor: default; }
 
+.inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.inline-form input { flex: 1 1 200px; min-width: 0; }
 .inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 input, select, textarea { font: 14px var(--font-body); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
 input[type="date"] { font-family: var(--font-mono); font-size: 13px; padding: 4px 6px; }

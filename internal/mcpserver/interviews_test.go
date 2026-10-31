@@ -91,7 +91,7 @@ func TestInterviews(t *testing.T) {
 	var thread struct {
 		ID int64 `json:"outreach_id"`
 	}
-	h.call("save_outreach", map[string]any{"person": "Sam Sample", "channel": "email", "company": "Made-Up Labs"}, &thread)
+	h.call("save_outreach", map[string]any{"direction": "inbound", "person": "Sam Sample", "channel": "email", "company": "Made-Up Labs"}, &thread)
 	h.call("save_interview", map[string]any{"outreach_id": thread.ID, "stage": "recruiter_screen", "scheduled_at": daysFromNow(4), "medium": "phone"}, &phone)
 	if phone.Job != 0 || phone.JobStatus != "" {
 		t.Errorf("interview from a thread: %+v", phone)

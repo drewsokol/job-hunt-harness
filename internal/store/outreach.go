@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,8 +12,31 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/utc"
 )
 
-// OutreachStatuses are where an outreach thread can be.
-var OutreachStatuses = []string{"sent", "accepted", "replied", "scheduled", "no_reply", "closed"}
+// OutreachStatuses are where an outreach thread can be. received is an
+// inbound thread not yet answered; declined means the user passed.
+var OutreachStatuses = []string{"received", "sent", "accepted", "replied", "scheduled", "no_reply", "declined", "closed"}
+
+// OutreachDirections say who wrote first: the other person (inbound) or
+// the user (outbound).
+var OutreachDirections = []string{"inbound", "outbound"}
+
+// DeclineReasons are why the user passed on a thread.
+var DeclineReasons = []string{"contract", "pay_below_floor", "hybrid_or_onsite", "wrong_role", "level_too_low", "no_details", "suspicious", "other"}
+
+// outreachEnded are the statuses that end a thread: it isn't open.
+const outreachEnded = `('declined', 'closed')`
+
+// OutreachPay is pay the person mentioned, apart from any listing's. A
+// zero Min or Max wasn't said.
+type OutreachPay struct {
+	Min, Max float64
+	Currency string // ISO 4217
+	Period   string // year or hour
+	Note     string
+}
+
+// IsZero reports whether no pay was mentioned.
+func (p OutreachPay) IsZero() bool { return p == OutreachPay{} }
 
 // outreachWaiting are the statuses that wait on the other person, so a
 // follow-up date on them is due.
@@ -33,17 +57,29 @@ type Outreach struct {
 	FollowUpAt time.Time
 	Note       string
 	UpdatedAt  time.Time
+
+	Direction     string
+	DeclineReason string
+	DeclineNote   string
+	Pay           OutreachPay
+	ClientCompany string // an agency's client, or "undisclosed"
 }
 
-// NewOutreach is a message to log. A contact with the same name at the
+// NewOutreach is a thread to log. A contact with the same name at the
 // same company is reused.
 type NewOutreach struct {
 	Person, Role, Company string
 	Channel               string
 	JobID                 int64
-	SentAt                time.Time
+	Direction             string
+	Status                string    // empty for the direction's default
+	SentAt                time.Time // when the thread started, whoever wrote
 	FollowUpAt            time.Time // zero for none
 	Note                  string
+	DeclineReason         string
+	DeclineNote           string
+	Pay                   OutreachPay
+	ClientCompany         string
 }
 
 // LogOutreach records a message, adding the contact if jhh doesn't know
@@ -104,10 +140,19 @@ func (s *Store) LogOutreach(ctx context.Context, by Actor, o NewOutreach) (id, c
 		if err != nil {
 			return err
 		}
+		status := o.Status
+		if status == "" {
+			status = map[string]string{"inbound": "received", "outbound": "sent"}[o.Direction]
+		}
+		p := payColumns(o.Pay)
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO outreach (contact_id, job_id, channel, sent_at, follow_up_at, note, created_at, created_by, updated_at, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			contactID, nullID(o.JobID), o.Channel, sent, follow, o.Note, now, by, now, by)
+			INSERT INTO outreach (contact_id, job_id, direction, channel, sent_at, status, follow_up_at, note,
+			                      decline_reason, decline_note, pay_min, pay_max, pay_currency, pay_period, pay_note, client_company,
+			                      created_at, created_by, updated_at, updated_by)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			contactID, nullID(o.JobID), o.Direction, o.Channel, sent, status, follow, o.Note,
+			nullString(o.DeclineReason), o.DeclineNote, p[0], p[1], p[2], p[3], o.Pay.Note, nullString(o.ClientCompany),
+			now, by, now, by)
 		if err != nil {
 			return err
 		}
@@ -115,7 +160,7 @@ func (s *Store) LogOutreach(ctx context.Context, by Actor, o NewOutreach) (id, c
 			return err
 		}
 		return insertEvent(ctx, tx, now, by, "outreach_logged", eventRefs{OutreachID: id, ContactID: contactID, JobID: o.JobID},
-			map[string]string{"channel": o.Channel})
+			map[string]string{"channel": o.Channel, "direction": o.Direction, "status": status})
 	})
 	return id, contactID, newContact, err
 }
@@ -143,6 +188,10 @@ func findContact(ctx context.Context, tx *sql.Tx, name, company string) (int64, 
 	return 0, rows.Err()
 }
 
+// ErrNotDeclined is returned for a decline reason on a thread that isn't
+// declined.
+var ErrNotDeclined = errors.New("decline_reason: only with status declined")
+
 // OutreachChange is a change to an outreach thread; empty fields are left
 // alone.
 type OutreachChange struct {
@@ -150,6 +199,26 @@ type OutreachChange struct {
 	FollowUpAt    time.Time // zero leaves it
 	ClearFollowUp bool
 	AppendNote    string
+	Direction     string
+	JobID         int64   // the job the thread turned out to be about
+	ClientCompany *string // nil leaves it
+	Pay           *OutreachPay
+	DeclineReason string
+	DeclineNote   string
+}
+
+// payColumns returns pay's min, max, currency and period as nullable
+// column values.
+func payColumns(p OutreachPay) [4]any {
+	var out [4]any
+	if p.Min > 0 {
+		out[0] = p.Min
+	}
+	if p.Max > 0 {
+		out[1] = p.Max
+	}
+	out[2], out[3] = nullString(p.Currency), nullString(p.Period)
+	return out
 }
 
 // UpdateOutreach records a reply, a follow-up date or a note.
@@ -174,6 +243,15 @@ func (s *Store) UpdateOutreach(ctx context.Context, by Actor, id int64, c Outrea
 				return err
 			}
 			data["from"], data["to"] = status, c.Status
+			status = c.Status
+			if status != "declined" { // a reopened thread's reason no longer holds
+				if _, err := tx.ExecContext(ctx, "UPDATE outreach SET decline_reason = NULL WHERE id = ?", id); err != nil {
+					return err
+				}
+			}
+		}
+		if c.DeclineReason != "" && status != "declined" {
+			return ErrNotDeclined
 		}
 		switch {
 		case c.ClearFollowUp:
@@ -197,6 +275,56 @@ func (s *Store) UpdateOutreach(ctx context.Context, by Actor, id int64, c Outrea
 				return err
 			}
 			data["note"] = true
+		}
+		set := func(column string, v any) error {
+			_, err := tx.ExecContext(ctx, "UPDATE outreach SET "+column+" = ? WHERE id = ?", v, id)
+			return err
+		}
+		if c.Direction != "" {
+			if err := set("direction", c.Direction); err != nil {
+				return err
+			}
+			data["direction"] = c.Direction
+		}
+		if c.JobID != 0 && c.JobID != job.Int64 {
+			var exists int
+			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM jobs WHERE id = ?", c.JobID).Scan(&exists); err != nil {
+				return err
+			}
+			if exists == 0 {
+				return fmt.Errorf("job %d: %w", c.JobID, ErrNotFound)
+			}
+			if err := set("job_id", c.JobID); err != nil {
+				return err
+			}
+			data["job_id"] = c.JobID
+			job = sql.NullInt64{Int64: c.JobID, Valid: true}
+		}
+		if c.ClientCompany != nil {
+			if err := set("client_company", nullString(*c.ClientCompany)); err != nil {
+				return err
+			}
+			data["client_company"] = true
+		}
+		if c.Pay != nil {
+			p := payColumns(*c.Pay)
+			if _, err := tx.ExecContext(ctx, "UPDATE outreach SET pay_min = ?, pay_max = ?, pay_currency = ?, pay_period = ?, pay_note = ? WHERE id = ?",
+				p[0], p[1], p[2], p[3], c.Pay.Note, id); err != nil {
+				return err
+			}
+			data["pay"] = true
+		}
+		if c.DeclineReason != "" {
+			if err := set("decline_reason", c.DeclineReason); err != nil {
+				return err
+			}
+			data["decline_reason"] = c.DeclineReason
+		}
+		if c.DeclineNote != "" {
+			if err := set("decline_note", c.DeclineNote); err != nil {
+				return err
+			}
+			data["decline_note"] = true
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE outreach SET updated_at = ?, updated_by = ? WHERE id = ?", now, by, id); err != nil {
 			return err
@@ -222,6 +350,11 @@ type OutreachQuery struct {
 	NewestFirst  bool // by when the message was sent
 	ChangedFirst bool // by when the thread last changed
 	WaitingOnly  bool
+
+	Direction     string
+	Channel       string
+	DeclineReason string
+	Since, Until  time.Time // when the thread started; zero for no bound
 }
 
 // ListOutreach returns outreach, follow-ups due soonest first, and how
@@ -252,6 +385,21 @@ func (s *Store) ListOutreach(ctx context.Context, q OutreachQuery) ([]Outreach, 
 	if q.FollowUpSet {
 		where = append(where, "o.follow_up_at IS NOT NULL")
 	}
+	if q.Direction != "" {
+		where, args = append(where, "o.direction = ?"), append(args, q.Direction)
+	}
+	if q.Channel != "" {
+		where, args = append(where, "o.channel = ?"), append(args, q.Channel)
+	}
+	if q.DeclineReason != "" {
+		where, args = append(where, "o.decline_reason = ?"), append(args, q.DeclineReason)
+	}
+	if !q.Since.IsZero() {
+		where, args = append(where, "o.sent_at >= ?"), append(args, utc.Format(q.Since))
+	}
+	if !q.Until.IsZero() {
+		where, args = append(where, "o.sent_at < ?"), append(args, utc.Format(q.Until))
+	}
 	if q.FollowUpNone {
 		where = append(where, "o.follow_up_at IS NULL")
 	}
@@ -280,11 +428,11 @@ func (s *Store) ListOutreach(ctx context.Context, q OutreachQuery) ([]Outreach, 
 	return out, total, err
 }
 
-// OpenThreads returns the threads not closed whose contact is named person
+// OpenThreads returns the open threads (not declined or closed) whose contact is named person
 // (in any case), at a company with company's key when company isn't empty,
 // and about jobID when it isn't 0.
 func (s *Store) OpenThreads(ctx context.Context, person, company string, jobID int64) ([]Outreach, error) {
-	where, args := "lower(ct.name) = lower(?) AND o.status <> 'closed'", []any{person}
+	where, args := "lower(ct.name) = lower(?) AND o.status NOT IN "+outreachEnded, []any{person}
 	if jobID != 0 {
 		where, args = where+" AND o.job_id = ?", append(args, jobID)
 	}
@@ -307,7 +455,9 @@ func (s *Store) OpenThreads(ctx context.Context, person, company string, jobID i
 func (s *Store) outreach(ctx context.Context, from string, args ...any) ([]Outreach, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT o.id, ct.id, ct.name, coalesce(ct.title, ''), coalesce(ct.company_name, ''), coalesce(o.job_id, 0), coalesce(j.title, ''),
-		       o.channel, o.sent_at, o.status, o.follow_up_at, o.note, o.updated_at `+from, args...)
+		       o.channel, o.sent_at, o.status, o.follow_up_at, o.note, o.updated_at,
+		       o.direction, coalesce(o.decline_reason, ''), o.decline_note, coalesce(o.pay_min, 0), coalesce(o.pay_max, 0),
+		       coalesce(o.pay_currency, ''), coalesce(o.pay_period, ''), o.pay_note, coalesce(o.client_company, '') `+from, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +469,9 @@ func (s *Store) outreach(ctx context.Context, from string, args ...any) ([]Outre
 			sent, follow, updated sql.NullString
 		)
 		if err := rows.Scan(&o.ID, &o.ContactID, &o.Person, &o.Role, &o.Company, &o.JobID, &o.JobTitle,
-			&o.Channel, &sent, &o.Status, &follow, &o.Note, &updated); err != nil {
+			&o.Channel, &sent, &o.Status, &follow, &o.Note, &updated,
+			&o.Direction, &o.DeclineReason, &o.DeclineNote, &o.Pay.Min, &o.Pay.Max,
+			&o.Pay.Currency, &o.Pay.Period, &o.Pay.Note, &o.ClientCompany); err != nil {
 			return nil, err
 		}
 		if o.SentAt, err = parseTime(sent); err != nil {
@@ -348,9 +500,18 @@ type TrackerSummary struct {
 	OpenFlags     int
 	SuspectFeeds  int
 	LastRefreshAt time.Time
-	// OutreachByStatus counts outreach threads by status; every status is
-	// present.
-	OutreachByStatus map[string]int
+	Outreach      OutreachCounts
+}
+
+// OutreachCounts count outreach threads for the summary.
+type OutreachCounts struct {
+	// ByDirection counts threads by direction, then status; every
+	// direction and status is present.
+	ByDirection      map[string]map[string]int
+	InboundLast7     int // inbound threads started in the last 7 days
+	InboundLast30    int
+	Unanswered       int            // inbound threads still received
+	DeclinedByReason map[string]int // "not_given" for a decline without a reason
 }
 
 // Tracker counts where the search stands at now.
@@ -380,26 +541,8 @@ func (s *Store) Tracker(ctx context.Context, now time.Time) (TrackerSummary, err
 	if t.LastRefreshAt, err = parseTime(refresh); err != nil {
 		return t, err
 	}
-	t.OutreachByStatus = map[string]int{}
-	for _, st := range OutreachStatuses {
-		t.OutreachByStatus[st] = 0
-	}
-	rows, err := s.db.QueryContext(ctx, "SELECT status, count(*) FROM outreach GROUP BY status")
-	if err != nil {
-		return t, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			st string
-			n  int
-		)
-		if err := rows.Scan(&st, &n); err != nil {
-			return t, err
-		}
-		t.OutreachByStatus[st] = n
-	}
-	return t, rows.Err()
+	t.Outreach, err = s.outreachCounts(ctx, now)
+	return t, err
 }
 
 // Applications returns the jobs the user applied to and hasn't heard a
@@ -443,4 +586,44 @@ func (s *Store) SuspectCompanies(ctx context.Context) ([]Company, error) {
 		}
 	}
 	return out, err
+}
+
+// outreachCounts counts threads by direction and status, recent inbound
+// threads, and declines by reason.
+func (s *Store) outreachCounts(ctx context.Context, now time.Time) (OutreachCounts, error) {
+	c := OutreachCounts{ByDirection: map[string]map[string]int{}, DeclinedByReason: map[string]int{}}
+	for _, d := range OutreachDirections {
+		c.ByDirection[d] = map[string]int{}
+		for _, st := range OutreachStatuses {
+			c.ByDirection[d][st] = 0
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT direction, status, coalesce(decline_reason, 'not_given'), count(*) FROM outreach
+		GROUP BY direction, status, coalesce(decline_reason, 'not_given')`)
+	if err != nil {
+		return c, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			d, st, reason string
+			n             int
+		)
+		if err := rows.Scan(&d, &st, &reason, &n); err != nil {
+			return c, err
+		}
+		c.ByDirection[d][st] += n
+		if st == "declined" {
+			c.DeclinedByReason[reason] += n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return c, err
+	}
+	c.Unanswered = c.ByDirection["inbound"]["received"]
+	err = s.db.QueryRowContext(ctx, `
+		SELECT coalesce(sum(sent_at >= ?), 0), coalesce(sum(sent_at >= ?), 0) FROM outreach WHERE direction = 'inbound'`,
+		utc.Format(now.AddDate(0, 0, -7)), utc.Format(now.AddDate(0, 0, -30))).Scan(&c.InboundLast7, &c.InboundLast30)
+	return c, err
 }
