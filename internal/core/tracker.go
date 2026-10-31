@@ -254,7 +254,7 @@ func ListOutreach(ctx context.Context, s *store.Store, in OutreachFilter) (Outre
 func FindThread(ctx context.Context, s *store.Store, person, company string, jobID int64) (int64, error) {
 	person, company = strings.TrimSpace(person), strings.TrimSpace(company)
 	if person == "" {
-		return 0, &InputError{Problems: []string{"outreach_id: give the thread's id, or the person it's with (list_outreach finds ids)"}}
+		return 0, &InputError{Problems: []string{"find.person: give the person the thread is with, or the thread's outreach_id (list_outreach finds ids)"}}
 	}
 	os, err := s.OpenThreads(ctx, person, company, jobID)
 	if err != nil {
