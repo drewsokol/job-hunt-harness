@@ -340,7 +340,7 @@ func FindThread(ctx context.Context, s *store.Store, person, company string, job
 }
 
 // TrackerViews are the views get_tracker offers.
-var TrackerViews = []string{"summary", "applied", "followups_due", "stale"}
+var TrackerViews = []string{"summary", "applied", "followups_due", "stale", "upcoming_interviews"}
 
 // TrackerView is one view of the tracker; only its view's fields are set.
 type TrackerView struct {
@@ -349,6 +349,12 @@ type TrackerView struct {
 	JobsTotal     int
 	Outreach      []store.Outreach
 	OutreachTotal int
+	// Interviews are upcoming, or, for followups_due, completed ones
+	// still pending after their next step was expected.
+	Interviews []store.Interview
+	// The summary's counts: scheduled in the next 7 days, and completed
+	// but still pending.
+	InterviewsSoon, InterviewsPending int
 }
 
 // Tracker returns a view of the applications and outreach.
@@ -363,10 +369,19 @@ func Tracker(ctx context.Context, s *store.Store, view string) (TrackerView, err
 		var t store.TrackerSummary
 		t, err = s.Tracker(ctx, now)
 		v.Summary = &t
+		if err == nil {
+			v.InterviewsSoon, v.InterviewsPending, err = s.InterviewCounts(ctx, now, now.Add(InterviewsSoon))
+		}
 	case "applied":
 		v.Jobs, v.JobsTotal, err = s.Applications(ctx, 0, trackerPage)
 	case "followups_due":
 		v.Outreach, v.OutreachTotal, err = s.ListOutreach(ctx, store.OutreachQuery{DueBy: now, Limit: trackerPage})
+		if err == nil {
+			v.Interviews, err = s.ListInterviews(ctx, store.InterviewQuery{NextStepBy: now, Limit: trackerPage})
+		}
+	case "upcoming_interviews":
+		v.Interviews, err = s.ListInterviews(ctx, store.InterviewQuery{Status: "scheduled", From: now, To: now.Add(UpcomingInterviews),
+			SoonestFirst: true, Limit: trackerPage})
 	case "stale":
 		v.Jobs, v.JobsTotal, err = s.StaleApplications(ctx, now.Add(-StaleApplication), 0, trackerPage)
 		if err == nil {

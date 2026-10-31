@@ -155,6 +155,10 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		if err != nil {
 			return nil, err
 		}
+		ivs, err := core.JobInterviews(ctx, t.Store, in.JobID)
+		if err != nil {
+			return nil, err
+		}
 		type threadOut struct {
 			ID         int64   `json:"outreach_id"`
 			Person     string  `json:"person"`
@@ -165,13 +169,14 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		}
 		out := struct {
 			jobOut
-			Notes      string       `json:"notes,omitempty"`
-			Postings   []postingOut `json:"postings"`
-			Screenings []*fitOut    `json:"screening_history,omitempty"`
-			Flags      []flagOut    `json:"content_flag_details,omitempty"`
-			Outreach   []threadOut  `json:"outreach,omitempty"`
-			Timeline   []eventOut   `json:"timeline"`
-		}{jobOut: job(d.JobRow, true), Notes: d.Notes, Postings: []postingOut{}, Timeline: []eventOut{}}
+			Notes      string         `json:"notes,omitempty"`
+			Postings   []postingOut   `json:"postings"`
+			Screenings []*fitOut      `json:"screening_history,omitempty"`
+			Flags      []flagOut      `json:"content_flag_details,omitempty"`
+			Outreach   []threadOut    `json:"outreach,omitempty"`
+			Interviews []interviewOut `json:"interviews,omitempty"`
+			Timeline   []eventOut     `json:"timeline"`
+		}{jobOut: job(d.JobRow, true), Notes: d.Notes, Postings: []postingOut{}, Interviews: interviews(ivs, false), Timeline: []eventOut{}}
 		for _, o := range threads.Outreach {
 			out.Outreach = append(out.Outreach, threadOut{o.ID, o.Person, o.Status, timeOrEmpty(o.FollowUpAt), o.Direction, pay(o.Pay)})
 		}
@@ -317,17 +322,19 @@ func (t *tools) addJobTools(s *mcp.Server) {
 	})
 }
 
-// eventOut is one timeline event. OutreachID names the thread it's about.
+// eventOut is one timeline event. OutreachID and InterviewID name the
+// thread and interview it's about.
 type eventOut struct {
-	At         string          `json:"at"`
-	Actor      string          `json:"actor"`
-	Kind       string          `json:"kind"`
-	OutreachID int64           `json:"outreach_id,omitempty"`
-	Data       json.RawMessage `json:"data,omitempty"`
+	At          string          `json:"at"`
+	Actor       string          `json:"actor"`
+	Kind        string          `json:"kind"`
+	OutreachID  int64           `json:"outreach_id,omitempty"`
+	InterviewID int64           `json:"interview_id,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
 }
 
 func event(e store.Event) eventOut {
-	ev := eventOut{At: timeOrEmpty(e.At), Actor: string(e.Actor), Kind: e.Kind, OutreachID: e.OutreachID}
+	ev := eventOut{At: timeOrEmpty(e.At), Actor: string(e.Actor), Kind: e.Kind, OutreachID: e.OutreachID, InterviewID: e.InterviewID}
 	if string(e.Data) != "{}" {
 		ev.Data = e.Data
 	}

@@ -779,3 +779,42 @@ func TestPayAndAsk(t *testing.T) {
 		t.Errorf("webURL = %q", got)
 	}
 }
+
+// TestInterviewsShown checks that the Applied list shows each job's next
+// interview and a job's detail lists its interviews.
+func TestInterviewsShown(t *testing.T) {
+	f := newFixture(t)
+	ids := f.seed("Backend Engineer", "Data Engineer")
+	ctx := context.Background()
+	soon := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	for _, iv := range []store.Interview{
+		{JobID: ids["Backend Engineer"], Stage: "final", ScheduledAt: soon.Add(72 * time.Hour), Medium: "video", Status: "scheduled", Outcome: "pending"},
+		{JobID: ids["Backend Engineer"], Stage: "technical", ScheduledAt: soon, Medium: "video", Joining: "https://meet.example/made-up",
+			Interviewers: []store.Interviewer{{Name: "Robin Example", Role: "Engineer"}}, Status: "scheduled", Outcome: "pending"},
+		{JobID: ids["Backend Engineer"], Stage: "recruiter_screen", ScheduledAt: soon.Add(-96 * time.Hour), Medium: "phone", Status: "completed", Outcome: "advanced"},
+	} {
+		if _, err := f.s.AddInterview(ctx, store.Agent("test-agent"), iv); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var next *interviewJSON
+	for _, j := range f.list("applied") {
+		if j.ID == ids["Data Engineer"] {
+			t.Errorf("a job with no interview is applied: %+v", j)
+		}
+		if j.ID == ids["Backend Engineer"] {
+			if j.Status != "interviewing" {
+				t.Errorf("status %s", j.Status)
+			}
+			next = j.NextInterview
+		}
+	}
+	if next == nil || next.Stage != "technical" || next.Joining == "" {
+		t.Fatalf("next interview %+v", next)
+	}
+	var d jobDetailJSON
+	f.ok("GET", fmt.Sprintf("/api/jobs/%d", ids["Backend Engineer"]), nil, &d)
+	if len(d.Interviews) != 3 || d.Interviews[0].Stage != "final" || d.Interviews[1].Interviewers[0].Name != "Robin Example" {
+		t.Errorf("detail interviews %+v", d.Interviews)
+	}
+}
