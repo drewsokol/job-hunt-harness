@@ -157,10 +157,12 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			return nil, err
 		}
 		type threadOut struct {
-			ID         int64  `json:"outreach_id"`
-			Person     string `json:"person"`
-			Status     string `json:"status"`
-			FollowUpAt string `json:"follow_up_at,omitempty"`
+			ID         int64   `json:"outreach_id"`
+			Person     string  `json:"person"`
+			Status     string  `json:"status"`
+			FollowUpAt string  `json:"follow_up_at,omitempty"`
+			Direction  string  `json:"direction"`
+			Pay        *payOut `json:"pay,omitempty"`
 		}
 		out := struct {
 			jobOut
@@ -172,7 +174,7 @@ func (t *tools) addJobTools(s *mcp.Server) {
 			Timeline   []eventOut   `json:"timeline"`
 		}{jobOut: job(d.JobRow, true), Notes: d.Notes, Postings: []postingOut{}, Timeline: []eventOut{}}
 		for _, o := range threads.Outreach {
-			out.Outreach = append(out.Outreach, threadOut{o.ID, o.Person, o.Status, timeOrEmpty(o.FollowUpAt)})
+			out.Outreach = append(out.Outreach, threadOut{o.ID, o.Person, o.Status, timeOrEmpty(o.FollowUpAt), o.Direction, pay(o.Pay)})
 		}
 		for _, p := range d.Postings {
 			out.Postings = append(out.Postings, postingOut{p.ID, p.Source, p.Search, timeOrEmpty(p.FirstSeenAt), timeOrEmpty(p.ClosedAt),

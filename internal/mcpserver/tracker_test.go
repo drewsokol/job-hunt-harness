@@ -64,12 +64,12 @@ func TestOutreachAndCheckIns(t *testing.T) {
 		FollowUpAt string `json:"follow_up_at"`
 	}
 	var a, b logged
-	h.call("save_outreach", map[string]any{"person": "Alex Example", "channel": "LinkedIn", "job_id": job, "role": "Engineering Manager", "sent_at": daysAgo(20)}, &a)
-	h.call("save_outreach", map[string]any{"person": "alex example", "channel": "email", "company": "Exampleco", "sent_at": daysAgo(15), "no_follow_up": true}, &b)
+	h.call("save_outreach", map[string]any{"direction": "outbound", "person": "Alex Example", "channel": "LinkedIn", "job_id": job, "role": "Engineering Manager", "sent_at": daysAgo(20)}, &a)
+	h.call("save_outreach", map[string]any{"direction": "outbound", "person": "alex example", "channel": "email", "company": "Exampleco", "sent_at": daysAgo(15), "no_follow_up": true}, &b)
 	if !a.NewContact || b.NewContact || a.ContactID != b.ContactID || a.FollowUpAt == "" || b.FollowUpAt != "" {
 		t.Errorf("save_outreach: %+v then %+v", a, b)
 	}
-	if msg := h.fail("save_outreach", map[string]any{"person": "Alex Example", "channel": "email", "sent_at": daysAgo(-3)}); !strings.Contains(msg, "in the future") {
+	if msg := h.fail("save_outreach", map[string]any{"direction": "outbound", "person": "Alex Example", "channel": "email", "sent_at": daysAgo(-3)}); !strings.Contains(msg, "in the future") {
 		t.Errorf("a message not sent yet: %s", msg)
 	}
 

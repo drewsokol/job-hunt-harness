@@ -36,10 +36,10 @@ func TestFindingOutreach(t *testing.T) {
 		ID int64 `json:"outreach_id"`
 	}
 	var aboutJob, general, other logged
-	h.call("save_outreach", map[string]any{"person": "Alex Example", "channel": "linkedin", "job_id": job, "sent_at": daysAgo(20)}, &aboutJob)
-	h.call("save_outreach", map[string]any{"person": "Alex Example", "channel": "email", "company": "Exampleco", "sent_at": daysAgo(10), "no_follow_up": true}, &general)
+	h.call("save_outreach", map[string]any{"direction": "outbound", "person": "Alex Example", "channel": "linkedin", "job_id": job, "sent_at": daysAgo(20)}, &aboutJob)
+	h.call("save_outreach", map[string]any{"direction": "outbound", "person": "Alex Example", "channel": "email", "company": "Exampleco", "sent_at": daysAgo(10), "no_follow_up": true}, &general)
 	longNote := strings.Repeat("Met at a made-up meetup. ", 20)
-	h.call("save_outreach", map[string]any{"person": "Sam Sample", "channel": "email", "company": "Made-Up Labs", "sent_at": daysAgo(5), "note": longNote}, &other)
+	h.call("save_outreach", map[string]any{"direction": "outbound", "person": "Sam Sample", "channel": "email", "company": "Made-Up Labs", "sent_at": daysAgo(5), "note": longNote}, &other)
 
 	type thread struct {
 		ID        int64  `json:"outreach_id"`
@@ -130,7 +130,7 @@ func TestFindingOutreach(t *testing.T) {
 	if msg := h.fail("save_outreach", map[string]any{"outreach_id": general.ID, "find": map[string]any{"person": "Alex Example"}, "status": "closed"}); !strings.Contains(msg, "not both") {
 		t.Errorf("id and person: %s", msg)
 	}
-	if msg := h.fail("save_outreach", map[string]any{"status": "closed"}); !strings.Contains(msg, "outreach_id or find") {
+	if msg := h.fail("save_outreach", map[string]any{"clear_follow_up": true}); !strings.Contains(msg, "outreach_id or find") {
 		t.Errorf("a status without a thread: %s", msg)
 	}
 	if msg := h.fail("save_outreach", map[string]any{"outreach_id": general.ID, "person": "Someone Else", "status": "closed"}); !strings.Contains(msg, "set when it's logged") {
@@ -207,12 +207,13 @@ func TestFindingOutreach(t *testing.T) {
 		t.Errorf("%d outreach events in the timeline: %+v", named, detail.Timeline)
 	}
 
-	// The summary counts threads by status.
+	// The summary counts threads by direction and status.
 	var summary struct {
-		Outreach map[string]int `json:"outreach_by_status"`
+		Outreach map[string]map[string]int `json:"outreach"`
 	}
 	h.call("get_tracker", map[string]any{}, &summary)
-	if want := map[string]int{"sent": 1, "accepted": 0, "replied": 0, "scheduled": 1, "no_reply": 0, "closed": 1}; fmt.Sprint(summary.Outreach) != fmt.Sprint(want) {
-		t.Errorf("outreach by status %v; want %v", summary.Outreach, want)
+	want := map[string]int{"received": 0, "sent": 1, "accepted": 0, "replied": 0, "scheduled": 1, "no_reply": 0, "declined": 0, "closed": 1}
+	if fmt.Sprint(summary.Outreach["outbound"]) != fmt.Sprint(want) || len(summary.Outreach["inbound"]) != len(want) {
+		t.Errorf("outreach by direction and status %v; want outbound %v", summary.Outreach, want)
 	}
 }
