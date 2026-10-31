@@ -30,7 +30,14 @@ const EVENTS = {
   outreach_updated: "Outreach updated", injection_reported: "Text aimed at an AI reported", content_flag_reviewed: "Content flag reviewed",
   job_merged: "Merged into another job", jobs_merged_in: "Other jobs merged in", job_unmerged: "Merge undone",
   job_split: "Postings split off", job_split_off: "Split off from another job", posting_closed: "Posting closed",
+  interview_logged: "Interview logged", interview_updated: "Interview updated",
 };
+const STAGES = {
+  recruiter_screen: "Recruiter screen", hiring_manager: "Hiring manager", technical: "Technical", system_design: "System design",
+  panel: "Panel", product: "Product", final: "Final", other: "Interview",
+};
+const INTERVIEW_STATUS = { scheduled: "Scheduled", completed: "Done", cancelled: "Cancelled", no_show: "No-show" };
+const OUTCOMES = { pending: "waiting to hear", advanced: "advanced", rejected: "rejected", offer: "offer" };
 
 const state = {
   signedOut: false, error: "", loaded: false,
@@ -91,6 +98,11 @@ function fmtDate(iso) {
   const opts = { month: "short", day: "numeric" };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
   return d.toLocaleDateString(undefined, opts);
+}
+// fmtWhen is a date and local time, for interviews.
+function fmtWhen(iso) {
+  if (!iso) return "";
+  return `${fmtDate(iso)}, ${new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 function who(actor) {
   if (!actor || actor === "user") return "you";
@@ -548,6 +560,9 @@ function detailsEl(j) {
           p.location ? ` · ${p.location}` : "", ` · ${p.source}`, p.closed ? ` · closed ${fmtDate(p.closed)}` : "");
       })));
   }
+  if (d.interviews && d.interviews.length) {
+    el.append(h("span", { class: "label" }, "Interviews"), h("ul", { class: "interviews" }, d.interviews.map(interviewEl)));
+  }
   el.append(h("label", { class: "notes-box" }, "Your notes",
     h("textarea", { id: `notes-${j.id}`, rows: "3", placeholder: "Recruiter name, referral, what you emphasized, interview dates",
       value: j.notes || "", onchange: (e) => change(j, { notes: e.target.value.trim() }, "Notes saved.", { notes: j.notes || "" }) })));
@@ -559,11 +574,30 @@ function detailsEl(j) {
   return el;
 }
 
+// interviewEl is one interview in a job's detail. Everything in it is the
+// agent's record, shown as text.
+function interviewEl(iv) {
+  const status = iv.status === "completed" ? `Done, ${OUTCOMES[iv.outcome] || iv.outcome}` : INTERVIEW_STATUS[iv.status] || iv.status;
+  const people = (iv.interviewers || []).map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(", ");
+  return h("li", null,
+    h("div", null, h("b", null, STAGES[iv.stage] || iv.stage), ` · ${fmtWhen(iv.scheduled_at)}`,
+      iv.duration_minutes ? ` · ${iv.duration_minutes} min` : "", iv.medium !== "other" ? ` · ${iv.medium}` : "", ` · ${status}`),
+    people ? h("div", { class: "hint" }, `With ${people}`) : null,
+    iv.joining ? h("div", { class: "joining" }, iv.joining) : null,
+    iv.next_step_at && iv.outcome === "pending" ? h("div", { class: "hint" }, `Expecting to hear by ${fmtDate(iv.next_step_at)}`) : null,
+    iv.prep_notes ? h("p", { class: "mynote" }, h("b", null, "Prep: "), iv.prep_notes) : null,
+    iv.debrief_notes ? h("p", { class: "mynote" }, h("b", null, "Debrief: "), iv.debrief_notes) : null);
+}
+
+function nextInterviewEl(iv) {
+  return h("p", { class: "next-interview" }, h("b", null, "Next interview: "), `${STAGES[iv.stage] || iv.stage} · ${fmtWhen(iv.scheduled_at)}`);
+}
+
 function eventText(e) {
   const d = e.data || {};
   switch (e.kind) {
     case "status_changed": {
-      const why = d.cause === "prefilter" ? " (filters)" : d.cause === "content_flag" ? " (hidden for AI instructions)" : d.cause === "prefilter_override" ? " (sent to screening)" : "";
+      const why = d.cause === "prefilter" ? " (filters)" : d.cause === "content_flag" ? " (hidden for AI instructions)" : d.cause === "prefilter_override" ? " (sent to screening)" : d.cause === "interview" ? " (interview logged)" : "";
       return `${STATUS[d.from] || d.from} → ${STATUS[d.to] || d.to}${why}`;
     }
     case "screened": return `Rated: ${FIT[d.fit] || d.fit}`;
@@ -648,7 +682,8 @@ function viewApplied() {
   const jobs = state.lists.applied || [];
   const sections = [["interviewing", "Interviewing"], ["offer", "Offers"], ["applied", "Waiting to hear back"]].map(([s, label]) => {
     const js = jobs.filter((j) => j.status === s);
-    return js.length ? [h("p", { class: "section-label" }, `${label} · ${js.length}`), js.map((j) => jobRow(j))] : [];
+    return js.length ? [h("p", { class: "section-label" }, `${label} · ${js.length}`),
+      js.map((j) => jobRow(j, { extra: j.next_interview ? nextInterviewEl(j.next_interview) : null }))] : [];
   }).flat(2);
   return sections.length ? h("div", { class: "list" }, sections)
     : empty("No applications yet", "Mark a role applied from To review and it moves here.");
