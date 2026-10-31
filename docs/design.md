@@ -527,7 +527,7 @@ The **suggested ask** is `min + ask_percentile × (max − min)` of the job's ye
 
 ### Tools
 
-Jobs are identified by their short number (`482`) in every tool, so you and the agent can use the same numbers in the chat ("mark 482 applied"). The MVP aims for **about 20 tools**. Some clients cap the total number of tools across all servers, and every tool description costs context.
+Jobs are identified by their short number (`482`) in every tool, so you and the agent can use the same numbers in the chat ("mark 482 applied"). The MVP aims for **about 20 tools** (33 after the MVP: a new capability joins an existing tool when it fits there, as one thread's history joins `list_outreach`). Some clients cap the total number of tools across all servers, and every tool description costs context.
 
 Tool outputs are compact JSON written with the agent's context window in mind. Descriptions are truncated (5,000 characters by default, which matches the reference) unless the agent asks for the full text. Everything from a listing is returned inside an `untrusted` object (see "Untrusted content and prompt injection"). All times going in and out are UTC (see section 4).
 
@@ -537,12 +537,13 @@ Tool outputs are compact JSON written with the agent's context window in mind. D
 | `whats_new(since?)` | The daily check-in: new jobs and their fit ratings, follow-ups due, postings you applied to that closed or were reposted, suspect feeds, content flags waiting for review. Defaults to "since the last call". |
 | `refresh_jobs(companies?: [str])` | Fetch feeds, dedupe and prefilter. Returns counts, newly passed jobs and per-company errors. |
 | `list_candidates(status="unscreened", fit?, limit=20, cursor?, include_description=false)` | Page through jobs. With `include_description=true`, the agent can screen a batch of 10 in one call instead of 10 `get_job` calls. |
-| `get_job(job_id, full_description=false)` | One job: all postings, parsed pay, prefilter reasons, screening history, notes and timeline. |
+| `get_job(job_id, full_description=false)` | One job: all postings, parsed pay, prefilter reasons, screening history, notes, timeline, and the outreach threads about it (id, person, status, follow-up date). Timeline events about a thread carry its `outreach_id`. |
 | `record_screening(screenings: [{job_id, fit, reason, gaps, flags?}])` | Batch write. `fit` is `strong`, `good`, `stretch` or `no`. Moves jobs to `review` or `screened_out`. Stamps the current profile version. |
 | `update_application(job_id, status?, applied_at?, notes?, append_note?)` | Pipeline changes. Writes an event. |
 | `log_outreach(person, channel, company?, job_id?, role?, sent_at?, follow_up_at?, note?)` | Creates or reuses a contact and logs a touch. |
-| `update_outreach(outreach_id, status?, follow_up_at?, note?)` | Records a reply, schedules a follow-up, closes the thread. |
-| `get_tracker(view="summary"\|"applied"\|"followups_due"\|"stale")` | Lets the agent answer "what should I follow up on?" |
+| `update_outreach(outreach_id? \| person + company? + job_id?, status?, follow_up_at?, note?)` | Records a reply, schedules a follow-up, closes the thread. The thread is named by its id, or by the person (see "Finding outreach threads"). |
+| `list_outreach(outreach_id?, status?, person?, company?, job_id?, follow_up?, limit=20, cursor?)` | Finds outreach threads, so the agent never depends on remembering an id. With `outreach_id`, that one thread with its whole note and history. |
+| `get_tracker(view="summary"\|"applied"\|"followups_due"\|"stale")` | Lets the agent answer "what should I follow up on?" The summary counts outreach threads by status. |
 | `add_jobs(jobs: [{url?, company, title?, location?, description?, pay?, employment_type?, notes?}])` | **The agent as a source.** For each job: if `url` matches a supported board (through `MatchURL`), jhh fetches the posting from that board's API itself. Otherwise it saves the fields the agent supplied, with `origin=agent`. Everything is treated as untrusted, deduped by the ladder above, and lands in `unscreened`: the prefilter records its decision on an agent's job but never moves it, since the agent chose it. Returns the job number for each, and whether it matched an existing job. In the MVP, jhh never fetches arbitrary pages. Reading schema.org `JobPosting` data from any URL comes later, with private and loopback addresses blocked at connection time, and limits on size and redirects. |
 | `merge_jobs(job_ids)` / `split_job(job_id, posting_ids)` | Corrects dedupe mistakes. Merging moves the other jobs' postings to the first and hides those jobs; splitting off exactly the postings a merge brought in restores the merged job, and any other split makes a new job. Recorded as events. |
 | `get_setup_state()` | What exists and what is missing: profile, resume, companies, memory count, filters, whether a refresh or screening has run yet. This is where `initialize` starts. |
@@ -565,7 +566,21 @@ Tool outputs are compact JSON written with the agent's context window in mind. D
 
 There are deliberately no delete tools in v1. Deleting is done in the UI, so an agent that goes wrong can't destroy data.
 
-### Prompts
+#### Finding outreach threads
+
+`log_outreach` returns the thread's id, and `update_outreach` used to need it. An agent whose context is condensed loses the ids, and guessing the next number risks updating the wrong person. So every thread can be found again:
+
+- **`list_outreach`** returns threads with `outreach_id`, person, role, channel, job number, status, `sent_at`, `follow_up_at`, `updated_at` and the note cut at 200 characters (with `note_truncated`). The company and the job's title come inside `untrusted`, as in `get_tracker`, since they can come from a listing. Filters, all optional and combined with AND:
+  - `status`: one or more of `sent`, `accepted`, `replied`, `scheduled`, `no_reply`, `closed`; `open` stands for every status but `closed`;
+  - `person` and `company`: a case-insensitive part of the name;
+  - `job_id`;
+  - `follow_up`: `due` (waiting, with a follow-up date that has come), `set` (any follow-up date) or `none`.
+
+  Threads come most recently changed first, 20 to a page, with a cursor and the total. With `outreach_id` it returns that one thread with its whole note and its history: every event about it (logged, status changes, follow-up dates moved or cleared, notes added), oldest first, with who made each change.
+- **`update_outreach` takes the person instead of the id.** `person` must match the contact's name exactly, ignoring case; `company` and `job_id` narrow it, matched the way `log_outreach` matches a company. Only open threads (any status but `closed`) are considered. Exactly one match is updated. Otherwise nothing changes and the error says why: no open thread, or several, listed with their ids, companies, jobs and sent dates, so the agent picks one by id. jhh never guesses between threads. A closed thread is reopened only by its id.
+- **`get_job`** lists the job's threads, and its timeline events about a thread carry `outreach_id`.
+- **`get_tracker`'s summary** counts threads by status. `followups_due` and `stale` already return threads with their ids.
+
 
 The server also sends a short `instructions` string when an MCP client connects: what jhh is, "if the user asks to initialize or set up, call `get_playbook('initialize')`", and "call `get_context` before judging fit". Many clients pass this to the model even when they ignore prompts, which is what makes "just ask your agent" work across different agents.
 
