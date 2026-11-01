@@ -336,20 +336,26 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
 	echo "::endgroup::"
 
 	echo "::group::Round $round: review"
-	mkdir -p "$TMP/review"
+	# The reviewer reads a copy of the committed tree without Claude Code's
+	# memory and settings files, so nothing the implementer wrote there
+	# becomes the reviewer's instructions. Changes to them are in the patch.
+	rm -rf "$TMP/review"
+	mkdir -p "$TMP/review/tree"
+	git -C "$WORK" archive HEAD | tar -x -C "$TMP/review/tree"
+	find "$TMP/review/tree" \( -name CLAUDE.md -o -name CLAUDE.local.md -o -name .claude \) -prune -exec rm -rf {} +
 	git -C "$WORK" diff "$MAIN...HEAD" >"$TMP/review/diff.patch"
 	{
 		cat "$TRUSTED/.github/prompts/build-review.md"
 		echo
-		echo "BRANCH: $WORK"
+		echo "BRANCH: $TMP/review/tree"
 		echo "DIFF: $TMP/review/diff.patch"
-		echo "SPEC: $WORK/$SPEC"
+		echo "SPEC: $TMP/review/tree/$SPEC"
 		echo
 		echo "DECISIONS:"
 		cat "$TMP/decisions.md"
 	} >"$TMP/review-prompt.md"
 	if ! (cd "$TRUSTED" && claude_ 40 -p --model "$MODEL" --max-turns 150 --output-format text \
-		--add-dir "$WORK" --add-dir "$TMP/review" --allowedTools "Read,Grep,Glob" \
+		--add-dir "$TMP/review" --allowedTools "Read,Grep,Glob" \
 		<"$TMP/review-prompt.md") >"$TMP/review-out.md"; then
 		echo "::endgroup::"
 		printf 'The reviewer stopped unexpectedly in round %s (the run log has the details: %s). The round'"'"'s code is pushed. Comment `/continue` to carry on.\n' "$round" "$RUN_URL" >"$TMP/msg.md"

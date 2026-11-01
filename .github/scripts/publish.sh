@@ -119,6 +119,12 @@ if [ -s "$TMP/scan.txt" ]; then
 fi
 
 # Push. The lease means the branch must still be where the build found it.
+# The PR is checked again first, in case it was stopped meanwhile.
+state=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq .state)
+if [ "$state" != OPEN ]; then
+	echo "PR $PR_NUMBER is $state; nothing to publish."
+	exit 0
+fi
 if [ "$head" != "$base" ]; then
 	git_ push -q --force-with-lease="refs/heads/$BRANCH:$base" origin "refs/build/head:refs/heads/$BRANCH" ||
 		stop_publish "GitHub refused the push of the build's commits (the run log says why; the branch may have moved while the build ran), so nothing was pushed or posted from it."
