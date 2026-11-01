@@ -43,7 +43,7 @@ To ask, the workflow posts one comment tagging the owner with numbered questions
 
 **The owner merges.** No workflow merges a PR. Letting the workflow merge after it has run well for a while is a later decision, with its own record.
 
-**Trust comes from the checks.** CI (gofmt, vet, staticcheck, tests, the migration numbering, the privacy scan) is required on `main`. The privacy scan reads the owner's private terms from a repository secret, so the public repo never lists them, and it reports a file and line, never the term it matched.
+**Trust comes from the checks.** CI (gofmt, vet, staticcheck, tests, the migration numbering, the privacy scan) is required on `main`. In CI the privacy scan runs its general rules: files that hold user data, invisible characters, local user paths, real email addresses. The owner's private terms (where they live, what they earn, who they talk to) never leave the owner's machine, not even as a secret, since a CI job runs the PR's own code and could print one. They are checked before every push from that machine, which is the only place they could enter the repo from: the workflows know only the repo and the specs, and specs are written there.
 
 **Only the owner can start anything.** Every workflow that holds a secret checks that the event came from an owner (`github.actor`, or the comment's author, against `OWNERS`) and never runs for forks. No workflow uses `pull_request_target` with the PR's code. The implementer pushes only its own branch, as the Claude GitHub App, so CI runs on its pushes; it can't change `.github/` or a merged spec, and it never merges.
 
