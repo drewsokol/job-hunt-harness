@@ -3,8 +3,8 @@
 # (.goreleaser.yaml) as a draft with notes from the merged PRs, attests
 # where each archive came from, so a download can be checked with
 # `gh attestation verify <file> -R drewsokol/job-hunt-harness`, and only
-# then publishes it. A run that fails after tagging deletes its tag and
-# draft, so it can simply be run again with the same version.
+# then publishes it. A run that fails or is cancelled after tagging deletes
+# its tag and draft, so it can simply be run again with the same version.
 #
 # Only an owner (listed in the OWNERS repository variable, a JSON array of
 # GitHub logins) can run it, from the Actions tab or with
@@ -97,8 +97,8 @@ jobs:
           REPO: ${{ github.repository }}
         run: gh release edit "$VERSION" --repo "$REPO" --draft=false --latest
 
-      - name: Clean up after a failed run
-        if: failure() && steps.tag.outputs.pushed == 'true'
+      - name: Clean up after a failed or cancelled run
+        if: (failure() || cancelled()) && steps.tag.outputs.pushed == 'true'
         env:
           VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
