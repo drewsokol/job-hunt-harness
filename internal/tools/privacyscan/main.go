@@ -161,14 +161,22 @@ func (s *scanner) scanDiff(rev string) error {
 
 var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)`)
 
-// scanPatch checks the added lines of a unified diff for the private terms.
+// scanPatch checks the added lines of a unified diff, and the names of the
+// files they're in, for the private terms.
 func (s *scanner) scanPatch(patch string) {
 	file, n := "", 0
+	header := false // between "diff --git" and the first hunk
 	for line := range strings.SplitSeq(patch, "\n") {
 		switch {
-		case strings.HasPrefix(line, "+++ "):
-			file = strings.TrimPrefix(strings.TrimPrefix(line, "+++ "), "b/")
+		case strings.HasPrefix(line, "diff --git "):
+			header = true
+		case header && strings.HasPrefix(line, "+++ "):
+			if name := strings.TrimPrefix(line, "+++ "); name != "/dev/null" {
+				file = strings.TrimPrefix(name, "b/")
+				s.scanTerms(file+" (file name)", file)
+			}
 		case strings.HasPrefix(line, "@@"):
+			header = false
 			if m := hunkHeader.FindStringSubmatch(line); m != nil {
 				fmt.Sscan(m[1], &n)
 			}

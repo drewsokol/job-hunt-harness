@@ -70,22 +70,24 @@ func TestScanPatch(t *testing.T) {
 	patch := `diff --git a/a.go b/a.go
 --- a/a.go
 +++ b/a.go
-@@ -10,0 +11,2 @@ func f() {
+@@ -10,0 +11,3 @@ func f() {
 +	ok := 1
 +	// springfield
++++ not a header, springfield
 @@ -20 +22 @@
 -	old springfield line
 +	new line
-diff --git a/b.md b/b.md
+diff --git a/springfield.md b/springfield.md
 --- /dev/null
-+++ b/b.md
++++ b/springfield.md
 @@ -0,0 +1 @@
 +Springfield again
 `
 	var out strings.Builder
 	s := scanner{terms: parseTerms("springfield"), out: &out}
 	s.scanPatch(patch)
-	want := "a.go:12: private term 1\nb.md:1: private term 1\n"
+	want := "a.go:12: private term 1\na.go:13: private term 1\n" +
+		"springfield.md (file name): private term 1\nspringfield.md:1: private term 1\n"
 	if out.String() != want {
 		t.Errorf("findings = %q, want %q", out.String(), want)
 	}

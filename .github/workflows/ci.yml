@@ -5,8 +5,9 @@
 # privacy: the privacy scan (internal/tools/privacyscan). The owner's private
 #   terms come from the PRIVACY_TERMS secret, one per line, and are checked
 #   on the lines a change adds, its commit messages and the PR's title and
-#   body. Secrets aren't given to pull requests from forks, so those get the
-#   general rules only, and the owner reads them before merging.
+#   body. Secrets aren't given to pull requests from forks or to
+#   Dependabot's, so those get the general rules only, and the owner reads
+#   them before merging.
 #
 # Nothing here needs more than read access, and no step runs with a token
 # that can write.
@@ -82,10 +83,11 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          ACTOR: ${{ github.actor }}
           FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository && github.event_name == 'pull_request' }}
         run: |
           require=true
-          if [ "$FROM_FORK" = "true" ]; then require=false; fi
+          if [ "$FROM_FORK" = "true" ] || [ "$ACTOR" = "dependabot[bot]" ]; then require=false; fi
           go run ./internal/tools/privacyscan \
             -terms-env PRIVACY_TERMS -require-terms="$require" \
             -base "$BASE" -commits "$BASE..$HEAD" \

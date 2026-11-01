@@ -869,9 +869,9 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 10. **Contributing**: link to CONTRIBUTING.md; good first issues (new companies, pay-parser cases, sources)
 11. **License**
 
-## 11. GitHub repo setup (deferred)
+## 11. GitHub repo setup
 
-This is planned but deliberately put off: CI, branch protection, the license and the other security settings will be done together as a separate step before the repo goes public. The list below is the starting point for that step.
+The repo is public, `main` takes changes only through PRs the owner merges, and CI runs on every PR. The rest of this list is still open: the security settings, the community files and templates, and releases (decision 0011).
 
 - **Branch**: the local branch is `master`. Rename it to `main` before the first push (`git branch -m master main`). Protect `main`: require PRs, passing CI and a linear history.
 - **Visibility**: public from the first push, after deciding on question 3 above.
