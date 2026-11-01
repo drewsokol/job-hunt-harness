@@ -5,7 +5,8 @@
 # It runs on its own when an owner opens a PR that changes docs/specs/, and
 # again when an owner comments on that PR with "/review" as the first line,
 # after answering the questions. Owners are listed in the OWNERS repository
-# variable (a JSON array of logins). Nobody else can start it.
+# variable (a JSON array of logins). Nobody else can start it, and it never
+# runs on a PR from a fork.
 #
 # The PR's files are checked out into pr-head/ only to be read. Claude's
 # tools are limited to reading files and gh pr commands.
@@ -39,7 +40,9 @@ jobs:
           github.event.issue.pull_request &&
           github.event.issue.state == 'open' &&
           contains(fromJSON(vars.OWNERS || '[]'), github.event.comment.user.login) &&
-          startsWith(github.event.comment.body, '/review'))
+          (github.event.comment.body == '/review' ||
+            startsWith(github.event.comment.body, fromJSON('"/review\n"')) ||
+            startsWith(github.event.comment.body, fromJSON('"/review\r"'))))
       )
     # At the job level, not the workflow's: a run whose `if` is false (any
     # other comment) then never joins the group, so it can't cancel a review.
@@ -53,7 +56,9 @@ jobs:
       REPO: ${{ github.repository }}
     steps:
       # The command is the comment's whole first line ("/reviewed it" isn't
-      # one), and only a PR that changes a spec gets a spec review.
+      # one; the job's `if` already checked most of that), only a PR from
+      # this repo gets reviewed (decision 0011: never forks), and only one
+      # that changes a spec.
       - name: Check the command and find the specs
         id: specs
         env:
@@ -69,8 +74,13 @@ jobs:
               exit 0
             fi
           fi
+          fork=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isCrossRepository --jq .isCrossRepository)
           specs=$(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only | grep '^docs/specs/' | grep -v '^docs/specs/\(TEMPLATE\|README\)\.md$' || true)
-          if [ -z "$specs" ]; then
+          if [ "$fork" != "false" ]; then
+            echo "This PR comes from a fork; spec review runs only on this repo's own PRs."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            reaction=confused
+          elif [ -z "$specs" ]; then
             echo "No spec in this PR; nothing to review."
             echo "found=false" >> "$GITHUB_OUTPUT"
             reaction=confused
