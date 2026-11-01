@@ -18,6 +18,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # The build workflow starts CI on its branch this way, since its pushes
+  # (made with the workflow's token) don't start it.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -88,5 +91,8 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          # Started by hand on a branch, there's no event base: scan what
+          # the branch adds to main.
+          [ -n "$BASE" ] || BASE=$(git merge-base origin/main "$HEAD")
           go run ./internal/tools/privacyscan \
             -commits "$BASE..$HEAD" -text-env PR_TITLE,PR_BODY

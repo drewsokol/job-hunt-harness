@@ -1,0 +1,211 @@
+# Builds features from specs (decision 0011). .github/scripts/build.sh does
+# the work: implement, check, review, fix, up to 10 rounds; it asks the owners
+# on the PR (label needs-owner-input) when it can't decide, and labels the PR
+# final-review when the checks and the review pass. Owners merge.
+#
+# It starts when:
+# - a new spec lands on main (merging a spec PR); the first new spec in the
+#   push is built;
+# - an owner runs it by hand with a spec's path;
+# - an owner comments on a build PR with a command as the comment's whole
+#   first line: /continue (carry on, with the comments since as answers),
+#   /restart (build again from the spec), or /stop (close the PR).
+#
+# Owners are listed in the OWNERS repository variable (a JSON array of
+# logins); nobody else can start it. One build runs at a time; GitHub keeps
+# one more waiting and cancels any beyond that.
+#
+# Claude never gets a GitHub token: the script keeps it, and pushes and
+# comments for it. Pushes made with the workflow's token don't start CI, so
+# the script starts CI on the branch when the build is ready.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/specs/**"
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: "Spec to build, such as docs/specs/0001-short-name.md"
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: >-
+      github.repository_owner == 'drewsokol' && (
+        (github.event_name == 'push' &&
+          contains(fromJSON(vars.OWNERS || '[]'), github.actor)) ||
+        (github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          contains(fromJSON(vars.OWNERS || '[]'), github.actor) &&
+          contains(fromJSON(vars.OWNERS || '[]'), github.triggering_actor)) ||
+        (github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          github.event.issue.state == 'open' &&
+          contains(fromJSON(vars.OWNERS || '[]'), github.event.comment.user.login) &&
+          (github.event.comment.body == '/continue' ||
+            startsWith(github.event.comment.body, fromJSON('"/continue\n"')) ||
+            startsWith(github.event.comment.body, fromJSON('"/continue\r"')) ||
+            github.event.comment.body == '/restart' ||
+            startsWith(github.event.comment.body, fromJSON('"/restart\n"')) ||
+            startsWith(github.event.comment.body, fromJSON('"/restart\r"'))))
+      )
+    # At the job level, so comments that aren't commands never join it.
+    concurrency:
+      group: build
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    permissions:
+      contents: write # the feature branch
+      pull-requests: write # the PR, its comments and labels
+      issues: write # labels
+      actions: write # starting CI on the branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: work
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Decide what to build
+        id: what
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          INPUT_SPEC: ${{ inputs.spec }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          case "$EVENT" in
+          push)
+            specs=$(git -C work diff --name-only --diff-filter=A "$BEFORE" "$AFTER" -- 'docs/specs/*.md' 2>/dev/null |
+              grep -E '^docs/specs/[0-9]{4}-[a-z0-9-]+\.md$' || true)
+            if [ -z "$specs" ]; then
+              echo "No new spec in this push."
+              echo "mode=none" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            first=$(echo "$specs" | head -n 1)
+            if [ "$(echo "$specs" | wc -l)" -gt 1 ]; then
+              echo "More than one new spec; building $first. Start the others by hand:" >> "$GITHUB_STEP_SUMMARY"
+              echo "$specs" | tail -n +2 >> "$GITHUB_STEP_SUMMARY"
+            fi
+            { echo "mode=start"; echo "spec=$first"; } >> "$GITHUB_OUTPUT"
+            ;;
+          workflow_dispatch)
+            { echo "mode=start"; echo "spec=$INPUT_SPEC"; } >> "$GITHUB_OUTPUT"
+            ;;
+          issue_comment)
+            first=$(printf '%s\n' "$COMMENT_BODY" | head -n 1 | tr -d '\r' | sed 's/[[:space:]]*$//')
+            mode=${first#/}
+            # Only build PRs, from this repo, take commands.
+            read -r head fork < <(gh pr view "$ISSUE" --repo "$REPO" --json headRefName,isCrossRepository --jq '.headRefName + " " + (.isCrossRepository|tostring)')
+            if [[ "$head" != spec/* || "$fork" != false ]]; then
+              echo "PR $ISSUE isn't a build PR."
+              echo "mode=none" >> "$GITHUB_OUTPUT"
+              gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=confused >/dev/null
+              exit 0
+            fi
+            gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=rocket >/dev/null
+            { echo "mode=$mode"; echo "pr=$ISSUE"; } >> "$GITHUB_OUTPUT"
+            ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.what.outputs.mode != 'none'
+        with:
+          ref: main
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.what.outputs.mode != 'none'
+        with:
+          go-version-file: work/go.mod
+          cache-dependency-path: work/go.sum
+
+      - name: Install Claude Code
+        if: steps.what.outputs.mode != 'none'
+        run: npm install -g @anthropic-ai/claude-code@2.1.302
+
+      - name: Build
+        if: steps.what.outputs.mode != 'none'
+        env:
+          MODE: ${{ steps.what.outputs.mode }}
+          SPEC: ${{ steps.what.outputs.spec }}
+          PR_NUMBER: ${{ steps.what.outputs.pr }}
+          OWNERS: ${{ vars.OWNERS }}
+          REPO: ${{ github.repository }}
+          BUILD_TOKEN: ${{ github.token }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: bash trusted/.github/scripts/build.sh
+
+      - name: Tell the owners the run failed
+        if: failure() && steps.what.outputs.mode != 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OWNERS: ${{ vars.OWNERS }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pr=$(cat "$RUNNER_TEMP/build/pr" 2>/dev/null || true)
+          [ -n "$pr" ] || exit 0
+          mentions=$(jq -r 'map("@" + .) | join(" ")' <<<"$OWNERS")
+          gh pr comment "$pr" --repo "$REPO" --body "$mentions: the build run failed ($RUN_URL). Comment \`/continue\` to try again or \`/restart\` to start over."
+          gh pr edit "$pr" --repo "$REPO" --add-label needs-owner-input --remove-label building
+
+  stop:
+    if: >-
+      github.repository_owner == 'drewsokol' &&
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.issue.state == 'open' &&
+      contains(fromJSON(vars.OWNERS || '[]'), github.event.comment.user.login) &&
+      (github.event.comment.body == '/stop' ||
+        startsWith(github.event.comment.body, fromJSON('"/stop\n"')) ||
+        startsWith(github.event.comment.body, fromJSON('"/stop\r"')))
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+      actions: write # cancelling a build that's running
+    steps:
+      - name: Stop the build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          read -r head fork labels < <(gh pr view "$PR" --repo "$REPO" --json headRefName,isCrossRepository,labels --jq '.headRefName + " " + (.isCrossRepository|tostring) + " " + ([.labels[].name] | join(","))')
+          if [[ "$head" != spec/* || "$fork" != false ]]; then
+            gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=confused >/dev/null
+            exit 0
+          fi
+          gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=+1 >/dev/null
+          # One build runs at a time, so a PR labeled building is the one
+          # that's running.
+          if [[ ",$labels," == *,building,* ]]; then
+            for id in $(gh run list --repo "$REPO" --workflow build.yml --status in_progress --json databaseId --jq '.[].databaseId'); do
+              # This stop job runs in a build.yml run too.
+              [ "$id" = "$GITHUB_RUN_ID" ] || gh run cancel "$id" --repo "$REPO" || true
+            done
+          fi
+          gh pr edit "$PR" --repo "$REPO" --remove-label building --remove-label needs-owner-input --remove-label final-review >/dev/null || true
+          gh pr close "$PR" --repo "$REPO" --comment "Stopped by an owner. The branch $head is kept; delete it when it's no longer needed."
