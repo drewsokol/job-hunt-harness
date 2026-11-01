@@ -12,7 +12,7 @@ Each feature starts here as a spec ([decision 0011](../decisions/0011-feature-pi
 
 When an owner opens the PR, the spec review workflow reads the spec against the design, the decisions and the code, and comments with numbered questions, each with a recommended answer. It asks only what would change what gets built; smaller points it leaves to the implementer.
 
-Answer in a comment ("1: yes. 2: go with your recommendation"), update the spec so it says what you decided (the implementer reads the spec, not the thread), and comment `/review` on a line of its own to have it reviewed again. When it says "ready to build", merge.
+Update the spec so it says what you decided (the implementer reads the spec, not the thread), and answer in a comment that starts with `/review` on its first line, with your answers below it ("1: yes. 2: go with your recommendation"). That runs the review again. A comment with `/review` anywhere else does nothing. `/review` is also how to get a review for a spec pushed to a PR after it was opened. When the review says "ready to build", merge.
 
 ## Building
 

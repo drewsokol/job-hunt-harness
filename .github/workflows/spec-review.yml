@@ -52,28 +52,19 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
     steps:
-      # The command is the comment's whole first line ("/reviewed it" isn't
-      # one; the job's `if` already checked most of that), only a PR from
-      # this repo gets reviewed (decision 0011: never forks), and only one
-      # that changes a spec.
-      - name: Check the command and find the specs
+      # The job's `if` let through only "/review" as a comment's whole first
+      # line ("/reviewed it" isn't one). Here: only a PR from this repo gets
+      # reviewed (decision 0011: never forks), and only one that changes a
+      # spec. The workflow token stays in this step, out of Claude's.
+      - name: Find the specs
         id: specs
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_ID: ${{ github.event.comment.id }}
         run: |
-          if [ "$EVENT" = "issue_comment" ]; then
-            first=$(printf '%s\n' "$COMMENT_BODY" | head -n 1 | tr -d '\r' | sed 's/[[:space:]]*$//')
-            if [ "$first" != "/review" ]; then
-              echo "Not a /review command."
-              echo "found=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
           fork=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isCrossRepository --jq .isCrossRepository)
           specs=$(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only | grep '^docs/specs/' | grep -v '^docs/specs/\(TEMPLATE\|README\)\.md$' || true)
           if [ "$fork" != "false" ]; then
