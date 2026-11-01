@@ -57,4 +57,5 @@ To ask, the workflow posts one comment tagging the owner with numbered questions
 - Every run uses the owner's Claude plan; the round limit and a turn limit on each step bound what one feature can use.
 - Features come one at a time. A spec merged while another is building waits its turn.
 - Plans for features move from GitHub Issues and a project board (design section 11) to specs in the repo, which also become the record of why each feature works the way it does. Issues stay for bug reports.
+- The `OWNERS` check holds only while the owners are the only people with write access. Any collaborator can edit repository variables, and anyone with write access can run a workflow from their own branch with the checks edited out. Before adding a collaborator, move the gates into settings only admins can change: a `release` environment that allows only `main` and needs an owner's approval, the same for the build workflow's write steps, and a tag ruleset so only admins create `v*` tags.
 - Some features will land with calls the owner would have made differently. That is the trade for not waiting, and a later spec corrects it.
