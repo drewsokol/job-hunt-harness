@@ -34,4 +34,5 @@ changelog:
   use: github-native
 
 release:
-  draft: false
+  # The workflow publishes it once the attestations are made.
+  draft: true
