@@ -869,16 +869,14 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 10. **Contributing**: link to CONTRIBUTING.md; good first issues (new companies, pay-parser cases, sources)
 11. **License**
 
-## 11. GitHub repo setup (deferred)
+## 11. GitHub repo setup
 
-This is planned but deliberately put off: CI, branch protection, the license and the other security settings will be done together as a separate step before the repo goes public. The list below is the starting point for that step.
+The repo is public, `main` takes changes only through PRs the owner merges, and CI runs on every PR. The rest of this list is still open: the security settings, the community files and templates, and releases (decision 0011).
 
-- **Branch**: the local branch is `master`. Rename it to `main` before the first push (`git branch -m master main`). Protect `main`: require PRs, passing CI and a linear history.
-- **Visibility**: public from the first push, after deciding on question 3 above.
 - **Files**: `LICENSE`, `README.md`, `CONTRIBUTING.md` (dev setup, the privacy rules from CLAUDE.md, how to add a source or company), `CODE_OF_CONDUCT.md` (Contributor Covenant), `SECURITY.md` (with GitHub private vulnerability reporting turned on).
 - **Issue templates**: bug report and feature request.
 - **PR template** with a privacy checklist: "no real resumes, profiles, salaries, contacts or databases; fixtures are made up".
-- **CI (GitHub Actions)**: `gofmt`, `go vet`, `staticcheck` and `go test -race` on Ubuntu, macOS and Windows. Also a guard that fails if `*.db`, `profile*.md` or `data/` show up in a diff.
+- **CI (GitHub Actions)**: `gofmt`, `go vet`, `staticcheck` and `go test -race` on Ubuntu, and `go test` on macOS and Windows (`.github/workflows/ci.yml`). The privacy scan (`internal/tools/privacyscan`) fails on files that hold user data (`*.db`, `profile*.md`, `data/`), invisible characters, local Windows user paths, and real email addresses. The owner's private terms are checked only on their own machine before a push (`scripts/pre-push`), never in CI, where the code under test could read them.
 - **Security settings**: secret scanning with push protection, Dependabot (Go modules and actions), CodeQL, `govulncheck` in CI.
 - **Community**: turn on Discussions (for questions and "show your setup"); add repo topics (`mcp`, `job-search`, `local-first`, `claude`); label a few issues `good first issue` at launch.
 - **Releases**: tag `v0.x` releases. goreleaser builds the binaries and checksums from Actions, with artifact attestations, so users can verify that a download came from this repo. Unsigned binaries trigger Windows SmartScreen and macOS Gatekeeper warnings, so start with `go install` and a Homebrew tap, and add code signing and notarization when there are enough users to justify the cost.

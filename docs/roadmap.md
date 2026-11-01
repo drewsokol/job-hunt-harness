@@ -47,7 +47,7 @@ New features start as specs in [docs/specs](specs/) and are built by a workflow 
 - `add_jobs` reading schema.org `JobPosting` data from any URL (with protection against requests to the local network)
 - Export (JSON) and backup command
 - README, CONTRIBUTING, docs on adding a source or a company
-- GitHub setup: branch protection, CI, security settings, issue and PR templates (design.md section 11)
+- GitHub setup: security settings, issue and PR templates (design.md section 11); CI and branch protection are done
 - v0.1 release binaries
 
 ## Later
