@@ -34,8 +34,9 @@ const EVENTS = {
   job_merged: "Merged into another job", jobs_merged_in: "Other jobs merged in", job_unmerged: "Merge undone",
   job_split: "Postings split off", job_split_off: "Split off from another job", posting_closed: "Posting closed",
   interview_logged: "Interview logged", interview_updated: "Interview updated",
-  refs_changed: "Email links changed",
+  refs_changed: "Email links changed", shortlist_changed: "Shortlist changed",
 };
+const SHORTLIST_CHANGE = { moved_up: "Moved up the shortlist", moved_down: "Moved down the shortlist", added: "Added to the shortlist", removed: "Taken off the shortlist" };
 const STAGES = {
   recruiter_screen: "Recruiter screen", hiring_manager: "Hiring manager", technical: "Technical", system_design: "System design",
   panel: "Panel", product: "Product", final: "Final", other: "Interview",
@@ -256,6 +257,22 @@ async function bulkSkip() {
     state.picked.clear();
     toast(`Skipped ${plural(jobs.length, "job", "jobs")}.`,
       () => api("POST", "/api/jobs/status", { changes: jobs.map((j) => ({ id: j.id, status: j.status })) }));
+  } catch (e) { toast(e.message); }
+  reload();
+}
+
+// shortlist moves a job up or down the shortlist, adds it at the bottom or
+// takes it off. Moves and adds can be undone; a removed job can be added
+// back, at the bottom.
+async function shortlist(j, action) {
+  const back = { up: "down", down: "up", add: "remove" }[action];
+  const msg = {
+    up: `Moved #${j.id} up the shortlist.`, down: `Moved #${j.id} down the shortlist.`,
+    add: `Added #${j.id} to the bottom of the shortlist.`, remove: `Took #${j.id} off the shortlist.`,
+  }[action];
+  try {
+    await api("POST", `/api/shortlist/${j.id}`, { action });
+    toast(msg, back && (() => api("POST", `/api/shortlist/${j.id}`, { action: back })));
   } catch (e) { toast(e.message); }
   reload();
 }
@@ -501,6 +518,7 @@ function jobActions(j) {
         h("button", { class: "btn primary", type: "button", onclick: () => markApplied(j) }, "Mark applied"),
         h("button", { class: "btn", type: "button", onclick: () => logOutreachFor(j) }, "Log outreach"),
         h("button", { class: "btn quiet", type: "button", onclick: () => skip(j) }, "Skip"),
+        j.status === "review" ? shortlistActions(j) : null,
       ];
     case "filtered_out":
       return [h("button", { class: "btn", type: "button", onclick: () => sendToScreening(j, true) }, "Send to screening")];
@@ -520,19 +538,41 @@ function jobActions(j) {
   }
 }
 
+// shortlistActions are a job's buttons for the shortlist: up, down and
+// remove when it's on it, add when it isn't.
+function shortlistActions(j) {
+  if (!j.shortlist) {
+    return h("button", { class: "btn quiet", type: "button", onclick: () => shortlist(j, "add") }, "Add to shortlist");
+  }
+  const last = (state.lists.review || []).filter((o) => o.shortlist).length;
+  return h("span", { class: "shortlist-actions" },
+    h("button", { class: "btn quiet", type: "button", disabled: j.shortlist.rank <= 1, "aria-label": `Move #${j.id} up the shortlist`, onclick: () => shortlist(j, "up") }, "Up"),
+    h("button", { class: "btn quiet", type: "button", disabled: j.shortlist.rank >= last, "aria-label": `Move #${j.id} down the shortlist`, onclick: () => shortlist(j, "down") }, "Down"),
+    h("button", { class: "btn quiet", type: "button", "aria-label": `Take #${j.id} off the shortlist`, onclick: () => shortlist(j, "remove") }, "Remove"));
+}
+
+// shortlistLine is a shortlisted job's reason to apply next, in the
+// agent's or the user's words.
+function shortlistLine(j) {
+  const p = j.shortlist;
+  if (!p || j.status !== "review") return null;
+  return h("p", { class: "apply-next" }, h("b", null, "Apply next: "), p.reason, p.set_by === "user" ? h("span", { class: "hint" }, " · placed by you") : null);
+}
+
 function jobRow(j, opts = {}) {
   const selected = opts.selected;
   const dim = ["skipped", "rejected", "withdrawn", "screened_out", "filtered_out"].includes(j.status) || j.closed;
   const head = h("div", { class: "row-head" },
     opts.pickable ? h("input", { type: "checkbox", class: "pick", checked: state.picked.has(j.id), "aria-label": `Select #${j.id}`,
       onchange: (e) => { if (e.target.checked) state.picked.add(j.id); else state.picked.delete(j.id); render(); } }) : null,
+    j.shortlist && j.status === "review" ? h("span", { class: "rank", title: "Its place on the shortlist" }, String(j.shortlist.rank)) : null,
     h("span", { class: "num" }, `#${j.id}`), h("span", { class: "company" }, j.company), titleEl(j), badges(j));
   const flags = j.flags && j.flags.length ? h("p", { class: "note" }, j.flags.join(" · ")) : null;
   const reasons = j.status === "filtered_out" && j.prefilter && j.prefilter.length
     ? h("ul", { class: "reasons" }, j.prefilter.map((r) => h("li", null, r.text))) : null;
   return h("article", { class: `row${dim ? " dim" : ""}${selected ? " selected" : ""}`, dataset: { id: String(j.id) } },
     h("div", { class: "row-main" },
-      head, metaLine(j),
+      head, metaLine(j), shortlistLine(j),
       j.reason ? h("p", { class: "reason" }, j.reason) : null,
       j.gaps ? h("p", { class: "gaps" }, h("b", null, "Gaps: "), j.gaps) : null,
       flags, reasons,
@@ -614,6 +654,7 @@ function eventText(e) {
       return `${STATUS[d.from] || d.from} → ${STATUS[d.to] || d.to}${why}`;
     }
     case "screened": return `Rated: ${FIT[d.fit] || d.fit}`;
+    case "shortlist_changed": return SHORTLIST_CHANGE[d.change] || EVENTS[e.kind];
     default: return EVENTS[e.kind] || e.kind.replaceAll("_", " ");
   }
 }
@@ -655,10 +696,12 @@ function groupRows(gs, opts = {}) {
 
 /* ---------- views ---------- */
 
+// reviewGroups is the shortlist, one job to a row in its order, then the
+// other jobs in review, grouped by title as elsewhere.
 function reviewGroups() {
   let jobs = state.lists.review || [];
   if (state.fit !== "all") jobs = jobs.filter((j) => j.fit === state.fit);
-  return groups(jobs);
+  return [...jobs.filter((j) => j.shortlist).map((j) => ({ lead: j, others: [] })), ...groups(jobs.filter((j) => !j.shortlist))];
 }
 
 function viewReview() {
@@ -675,7 +718,13 @@ function viewReview() {
         h("kbd", null, "s"), " skip · ", h("kbd", null, "o"), " open · ", h("kbd", null, "n"), " notes · ", h("kbd", null, "x"), " select · ",
         h("kbd", null, "u"), " undo"),
       h("button", { class: "btn", type: "button", onclick: () => toggleForm("job") }, state.form === "job" ? "Close" : "Add a role")));
-  const list = gs.length ? h("div", { class: "list" }, groupRows(gs, { pickable: true, keys: true })) : reviewEmpty();
+  const rows = groupRows(gs, { pickable: true, keys: true });
+  const listed = gs.filter((g) => g.lead.shortlist).length;
+  if (listed) {
+    if (listed < gs.length) rows.splice(listed, 0, h("p", { class: "section-label divider" }, "Everything else in review"));
+    rows.unshift(h("p", { class: "section-label" }, `Apply next · ${listed}`));
+  }
+  const list = gs.length ? h("div", { class: "list" }, rows) : reviewEmpty();
   return [toolbar, state.form === "job" ? jobForm() : null, list].filter(Boolean);
 }
 

@@ -55,6 +55,7 @@ func New(d Deps) *mcp.Server {
 	t := &tools{Deps: d}
 	t.addProfileTools(s)
 	t.addJobTools(s)
+	t.addShortlistTools(s)
 	t.addManageTools(s)
 	t.addTrackerTools(s)
 	t.addInterviewTools(s)

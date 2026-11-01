@@ -415,6 +415,106 @@ func TestTriage(t *testing.T) {
 	}
 }
 
+func TestShortlist(t *testing.T) {
+	f := newFixture(t)
+	ids := f.seed("Backend Engineer", "Data Engineer", "Platform Engineer", "Frontend Engineer", "Product Designer")
+	a, b, c, d := ids["Backend Engineer"], ids["Data Engineer"], ids["Platform Engineer"], ids["Frontend Engineer"]
+	ctx := context.Background()
+	if _, err := core.SetShortlist(ctx, f.s, store.Agent("test-agent"), []store.ShortlistEntry{
+		{JobID: c, Reason: "Pay fits"}, {JobID: a, Reason: "Principal level"}, {JobID: b, Reason: "Closing soon"}}); err != nil {
+		t.Fatal(err)
+	}
+	// order is the To review list, with the shortlisted jobs' ranks and
+	// who set them; the agent sees the same through list_candidates.
+	order := func() string {
+		t.Helper()
+		var parts []string
+		for _, j := range f.list("review") {
+			p := fmt.Sprint(j.ID)
+			if j.Shortlist != nil {
+				p += fmt.Sprintf(":%d:%s", j.Shortlist.Rank, j.Shortlist.SetBy)
+			}
+			parts = append(parts, p)
+		}
+		page, err := core.ListJobs(ctx, f.s, core.ListInput{Status: "review"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var agent []string
+		for _, r := range page.Jobs {
+			p := fmt.Sprint(r.ID)
+			if r.Shortlist != nil {
+				p += fmt.Sprintf(":%d:%s", r.Shortlist.Rank, core.ShortlistSetBy(r.Shortlist.SetBy))
+			}
+			agent = append(agent, p)
+		}
+		if got, want := strings.Join(agent, " "), strings.Join(parts, " "); got != want {
+			t.Errorf("list_candidates shows %s; the dashboard %s", got, want)
+		}
+		return strings.Join(parts, " ")
+	}
+	want := func(parts ...any) string { return strings.TrimSpace(fmt.Sprintln(parts...)) }
+
+	if got := order(); got != want(fmt.Sprintf("%d:1:agent", c), fmt.Sprintf("%d:2:agent", a), fmt.Sprintf("%d:3:agent", b), d) {
+		t.Fatalf("the agent's shortlist: %s", got)
+	}
+	if r := f.list("review")[0].Shortlist; r.Reason != "Pay fits" {
+		t.Errorf("the first job's reason: %+v", r)
+	}
+
+	var row jobJSON
+	f.ok("POST", fmt.Sprintf("/api/shortlist/%d", a), map[string]any{"action": "up"}, &row)
+	if row.Shortlist == nil || row.Shortlist.Rank != 1 || row.Shortlist.SetBy != "user" {
+		t.Errorf("after up: %+v", row.Shortlist)
+	}
+	if got := order(); got != want(fmt.Sprintf("%d:1:user", a), fmt.Sprintf("%d:2:user", c), fmt.Sprintf("%d:3:agent", b), d) {
+		t.Errorf("after up: %s", got)
+	}
+	f.ok("POST", fmt.Sprintf("/api/shortlist/%d", c), map[string]any{"action": "down"}, nil)
+	f.ok("POST", fmt.Sprintf("/api/shortlist/%d", a), map[string]any{"action": "remove"}, nil)
+	f.ok("POST", fmt.Sprintf("/api/shortlist/%d", d), map[string]any{"action": "add"}, &row)
+	if row.Shortlist == nil || row.Shortlist.Reason != core.UserShortlistReason || row.Shortlist.Rank != 3 {
+		t.Errorf("after add: %+v", row.Shortlist)
+	}
+	if got := order(); got != want(fmt.Sprintf("%d:1:user", b), fmt.Sprintf("%d:2:user", c), fmt.Sprintf("%d:3:user", d), a) {
+		t.Errorf("after down, remove and add: %s", got)
+	}
+
+	// Up and down swap among the jobs shown: a job out of review is
+	// skipped over, and keeps its row.
+	f.ok("PATCH", fmt.Sprintf("/api/jobs/%d", c), map[string]any{"status": "skipped"}, nil)
+	f.ok("POST", fmt.Sprintf("/api/shortlist/%d", d), map[string]any{"action": "up"}, nil)
+	f.ok("PATCH", fmt.Sprintf("/api/jobs/%d", c), map[string]any{"status": "review"}, nil)
+	if got := order(); got != want(fmt.Sprintf("%d:1:user", d), fmt.Sprintf("%d:2:user", c), fmt.Sprintf("%d:3:user", b), a) {
+		t.Errorf("after moving past a skipped job: %s", got)
+	}
+
+	for _, bad := range []struct {
+		id     int64
+		action string
+	}{{d, "up"}, {b, "down"}, {d, "add"}, {a, "remove"}, {ids["Product Designer"], "add"}, {a, "top"}} {
+		if code := f.do("POST", fmt.Sprintf("/api/shortlist/%d", bad.id), map[string]any{"action": bad.action}, nil); code != http.StatusBadRequest {
+			t.Errorf("%s on %d: status %d", bad.action, bad.id, code)
+		}
+	}
+
+	// Each change is on the job's timeline as the user's, without the reason.
+	var detail jobDetailJSON
+	f.ok("GET", fmt.Sprintf("/api/jobs/%d", d), nil, &detail)
+	var changes []string
+	for _, e := range detail.Events {
+		if e.Kind == "shortlist_changed" {
+			changes = append(changes, e.Actor+" "+string(e.Data))
+			if strings.Contains(string(e.Data), core.UserShortlistReason) {
+				t.Errorf("an event holds the reason: %s", e.Data)
+			}
+		}
+	}
+	if len(changes) != 2 || !strings.HasPrefix(changes[0], `user {"change":"added"`) || !strings.HasPrefix(changes[1], `user {"change":"moved_up"`) {
+		t.Errorf("events: %v", changes)
+	}
+}
+
 func TestContentFlagReview(t *testing.T) {
 	f := newFixture(t)
 	ids := f.seed("Backend Engineer")

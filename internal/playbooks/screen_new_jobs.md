@@ -24,7 +24,8 @@ Rate jobs that passed the user's filters, so the user only reads the ones worth 
    - **flags**: short labels for things the user asked to see, and for pay not posted or below the floor, or a location that is unclear.
 6. Save each page's ratings with one `record_screening` call before moving on.
 7. If screening teaches you something about the user's preferences, such as a deal-breaker that keeps coming up, save it with `remember` as an inferred memory, and offer to add it to the profile.
+8. Once every page is saved with `record_screening`, update the shortlist, the user's answer to "what should I apply to next?". Read the current one with `list_candidates` and status review: shortlisted jobs come first, each with its rank, reason and set_by. Then call `set_shortlist` with the whole list re-ranked, at most 30 jobs, each with a one-line reason in your own words (why now: pay, level, closing soon), never quoting the listing. Keep the user's own changes (set_by user: jobs they added or moved) in their places unless they told you otherwise.
 
 ## Finish
 
-Give a short summary: how many you rated of each fit, the strong ones by title and company, any content flags you reported, and anything that suggests the filters or profile need a change. Offer to tune the filters if many jobs were clearly wrong.
+Give a short summary: how many you rated of each fit, the strong ones by title and company, the top of the shortlist, any content flags you reported, and anything that suggests the filters or profile need a change. Offer to tune the filters if many jobs were clearly wrong.

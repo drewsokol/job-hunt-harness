@@ -60,7 +60,7 @@ func TestOutputSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(res.Tools)
-	if len(b) > 40_000 {
+	if len(b) > 42_000 {
 		t.Errorf("the tool list is %d bytes", len(b))
 	}
 	t.Logf("tool list: %d tools, %d bytes", len(res.Tools), len(b))

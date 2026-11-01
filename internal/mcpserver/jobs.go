@@ -47,11 +47,20 @@ type fitOut struct {
 	At             string          `json:"at"`
 }
 
+// shortlistOut is a job's place on the shortlist. The reason is the
+// agent's or the user's own words.
+type shortlistOut struct {
+	Rank   int    `json:"rank"`
+	Reason string `json:"reason"`
+	SetBy  string `json:"set_by"` // agent or user
+}
+
 type jobOut struct {
-	Job       int64  `json:"job"`
-	Status    string `json:"status"`
-	Origin    string `json:"origin"`
-	Workplace string `json:"workplace"`
+	Job       int64         `json:"job"`
+	Status    string        `json:"status"`
+	Shortlist *shortlistOut `json:"shortlist,omitempty"`
+	Origin    string        `json:"origin"`
+	Workplace string        `json:"workplace"`
 	// Via says the job was found by search and no board lists it: the link
 	// is the job's page there, where the user applies.
 	Via            string             `json:"via,omitempty"`
@@ -91,6 +100,9 @@ func job(r store.JobRow, allReasons bool) jobOut {
 	}
 	if sc := r.Screening; sc != nil {
 		out.Fit = screening(*sc)
+	}
+	if p := r.Shortlist; p != nil {
+		out.Shortlist = &shortlistOut{p.Rank, p.Reason, core.ShortlistSetBy(p.SetBy)}
 	}
 	return out
 }

@@ -102,6 +102,11 @@ details.group > .list { margin-top: 8px; }
 .notes-box textarea { text-transform: none; letter-spacing: 0; font-size: 14px; line-height: 1.45; resize: vertical; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; justify-content: flex-end; }
 .pick { margin: 0; align-self: center; }
+.rank { font: 600 13px var(--font-mono); color: var(--accent-ink); background: var(--accent); border-radius: 999px; min-width: 22px; padding: 1px 6px; text-align: center; }
+.apply-next { margin: 2px 0 0; max-width: 72ch; color: var(--accent); }
+.apply-next b { font-weight: 600; }
+.shortlist-actions { display: flex; gap: 4px; }
+.section-label.divider { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
 
 .flag { border-left: 3px solid var(--bad-fg); background: var(--bad-bg); border-radius: 0 8px 8px 0; padding: 8px 12px; margin-top: 8px; display: grid; gap: 6px; max-width: 80ch; }
 .flag.canary { border-left-color: var(--warn-fg); background: var(--warn-bg); }
