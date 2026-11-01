@@ -1,0 +1,38 @@
+# Builds jhh's release binaries. The Release workflow
+# (.github/workflows/release.yml) runs it on a new version tag.
+version: 2
+
+project_name: jhh
+
+builds:
+  - id: jhh
+    main: ./cmd/jhh
+    binary: jhh
+    env:
+      # modernc.org/sqlite is pure Go, so no C toolchain is needed.
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/drewsokol/job-hunt-harness/internal/buildinfo.version=v{{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "jhh_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  # GitHub writes the notes from the merged PRs' titles.
+  use: github-native
+
+release:
+  # The workflow publishes it once the attestations are made.
+  draft: true

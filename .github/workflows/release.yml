@@ -1,0 +1,108 @@
+# Publishes a release: tags main's latest commit with the version given,
+# builds the binaries for Windows, macOS and Linux with GoReleaser
+# (.goreleaser.yaml) as a draft with notes from the merged PRs, attests
+# where each archive came from, so a download can be checked with
+# `gh attestation verify <file> -R drewsokol/job-hunt-harness`, and only
+# then publishes it. A run that fails or is cancelled after tagging deletes
+# its tag and draft, so it can simply be run again with the same version.
+#
+# Only an owner (listed in the OWNERS repository variable, a JSON array of
+# GitHub logins) can run it, from the Actions tab or with
+# `gh workflow run release.yml -f version=v0.1.0`, and only on main.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, such as v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.repository_owner == 'drewsokol' &&
+      github.ref == 'refs/heads/main' &&
+      contains(fromJSON(vars.OWNERS || '[]'), github.actor) &&
+      contains(fromJSON(vars.OWNERS || '[]'), github.triggering_actor)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the tag and the release
+      id-token: write # signing the attestations
+      attestations: write
+    steps:
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Version must look like v1.2.3, not $VERSION"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # GoReleaser compares with the previous tag
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Tag
+        id: tag
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "$VERSION is already tagged"
+            exit 1
+          fi
+          git tag "$VERSION"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "refs/tags/$VERSION"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+      - name: Publish
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh release edit "$VERSION" --repo "$REPO" --draft=false --latest
+
+      - name: Clean up after a failed or cancelled run
+        if: (failure() || cancelled()) && steps.tag.outputs.pushed == 'true'
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release delete "$VERSION" --repo "$REPO" --yes || true
+          git push --delete "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "refs/tags/$VERSION" || true

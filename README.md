@@ -6,9 +6,17 @@ jhh pulls open roles from the public job boards of the companies you care about,
 
 **Status: early development.** The MVP is built: jhh works from your agent and has a local dashboard. Next it gets used on a real search before more features are added. The design is in [docs/design.md](docs/design.md), and progress is tracked in [docs/roadmap.md](docs/roadmap.md).
 
+## Install
+
+Download the archive for your system from the [latest release](https://github.com/drewsokol/job-hunt-harness/releases/latest), unpack it, and put `jhh` (`jhh.exe` on Windows) somewhere on your `PATH`. `jhh version` says which release you have.
+
+The binaries aren't signed yet, so Windows SmartScreen and macOS Gatekeeper warn the first time you run one. To check that a download was built from this repo, use the GitHub CLI: `gh attestation verify <archive> -R drewsokol/job-hunt-harness`. Or build it yourself with Go: `go install github.com/drewsokol/job-hunt-harness/cmd/jhh@latest`.
+
+To update, download the new release and replace the binary, then restart your agent's connection to jhh. jhh backs up its database before it upgrades it.
+
 ## Connect your agent
 
-Build jhh (see Development below), then add it to your agent as an MCP server that runs the `jhh` binary with no arguments. In Claude Code:
+Add jhh to your agent as an MCP server that runs the `jhh` binary with no arguments. In Claude Code:
 
 ```sh
 claude mcp add jhh -- /path/to/jhh
