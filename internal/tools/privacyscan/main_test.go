@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -85,10 +88,63 @@ diff --git a/springfield.md b/springfield.md
 `
 	var out strings.Builder
 	s := scanner{terms: parseTerms("springfield"), out: &out}
-	s.scanPatch(patch)
+	s.scanPatch("", patch)
 	want := "a.go:12: private term 1\na.go:13: private term 1\n" +
 		"springfield.md (file name): private term 1\nspringfield.md:1: private term 1\n"
 	if out.String() != want {
 		t.Errorf("findings = %q, want %q", out.String(), want)
+	}
+}
+
+// TestScanCommits checks each commit's own changes, so a term added in one
+// commit and removed in the next, or brought in by a rename, is caught.
+func TestScanCommits(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+			"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	write("a.txt", "one\n")
+	git("add", "a.txt")
+	git("commit", "-q", "-m", "base")
+	git("tag", "base")
+	write("a.txt", "one\nmoving to Springfield\n")
+	git("commit", "-q", "-am", "add a line")
+	write("a.txt", "one\n")
+	git("commit", "-q", "-am", "take it out again")
+	git("mv", "a.txt", "springfield.txt")
+	git("commit", "-q", "-m", "rename")
+
+	var out strings.Builder
+	s := scanner{terms: parseTerms("springfield"), out: &out, dir: dir}
+	if err := s.scanCommits("base..HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{" a.txt:2: private term 1", " springfield.txt (file name): private term 1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("findings = %q, want one containing %q", got, want)
+		}
+	}
+	if s.findings != 2 {
+		t.Errorf("findings = %d (%q), want 2", s.findings, got)
 	}
 }

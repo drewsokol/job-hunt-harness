@@ -8,11 +8,14 @@
 // The private terms are checked only on the owner's own machine, from a
 // file outside the repo, one per line. They are never given to CI, where
 // the code under test could read them. A finding names the term by its line
-// number, never by its text. With -base, the terms are checked only on
-// lines added since that revision, since some terms are ordinary words (a
-// state, a round number) that existing code uses for other reasons.
+// number, never by its text. With -commits, the terms are checked on the
+// messages of the commits in that range and on every line and file name
+// each one adds, so a term added in one commit and removed in the next is
+// still caught; the rest of the tree is left out, since some terms are
+// ordinary words (a state, a round number) that existing code uses for
+// other reasons.
 //
-//	go run ./internal/tools/privacyscan -terms-file ~/.jhh-dev/privacy-terms.txt -base origin/main -commits origin/main..HEAD
+//	go run ./internal/tools/privacyscan -terms-file ~/.jhh-dev/privacy-terms.txt -commits origin/main..HEAD
 package main
 
 import (
@@ -25,14 +28,14 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
 func main() {
 	termsFile := flag.String("terms-file", "", "file outside the repo holding the private terms, one per line")
-	commits := flag.String("commits", "", "git revision range whose commit messages to scan, such as origin/main..HEAD")
-	base := flag.String("base", "", "check the private terms only on lines added since this git revision")
+	commits := flag.String("commits", "", "git revision range whose commits to scan, such as origin/main..HEAD")
 	textEnv := flag.String("text-env", "", "comma-separated environment variables whose text to scan, such as PR_TITLE,PR_BODY")
 	flag.Parse()
 
@@ -50,15 +53,9 @@ func main() {
 	}
 
 	s := scanner{terms: terms, out: os.Stdout}
-	if err := s.scanTree(*base == ""); err != nil {
+	if err := s.scanTree(*commits == ""); err != nil {
 		fmt.Fprintln(os.Stderr, "privacyscan:", err)
 		os.Exit(2)
-	}
-	if *base != "" {
-		if err := s.scanDiff(*base); err != nil {
-			fmt.Fprintln(os.Stderr, "privacyscan:", err)
-			os.Exit(2)
-		}
 	}
 	if *commits != "" {
 		if err := s.scanCommits(*commits); err != nil {
@@ -95,7 +92,18 @@ func parseTerms(text string) []string {
 type scanner struct {
 	terms    []string
 	out      io.Writer
+	dir      string // the repo; "" is the working directory
 	findings int
+}
+
+func (s *scanner) git(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = s.dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w", args[0], err)
+	}
+	return string(out), nil
 }
 
 func (s *scanner) report(where, what string) {
@@ -106,18 +114,18 @@ func (s *scanner) report(where, what string) {
 // scanTree checks every file git tracks, for the private terms too when
 // terms is true.
 func (s *scanner) scanTree(terms bool) error {
-	list, err := exec.Command("git", "ls-files", "-z").Output()
+	list, err := s.git("ls-files", "-z")
 	if err != nil {
-		return fmt.Errorf("git ls-files: %w", err)
+		return err
 	}
-	for name := range strings.SplitSeq(strings.TrimRight(string(list), "\x00"), "\x00") {
+	for name := range strings.SplitSeq(strings.TrimRight(list, "\x00"), "\x00") {
 		if name == "" {
 			continue
 		}
 		if why := dataFile(name); why != "" {
 			s.report(name, why)
 		}
-		b, err := os.ReadFile(name)
+		b, err := os.ReadFile(filepath.Join(s.dir, name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue // deleted in the working tree
 		}
@@ -132,22 +140,11 @@ func (s *scanner) scanTree(terms bool) error {
 	return nil
 }
 
-// scanDiff checks the lines added since a revision for the private terms.
-// The general rules already covered them in scanTree.
-func (s *scanner) scanDiff(rev string) error {
-	out, err := exec.Command("git", "diff", "-U0", "--no-color", "--no-ext-diff", rev, "--").Output()
-	if err != nil {
-		return fmt.Errorf("git diff %s: %w", rev, err)
-	}
-	s.scanPatch(string(out))
-	return nil
-}
-
 var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)`)
 
 // scanPatch checks the added lines of a unified diff, and the names of the
-// files they're in, for the private terms.
-func (s *scanner) scanPatch(patch string) {
+// files they're in, for the private terms. Findings start with prefix.
+func (s *scanner) scanPatch(prefix, patch string) {
 	file, n := "", 0
 	header := false // between "diff --git" and the first hunk
 	for line := range strings.SplitSeq(patch, "\n") {
@@ -157,7 +154,7 @@ func (s *scanner) scanPatch(patch string) {
 		case header && strings.HasPrefix(line, "+++ "):
 			if name := strings.TrimPrefix(line, "+++ "); name != "/dev/null" {
 				file = strings.TrimPrefix(name, "b/")
-				s.scanTerms(file+" (file name)", file)
+				s.scanTerms(prefix+file+" (file name)", file)
 			}
 		case strings.HasPrefix(line, "@@"):
 			header = false
@@ -165,28 +162,47 @@ func (s *scanner) scanPatch(patch string) {
 				fmt.Sscan(m[1], &n)
 			}
 		case strings.HasPrefix(line, "+"):
-			s.scanTerms(fmt.Sprintf("%s:%d", file, n), line[1:])
+			s.scanTerms(fmt.Sprintf("%s%s:%d", prefix, file, n), line[1:])
 			n++
 		}
 	}
 }
 
-// scanCommits checks the messages of the commits in a revision range.
+// scanCommits checks the messages of the commits in a revision range and,
+// when there are private terms, what each commit adds.
 func (s *scanner) scanCommits(rng string) error {
-	out, err := exec.Command("git", "log", "--format=%H%n%B%x00", rng).Output()
+	out, err := s.git("log", "--format=%H%n%B%x00", rng)
 	if err != nil {
-		return fmt.Errorf("git log %s: %w", rng, err)
+		return err
 	}
-	for entry := range strings.SplitSeq(string(out), "\x00") {
+	for entry := range strings.SplitSeq(out, "\x00") {
 		entry = strings.TrimLeft(entry, "\n")
 		hash, msg, ok := strings.Cut(entry, "\n")
 		if !ok {
 			continue
 		}
-		s.scanText("commit "+hash[:min(len(hash), 12)], msg, true, true)
+		s.scanText("commit "+short(hash), msg, true, true)
+	}
+	if len(s.terms) == 0 {
+		return nil
+	}
+	// Renames are shown as a delete and an add, so a new name and every
+	// line under it are scanned.
+	out, err = s.git("log", "-p", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--format=%x00%H", rng)
+	if err != nil {
+		return err
+	}
+	for entry := range strings.SplitSeq(out, "\x00") {
+		hash, patch, ok := strings.Cut(entry, "\n")
+		if !ok {
+			continue
+		}
+		s.scanPatch("commit "+short(hash)+" ", patch)
 	}
 	return nil
 }
+
+func short(hash string) string { return hash[:min(len(hash), 12)] }
 
 // dataFile says why a tracked file looks like user data, or "".
 func dataFile(name string) string {
