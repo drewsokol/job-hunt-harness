@@ -101,7 +101,7 @@ func (s *scanner) git(args ...string) (string, error) {
 	cmd.Dir = s.dir
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w", args[0], err)
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return string(out), nil
 }
@@ -150,12 +150,15 @@ func (s *scanner) scanPatch(prefix, patch string) {
 	for line := range strings.SplitSeq(patch, "\n") {
 		switch {
 		case strings.HasPrefix(line, "diff --git "):
+			// The name comes from here, not "+++", which binary and
+			// empty files don't have.
 			header = true
-		case header && strings.HasPrefix(line, "+++ "):
-			if name := strings.TrimPrefix(line, "+++ "); name != "/dev/null" {
-				file = strings.TrimPrefix(name, "b/")
+			if _, name, ok := strings.Cut(line, " b/"); ok {
+				file = name
 				s.scanTerms(prefix+file+" (file name)", file)
 			}
+		case header && strings.HasPrefix(line, "+++ "):
+			// Part of the header, not an added line.
 		case strings.HasPrefix(line, "@@"):
 			header = false
 			if m := hunkHeader.FindStringSubmatch(line); m != nil {
@@ -171,7 +174,7 @@ func (s *scanner) scanPatch(prefix, patch string) {
 // scanCommits checks the messages of the commits in a revision range and,
 // when there are private terms, what each commit adds.
 func (s *scanner) scanCommits(rng string) error {
-	out, err := s.git("log", "--format=%H%n%B%x00", rng)
+	out, err := s.git("-c", "core.quotepath=off", "log", "--format=%H%n%B%x00", rng)
 	if err != nil {
 		return err
 	}
@@ -187,8 +190,9 @@ func (s *scanner) scanCommits(rng string) error {
 		return nil
 	}
 	// Renames are shown as a delete and an add, so a new name and every
-	// line under it are scanned.
-	out, err = s.git("log", "-p", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--format=%x00%H", rng)
+	// line under it are scanned. Merge commits show no patch: what a merge
+	// brings in is scanned in the commits it merges.
+	out, err = s.git("-c", "core.quotepath=off", "log", "-p", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--format=%x00%H", rng)
 	if err != nil {
 		return err
 	}

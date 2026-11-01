@@ -873,8 +873,6 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 
 The repo is public, `main` takes changes only through PRs the owner merges, and CI runs on every PR. The rest of this list is still open: the security settings, the community files and templates, and releases (decision 0011).
 
-- **Branch**: the local branch is `master`. Rename it to `main` before the first push (`git branch -m master main`). Protect `main`: require PRs, passing CI and a linear history.
-- **Visibility**: public from the first push, after deciding on question 3 above.
 - **Files**: `LICENSE`, `README.md`, `CONTRIBUTING.md` (dev setup, the privacy rules from CLAUDE.md, how to add a source or company), `CODE_OF_CONDUCT.md` (Contributor Covenant), `SECURITY.md` (with GitHub private vulnerability reporting turned on).
 - **Issue templates**: bug report and feature request.
 - **PR template** with a privacy checklist: "no real resumes, profiles, salaries, contacts or databases; fixtures are made up".

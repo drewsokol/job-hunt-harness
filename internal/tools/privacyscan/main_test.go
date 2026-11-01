@@ -132,6 +132,9 @@ func TestScanCommits(t *testing.T) {
 	git("commit", "-q", "-am", "take it out again")
 	git("mv", "a.txt", "springfield.txt")
 	git("commit", "-q", "-m", "rename")
+	write("springfield.png", "\x00binary")
+	git("add", "springfield.png")
+	git("commit", "-q", "-m", "write to someone"+"@"+"realmail.io")
 
 	var out strings.Builder
 	s := scanner{terms: parseTerms("springfield"), out: &out, dir: dir}
@@ -139,12 +142,17 @@ func TestScanCommits(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{" a.txt:2: private term 1", " springfield.txt (file name): private term 1"} {
+	for _, want := range []string{
+		" a.txt:2: private term 1",
+		" springfield.txt (file name): private term 1",
+		" springfield.png (file name): private term 1",
+		":1: email address outside the example domains",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("findings = %q, want one containing %q", got, want)
 		}
 	}
-	if s.findings != 2 {
-		t.Errorf("findings = %d (%q), want 2", s.findings, got)
+	if s.findings != 4 {
+		t.Errorf("findings = %d (%q), want 4", s.findings, got)
 	}
 }
