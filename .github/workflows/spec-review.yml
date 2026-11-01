@@ -21,10 +21,6 @@ on:
   issue_comment:
     types: [created]
 
-concurrency:
-  group: spec-review-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   pull-requests: write
@@ -45,6 +41,11 @@ jobs:
           contains(fromJSON(vars.OWNERS || '[]'), github.event.comment.user.login) &&
           startsWith(github.event.comment.body, '/review'))
       )
+    # At the job level, not the workflow's: a run whose `if` is false (any
+    # other comment) then never joins the group, so it can't cancel a review.
+    concurrency:
+      group: spec-review-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     env:
       PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
@@ -67,14 +68,20 @@ jobs:
               echo "found=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes >/dev/null
           fi
           specs=$(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only | grep '^docs/specs/' | grep -v '^docs/specs/\(TEMPLATE\|README\)\.md$' || true)
           if [ -z "$specs" ]; then
             echo "No spec in this PR; nothing to review."
             echo "found=false" >> "$GITHUB_OUTPUT"
+            reaction=confused
           else
             echo "found=true" >> "$GITHUB_OUTPUT"
+            reaction=eyes
+          fi
+          # Show the owner the command was seen: eyes for a review on its
+          # way, confused for a PR with no spec in it.
+          if [ "$EVENT" = "issue_comment" ]; then
+            gh api "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content="$reaction" >/dev/null
           fi
 
       # The base branch, trusted: Claude Code reads its CLAUDE.md and settings.
