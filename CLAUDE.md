@@ -45,6 +45,7 @@ The original personal version's scripts and dashboard were removed from the repo
 
 ## Working in this repo
 
+- Releases come from the Release workflow, which an owner runs with a version (`gh workflow run release.yml -f version=v0.2.0`); it tags main and GoReleaser builds the binaries (`.goreleaser.yaml`). Never tag by hand.
 - Line endings are LF (`.gitattributes`). Editors or scripts on Windows that write CRLF will show every line as changed.
 - Tests never touch the network. Sources are tested against made-up fixtures through `internal/sources/conformance`. For a live check, run `jhh refresh` with `JHH_DATA_DIR` pointing at a scratch directory, never at real data.
 - Tests that start jhh set `JHH_UI_PORT=0`, so they never take the real dashboard's port.

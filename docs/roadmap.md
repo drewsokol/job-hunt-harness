@@ -48,7 +48,7 @@ New features start as specs in [docs/specs](specs/) and are built by a workflow 
 - Export (JSON) and backup command
 - README, CONTRIBUTING, docs on adding a source or a company
 - GitHub setup: security settings, issue and PR templates (design.md section 11); CI and branch protection are done
-- v0.1 release binaries
+- v0.1 release binaries (the Release workflow is built; the first release is still to come)
 
 ## Later
 

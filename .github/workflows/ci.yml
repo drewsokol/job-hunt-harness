@@ -1,6 +1,7 @@
 # Checks every pull request to main and every push to main.
 #
-# check: formatting, vet, staticcheck, and the tests with the race detector.
+# check: formatting, vet, staticcheck, the tests with the race detector, and
+#   the GoReleaser config.
 # test: the tests on macOS and Windows.
 # privacy: the privacy scan's general rules (internal/tools/privacyscan) on
 #   every file, the commit messages and the PR's title and body. The owner's
@@ -46,6 +47,12 @@ jobs:
       - run: go vet ./...
       - run: go tool staticcheck ./...
       - run: go test -race ./...
+      - name: Check the GoReleaser config
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: check
 
   test:
     strategy:

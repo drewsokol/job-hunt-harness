@@ -49,7 +49,7 @@ To ask, the workflow posts one comment tagging the owner with numbered questions
 
 **A coding agent watches for questions.** In a session the owner leaves open, a coding agent checks for `needs-owner-input` every few minutes, reads the question and the code it's about, and brings the owner a summary and a recommendation. After they talk it over, it posts the answer and `/continue` from the owner's account, once the owner has approved the wording, and says it drafted the reply. GitHub's own notification of the tag covers the times no session is open.
 
-**Releases are built by a workflow.** A release PR collects merged changes, and merging it tags a version; GoReleaser then builds the binaries for Windows, macOS and Linux with checksums and notes. Users install a release instead of building from source.
+**Releases are built by a workflow.** An owner runs the Release workflow with a version number; it tags main, GoReleaser builds the binaries for Windows, macOS and Linux with checksums, and GitHub writes the notes from the merged PRs' titles. Users install a release instead of building from source. (A release PR made by a release bot was considered, but a PR opened with the workflow's own token never starts CI, so its required checks could never pass.)
 
 ## Consequences
 
