@@ -28,9 +28,9 @@ The steps that need the owner are few: agreeing what to build, answering a quest
 - they can't tell whether something is personal data;
 - they still disagree after 10 rounds.
 
-To ask, the workflow posts one comment tagging the owner with numbered questions, adds the `needs-drew` label, and **ends the run**. Nothing waits on a runner; everything the next run needs is on the PR.
+To ask, the workflow posts one comment tagging the owner with numbered questions, adds the `needs-owner-input` label, and **ends the run**. Nothing waits on a runner; everything the next run needs is on the PR.
 
-**The owner steers with commands.** A comment by the owner whose first line is one of these starts the next step; comments from anyone else, and comments without a command, start nothing.
+**The owner steers with commands.** A comment by an owner whose first line is one of these starts the next step; comments from anyone else, and comments without a command, start nothing. The owners are listed in a repository variable (`OWNERS`), not written into the workflows, so the project can add owners later; labels and commands never name a person.
 
 | Command | Where | What it does |
 |---|---|---|
@@ -39,15 +39,15 @@ To ask, the workflow posts one comment tagging the owner with numbered questions
 | `/stop` | build PR | Ends the attempt: the PR is closed and the branch kept |
 | `/restart` | build PR | Throws the branch away and builds again from the spec and the comments |
 
-**Labels show where a feature stands:** `building` while a run is going, `needs-drew` when it's waiting on the owner, `final-review` when it's ready to merge.
+**Labels show where a feature stands:** `building` while a run is going, `needs-owner-input` when it's waiting on the owner, `final-review` when it's ready to merge.
 
 **The owner merges.** No workflow merges a PR. Letting the workflow merge after it has run well for a while is a later decision, with its own record.
 
 **Trust comes from the checks.** CI (gofmt, vet, staticcheck, tests, the migration numbering, the privacy scan) is required on `main`. The privacy scan reads the owner's private terms from a repository secret, so the public repo never lists them, and it reports a file and line, never the term it matched.
 
-**Only the owner can start anything.** Every workflow that holds a secret checks that the event came from the owner (`github.actor`, or the comment's author) and never runs for forks. No workflow uses `pull_request_target` with the PR's code. The implementer pushes only its own branch, as the Claude GitHub App, so CI runs on its pushes; it can't change `.github/` or a merged spec, and it never merges.
+**Only the owner can start anything.** Every workflow that holds a secret checks that the event came from an owner (`github.actor`, or the comment's author, against `OWNERS`) and never runs for forks. No workflow uses `pull_request_target` with the PR's code. The implementer pushes only its own branch, as the Claude GitHub App, so CI runs on its pushes; it can't change `.github/` or a merged spec, and it never merges.
 
-**A coding agent watches for questions.** In a session the owner leaves open, a coding agent checks for `needs-drew` every few minutes, reads the question and the code it's about, and brings the owner a summary and a recommendation. After they talk it over, it posts the answer and `/continue` from the owner's account, once the owner has approved the wording, and says it drafted the reply. GitHub's own notification of the tag covers the times no session is open.
+**A coding agent watches for questions.** In a session the owner leaves open, a coding agent checks for `needs-owner-input` every few minutes, reads the question and the code it's about, and brings the owner a summary and a recommendation. After they talk it over, it posts the answer and `/continue` from the owner's account, once the owner has approved the wording, and says it drafted the reply. GitHub's own notification of the tag covers the times no session is open.
 
 **Releases are built by a workflow.** A release PR collects merged changes, and merging it tags a version; GoReleaser then builds the binaries for Windows, macOS and Linux with checksums and notes. Users install a release instead of building from source.
 
