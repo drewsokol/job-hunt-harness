@@ -1,0 +1,16 @@
+#!/bin/sh
+# Runs the privacy scan before every push, with the owner's private terms.
+#
+# Install:  cp scripts/pre-push .git/hooks/pre-push
+#
+# The terms live in a file outside the repo, one per line (lines starting
+# with # are skipped): $JHH_PRIVACY_TERMS, or ~/.jhh-dev/privacy-terms.txt.
+# They never go to GitHub. Without the file, only the general rules run.
+
+terms="${JHH_PRIVACY_TERMS:-$HOME/.jhh-dev/privacy-terms.txt}"
+git fetch --quiet origin main || exit 1
+if [ -f "$terms" ]; then
+	exec go run ./internal/tools/privacyscan -terms-file "$terms" -base origin/main -commits origin/main..HEAD
+fi
+echo "pre-push: no private terms at $terms; checking the general rules only" >&2
+exec go run ./internal/tools/privacyscan -commits origin/main..HEAD

@@ -3,15 +3,16 @@
 // characters, local Windows user paths and real email addresses.
 //
 // The general rules cover every tracked file, and optionally commit
-// messages and extra text such as a PR's title and body. The private terms
-// come from an environment variable or a file outside the repo, one per
-// line, so the public repo never lists them; a finding names the term by
-// its line number, never by its text. With -base, the terms are checked
-// only on lines added since that revision, since some terms are ordinary
-// words (a state, a round number) that existing code uses for other
-// reasons.
+// messages and extra text such as a PR's title and body; CI runs them.
 //
-//	go run ./internal/tools/privacyscan -terms-file ~/privacy-terms.txt -base origin/main -commits origin/main..HEAD
+// The private terms are checked only on the owner's own machine, from a
+// file outside the repo, one per line. They are never given to CI, where
+// the code under test could read them. A finding names the term by its line
+// number, never by its text. With -base, the terms are checked only on
+// lines added since that revision, since some terms are ordinary words (a
+// state, a round number) that existing code uses for other reasons.
+//
+//	go run ./internal/tools/privacyscan -terms-file ~/.jhh-dev/privacy-terms.txt -base origin/main -commits origin/main..HEAD
 package main
 
 import (
@@ -29,24 +30,22 @@ import (
 )
 
 func main() {
-	termsEnv := flag.String("terms-env", "", "environment variable holding the private terms, one per line")
-	termsFile := flag.String("terms-file", "", "file holding the private terms, one per line")
-	requireTerms := flag.Bool("require-terms", false, "fail when no private terms are given")
+	termsFile := flag.String("terms-file", "", "file outside the repo holding the private terms, one per line")
 	commits := flag.String("commits", "", "git revision range whose commit messages to scan, such as origin/main..HEAD")
 	base := flag.String("base", "", "check the private terms only on lines added since this git revision")
 	textEnv := flag.String("text-env", "", "comma-separated environment variables whose text to scan, such as PR_TITLE,PR_BODY")
 	flag.Parse()
 
-	terms, err := loadTerms(*termsEnv, *termsFile)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "privacyscan:", err)
-		os.Exit(2)
-	}
-	if len(terms) == 0 {
-		if *requireTerms {
-			fmt.Fprintln(os.Stderr, "privacyscan: no private terms given; set the PRIVACY_TERMS secret")
+	var terms []string
+	if *termsFile != "" {
+		b, err := os.ReadFile(*termsFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "privacyscan:", err)
 			os.Exit(2)
 		}
+		terms = parseTerms(string(b))
+	}
+	if len(terms) == 0 {
 		fmt.Fprintln(os.Stderr, "privacyscan: no private terms given; checking the general rules only")
 	}
 
@@ -79,23 +78,8 @@ func main() {
 	fmt.Fprintln(os.Stderr, "privacyscan: clean")
 }
 
-// loadTerms reads the private terms from an environment variable and a
-// file, either or both. Blank lines and lines starting with # are skipped.
-func loadTerms(envName, file string) ([]string, error) {
-	var text string
-	if envName != "" {
-		text = os.Getenv(envName)
-	}
-	if file != "" {
-		b, err := os.ReadFile(file)
-		if err != nil {
-			return nil, err
-		}
-		text += "\n" + string(b)
-	}
-	return parseTerms(text), nil
-}
-
+// parseTerms reads the private terms, one per line. Blank lines and lines
+// starting with # are skipped.
 func parseTerms(text string) []string {
 	var terms []string
 	for line := range strings.SplitSeq(text, "\n") {
