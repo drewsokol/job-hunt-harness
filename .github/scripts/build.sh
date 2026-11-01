@@ -211,7 +211,7 @@ put_back() {
 	git -C "$WORK" rm -rq --cached --ignore-unmatch -- .claude
 	git -C "$WORK" checkout -q "$MAIN" -- .claude 2>/dev/null || true
 	git -C "$WORK" clean -qfdx -- .github docs/specs internal/tools/privacyscan .claude
-	git -C "$WORK" diff --name-only --diff-filter=MD "$MAIN" -- docs/decisions ':!docs/decisions/README.md' |
+	git -C "$WORK" diff --name-only --no-renames --diff-filter=MD "$MAIN" -- docs/decisions ':!docs/decisions/README.md' |
 		while read -r f; do git -C "$WORK" checkout -q "$MAIN" -- "$f"; done
 }
 

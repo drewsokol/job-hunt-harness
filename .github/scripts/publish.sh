@@ -85,7 +85,7 @@ git fetch -q "$OUT/branch.bundle" "refs/heads/$BRANCH:refs/build/head" ||
 # What the implementer may not change (build.sh reverts these too).
 protected=$(
 	git diff --name-only origin/main...refs/build/head -- .github docs/specs internal/tools/privacyscan .claude
-	git diff --name-only --diff-filter=MD origin/main...refs/build/head -- docs/decisions ':!docs/decisions/README.md'
+	git diff --name-only --no-renames --diff-filter=MD origin/main...refs/build/head -- docs/decisions ':!docs/decisions/README.md'
 )
 [ -z "$protected" ] || stop_publish "The build changed files it may not change ($(tr '\n' ' ' <<<"$protected")), so nothing was pushed or posted from it."
 
