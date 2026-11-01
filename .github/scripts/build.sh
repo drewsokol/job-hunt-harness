@@ -66,9 +66,19 @@ add_comment() { # add_comment FILE: a comment for the publish job to post, in or
 # pass, ask (waiting for an owner) or error (the script failed; what was
 # committed before is kept).
 finish() {
-	git -C "$WORK" bundle create -q "$OUT/branch.bundle" "refs/heads/$BRANCH"
 	cp "$TMP/decisions.md" "$OUT/decisions.md"
 	cp "$3" "$OUT/message.md"
+	# Nothing that leaves this job may hold a token: not the texts, not the
+	# commit messages. If one does, leave nothing; publish then tells the
+	# owners the run ended without results.
+	if { cat "$OUT"/comments/*.md "$OUT/message.md" "$OUT/decisions.md" 2>/dev/null
+		git -C "$WORK" log --format=%B "$base..refs/heads/$BRANCH"; } |
+		grep -qF -e "$CLAUDE_CODE_OAUTH_TOKEN" -e "$READ_TOKEN"; then
+		echo "::error::The build's output contains a token; leaving no results."
+		rm -rf "${OUT:?}"/*
+		exit 1
+	fi
+	git -C "$WORK" bundle create -q "$OUT/branch.bundle" "refs/heads/$BRANCH"
 	{
 		echo "STATUS=$1"
 		echo "ROUND=$2"
@@ -117,8 +127,11 @@ jq -s --argjson owners "$OWNERS" -r '
 
 case "$MODE" in
 start)
-	# The prepare job made the branch: main plus an empty commit.
+	# The prepare job made the branch: main plus an empty commit. Main may
+	# have moved since, if this build waited for another, so bring it in:
+	# put_back and the checks compare with main as it is now.
 	git -C "$WORK" switch -q -C "$BRANCH" "origin/$BRANCH"
+	git -C "$WORK" merge -q --no-edit origin/main
 	TASK="Build the spec from scratch."
 	;;
 restart)
@@ -178,7 +191,7 @@ put_back() {
 commit_round() {
 	put_back
 	git -C "$WORK" add -A
-	if git -C "$WORK" diff --cached | grep -qF -e "$CLAUDE_CODE_OAUTH_TOKEN" -e "$READ_TOKEN"; then
+	if git -C "$WORK" diff --cached --text | grep -qF -e "$CLAUDE_CODE_OAUTH_TOKEN" -e "$READ_TOKEN"; then
 		echo "The change contains a token; throwing the round away."
 		git -C "$WORK" reset -q --hard
 		echo 'The build stopped: the change contained a token, so this round was thrown away. Look at the run log, then `/continue` or `/restart`.' >"$TMP/msg.md"

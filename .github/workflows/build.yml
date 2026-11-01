@@ -130,7 +130,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: work/go.mod
-          cache-dependency-path: work/go.sum
+          # No cache: this job runs on main's ref, so a cache it saved would
+          # be restored by trusted jobs (publish, release).
+          cache: false
 
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code@2.1.302
@@ -179,7 +181,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: trusted/go.mod
-          cache-dependency-path: trusted/go.sum
+          cache: false # the scanner needs only the standard library
 
       - name: Build the privacy scanner from main
         working-directory: trusted
@@ -237,11 +239,11 @@ jobs:
           # and leaves it alone.
           gh pr edit "$PR" --repo "$REPO" --remove-label building --remove-label needs-owner-input --remove-label final-review >/dev/null || true
           gh pr close "$PR" --repo "$REPO" --comment "Stopped by an owner. The branch $head is kept; delete it when it's no longer needed."
-          # One build runs at a time, so a PR labeled building is the one
-          # that's running or waiting.
+          # The PR description names the run building it (prepare.sh), so
+          # only that run is cancelled.
           if [[ ",$labels," == *,building,* ]]; then
-            for id in $(gh run list --repo "$REPO" --workflow build.yml --json databaseId,status --jq '.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "pending") | .databaseId'); do
-              # This stop job runs in a build.yml run too.
-              [ "$id" = "$GITHUB_RUN_ID" ] || gh run cancel "$id" --repo "$REPO" || true
-            done
+            id=$(gh pr view "$PR" --repo "$REPO" --json body --jq .body | sed -n 's/^<!-- build-run: \([0-9]*\) -->$/\1/p' | tail -n 1)
+            if [ -n "$id" ] && [ "$id" != "$GITHUB_RUN_ID" ]; then
+              gh run cancel "$id" --repo "$REPO" || true
+            fi
           fi

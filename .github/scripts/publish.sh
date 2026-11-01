@@ -92,15 +92,27 @@ protected=$(
 # findings name the rule and the place, never the text.
 git checkout -q --detach refs/build/head
 : >"$TMP/scan.txt"
-"$SCANNER" -commits origin/main..refs/build/head >>"$TMP/scan.txt" 2>/dev/null || true
+# The scanner exits 1 on findings; anything else but 0 means it didn't
+# finish, and that stops the publish too.
+scan() {
+	local st=0
+	"$@" 2>/dev/null || st=$?
+	[ "$st" -le 1 ] || stop_publish "The privacy scan couldn't run on the build's output (exit $st), so nothing was pushed or posted from it."
+}
+scan "$SCANNER" -commits origin/main..refs/build/head >>"$TMP/scan.txt"
 # The texts are scanned from an empty repo, since the scanner also scans
 # the tree it's run in.
 git init -q "$TMP/empty"
 for f in "$OUT"/comments/*.md "$OUT/message.md" "$OUT/decisions.md"; do
 	[ -f "$f" ] || continue
-	(cd "$TMP/empty" && BUILD_TEXT=$(clip "$f") "$SCANNER" -text-env BUILD_TEXT 2>/dev/null) |
-		sed "s|^BUILD_TEXT|${f#"$OUT"/}|" >>"$TMP/scan.txt" || true
+	cd "$TMP/empty"
+	BUILD_TEXT=$(clip "$f")
+	export BUILD_TEXT
+	scan "$SCANNER" -text-env BUILD_TEXT >"$TMP/one.txt"
+	sed "s|^BUILD_TEXT|${f#"$OUT"/}|" "$TMP/one.txt" >>"$TMP/scan.txt"
 done
+unset BUILD_TEXT
+cd "$TMP/repo"
 if [ -s "$TMP/scan.txt" ]; then
 	stop_publish "$(printf 'The privacy scan flagged the build'"'"'s output, so nothing was pushed or posted from it:\n\n```\n%s\n```' "$(head -n 50 "$TMP/scan.txt")")"
 fi

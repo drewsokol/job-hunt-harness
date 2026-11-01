@@ -26,6 +26,9 @@ set -euo pipefail
 
 : "${EVENT:?}" "${REPO:?}" "${GH_TOKEN:?}"
 SERVER=${GITHUB_SERVER_URL:-https://github.com}
+# The PR description names the run building it, so /stop cancels only that
+# run.
+MARK="<!-- build-run: ${GITHUB_RUN_ID:?} -->"
 summary() { echo "$*" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 none() {
 	summary "$1"
@@ -62,8 +65,8 @@ start() { # start SPEC
 	gh api "repos/$REPO/git/refs" -f ref="refs/heads/$branch" -f sha="$commit" >/dev/null
 	url=$(gh pr create --repo "$REPO" --base main --head "$branch" --label building \
 		--title "Build: $title" --body "$(
-			printf 'Building [%s](%s/%s/blob/main/%s) (decision 0011). The build workflow is working on it; it will comment here when it needs an answer or is ready for review.\n\n🤖 Built by the build workflow with Claude Code\n' \
-				"$spec" "$SERVER" "$REPO" "$spec"
+			printf 'Building [%s](%s/%s/blob/main/%s) (decision 0011). The build workflow is working on it; it will comment here when it needs an answer or is ready for review.\n\n🤖 Built by the build workflow with Claude Code\n\n%s\n' \
+				"$spec" "$SERVER" "$REPO" "$spec" "$MARK"
 		)")
 	pr=${url##*/}
 	summary "Building $spec on $branch: $url"
@@ -111,6 +114,11 @@ issue_comment)
 	labels
 	gh pr edit "$ISSUE" --repo "$REPO" --add-label building \
 		--remove-label needs-owner-input --remove-label final-review >/dev/null
+	{
+		gh pr view "$ISSUE" --repo "$REPO" --json body --jq .body | grep -v '^<!-- build-run: ' || true
+		printf '\n%s\n' "$MARK"
+	} >"${RUNNER_TEMP:-/tmp}/body.md"
+	gh pr edit "$ISSUE" --repo "$REPO" --body-file "${RUNNER_TEMP:-/tmp}/body.md" >/dev/null
 	{
 		echo "mode=$mode"
 		echo "pr=$ISSUE"
