@@ -132,7 +132,7 @@ jobs:
             Read the spec, then check it against the design, the decisions and the code it touches (the tools, store, migrations, dashboard). Look for:
             - Gaps that change what gets built: behavior the spec doesn't decide where reasonable builders would pick differently, and a wrong pick would be costly to undo (data shape, migrations, a tool's contract, what the user sees).
             - Contradictions: within the spec, or with docs/design.md, an accepted decision, CLAUDE.md, or how the code works today, unless the spec says it changes them on purpose.
-            - Limits the spec runs into: the tool list budget (TestOutputSizes in internal/mcpserver/size_test.go; check the current size against the cap), decision 0010 (one tool per kind of record), migration numbering, the untrusted envelope for listing text, the dashboard's no-HTML rule, UTC.
+            - Limits the spec runs into: the tool list budget (TestOutputSizes in internal/mcpserver/size_test.go; you can read the cap but not run the test, so estimate what new tools or parameters would add, and trust a size the spec states), decision 0010 (one tool per kind of record), migration numbering, the untrusted envelope for listing text, the dashboard's no-HTML rule, UTC.
             - Acceptance checks that can't be checked, or that don't cover the spec's main promise.
             - Privacy: anything that looks like a real person's data or the owner's own search (real companies tied to their search, contacts, location, pay). Specs are public; examples must be made up.
 
