@@ -22,4 +22,4 @@ Merging a spec starts the build (`.github/workflows/build.yml`, which runs `.git
 - **When it's done** (checks and review pass), it labels the PR `final-review`, tags the owners and starts CI on the branch. Review it and merge.
 - **Other commands**, as a comment's first line: `/restart` throws the branch away and builds again from the spec and the thread; `/stop` closes the PR (and cancels the run if it's going).
 
-One build runs at a time. To build a spec by hand (one merged before this workflow existed, say), run the Build workflow from the Actions tab with its path, or `gh workflow run build.yml -f spec=docs/specs/NNNN-short-name.md`.
+One build runs at a time, and GitHub keeps only one more waiting: if a third starts, the older waiting one is cancelled, and its PR says so. Comment `/continue` on that PR (or run the Build workflow again for a new spec whose PR never opened) once the others are done. To build a spec by hand (one merged before this workflow existed, say), run the Build workflow from the Actions tab with its path, or `gh workflow run build.yml -f spec=docs/specs/NNNN-short-name.md`.

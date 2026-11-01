@@ -68,12 +68,19 @@ add_comment() { # add_comment FILE: a comment for the publish job to post, in or
 finish() {
 	cp "$TMP/decisions.md" "$OUT/decisions.md"
 	cp "$3" "$OUT/message.md"
+	if [ -n "${stale:-}" ]; then
+		printf '\n%s\n' 'Main has changed workflow files since this branch started, and pushes made with the workflow'"'"'s token can'"'"'t change workflow files, so this build is on the older main. To build on the newer one, use **Update branch** on this PR (or merge main into the branch), then comment `/continue`.' >>"$OUT/message.md"
+	fi
 	# Nothing that leaves this job may hold a token: not the texts, not the
 	# commit messages. If one does, leave nothing; publish then tells the
 	# owners the run ended without results.
-	if { cat "$OUT"/comments/*.md "$OUT/message.md" "$OUT/decisions.md" 2>/dev/null
-		git -C "$WORK" log -p --text "$base..refs/heads/$BRANCH"; } |
-		grep -qF -e "$CLAUDE_CODE_OAUTH_TOKEN" -e "$READ_TOKEN"; then
+	# (Into a file first: under pipefail, grep -q stopping early on a match
+	# would fail the pipe and read as no match.)
+	{
+		cat "$OUT"/comments/*.md "$OUT/message.md" "$OUT/decisions.md" 2>/dev/null || true
+		git -C "$WORK" log -p --text "$base..refs/heads/$BRANCH"
+	} >"$TMP/leaving.txt"
+	if grep -qF -e "$CLAUDE_CODE_OAUTH_TOKEN" -e "$READ_TOKEN" "$TMP/leaving.txt"; then
 		echo "::error::The build's output contains a token; leaving no results."
 		rm -rf "${OUT:?}"/*
 		leave_nothing=1
@@ -115,6 +122,15 @@ SPEC=docs/specs/$slug.md
 git -C "$WORK" fetch -q origin "$BRANCH"
 # The publish job pushes only if the branch is still here.
 base=$(git -C "$WORK" rev-parse "origin/$BRANCH")
+# MAIN is the main the branch builds on. Pushes made with the workflow's
+# token can't change workflow files, so the branch takes main as it is now
+# only if that leaves .github/workflows as the branch has it; otherwise it
+# stays on the main it started from (where it meets main).
+MAIN=origin/main
+if ! git -C "$WORK" diff --quiet "origin/$BRANCH" origin/main -- .github/workflows; then
+	MAIN=$(git -C "$WORK" merge-base origin/main "origin/$BRANCH")
+	stale=1
+fi
 
 echo "None yet." >"$TMP/decisions.md"
 : >"$TMP/fix.md"
@@ -131,13 +147,13 @@ case "$MODE" in
 start)
 	# The prepare job made the branch: main plus an empty commit. Main may
 	# have moved since, if this build waited for another, so bring it in:
-	# put_back and the checks compare with main as it is now.
+	# put_back and the checks compare with MAIN.
 	git -C "$WORK" switch -q -C "$BRANCH" "origin/$BRANCH"
-	git -C "$WORK" merge -q --no-edit origin/main
+	git -C "$WORK" merge -q --no-edit "$MAIN"
 	TASK="Build the spec from scratch."
 	;;
 restart)
-	git -C "$WORK" switch -q -C "$BRANCH" origin/main
+	git -C "$WORK" switch -q -C "$BRANCH" "$MAIN"
 	git -C "$WORK" commit -q --allow-empty -m "Start building spec $slug again"
 	TASK="Build the spec from scratch. An earlier attempt was thrown away; the owners' comments say what to do differently."
 	;;
@@ -154,18 +170,20 @@ continue)
 		awk '/<!-- decisions -->/{on=1; next} /<!-- \/decisions -->/{on=0} on' >"$TMP/prev.md"
 	[ ! -s "$TMP/prev.md" ] || cp "$TMP/prev.md" "$TMP/decisions.md"
 	git -C "$WORK" switch -q -C "$BRANCH" "origin/$BRANCH"
-	if ! git -C "$WORK" merge -q --no-edit origin/main; then
+	if ! git -C "$WORK" merge -q --no-edit "$MAIN"; then
 		git -C "$WORK" merge --abort
 		echo 'The branch conflicts with main, so the build can'"'"'t carry on. Comment `/restart` to build it again from the spec and this thread.' >"$TMP/msg.md"
 		finish ask 0 "$TMP/msg.md"
 	fi
-	TASK="Carry on with the build. The owners answered or commented since the run stopped; follow their answers, and fix what the latest review (under To fix) found."
+	TASK="Carry on with the build. The owners answered or commented since the run stopped; follow their answers, and fix what the latest review (under To fix) found, if a later round hasn't fixed it already."
 	;;
 *)
 	echo "Unknown mode $MODE"
 	exit 1
 	;;
 esac
+# Every comment on the PR, anyone's: not left where Claude could read it.
+rm -f "$TMP/comments.json"
 
 checks() {
 	(
@@ -179,7 +197,7 @@ checks() {
 		st=$?
 		grep -v '^ok \|no test files' "$TMP/test.out"
 		[ "$st" = 0 ] || exit 1
-		clean_env go run ./internal/tools/privacyscan -commits origin/main..HEAD 2>&1 || exit 1
+		clean_env go run ./internal/tools/privacyscan -commits "$MAIN..HEAD" 2>&1 || exit 1
 	) >"$TMP/checks.txt"
 }
 
@@ -187,21 +205,22 @@ checks() {
 # workflows, the specs, the privacy scanner, Claude Code's settings, and old
 # decision records (new records and the decisions index are allowed).
 put_back() {
-	git -C "$WORK" checkout -q origin/main -- .github docs/specs internal/tools/privacyscan
+	git -C "$WORK" checkout -q "$MAIN" -- .github docs/specs internal/tools/privacyscan
 	# .claude may not exist on main; its settings would load for the next
 	# round's Claude, and for the review workflows once merged.
 	git -C "$WORK" rm -rq --cached --ignore-unmatch -- .claude
-	git -C "$WORK" checkout -q origin/main -- .claude 2>/dev/null || true
+	git -C "$WORK" checkout -q "$MAIN" -- .claude 2>/dev/null || true
 	git -C "$WORK" clean -qfdx -- .github docs/specs internal/tools/privacyscan .claude
-	git -C "$WORK" diff --name-only --diff-filter=MD origin/main -- docs/decisions ':!docs/decisions/README.md' |
-		while read -r f; do git -C "$WORK" checkout -q origin/main -- "$f"; done
+	git -C "$WORK" diff --name-only --diff-filter=MD "$MAIN" -- docs/decisions ':!docs/decisions/README.md' |
+		while read -r f; do git -C "$WORK" checkout -q "$MAIN" -- "$f"; done
 }
 
 # commit_round ROUND SUMMARY: commit what the implementer left, if anything.
 commit_round() {
 	put_back
 	git -C "$WORK" add -A
-	if git -C "$WORK" diff --cached --text | grep -qF -e "$CLAUDE_CODE_OAUTH_TOKEN" -e "$READ_TOKEN"; then
+	git -C "$WORK" diff --cached --text >"$TMP/staged.patch"
+	if grep -qF -e "$CLAUDE_CODE_OAUTH_TOKEN" -e "$READ_TOKEN" "$TMP/staged.patch"; then
 		echo "The change contains a token; throwing the round away."
 		git -C "$WORK" reset -q --hard
 		echo 'The build stopped: the change contained a token, so this round was thrown away. Look at the run log, then `/continue` or `/restart`.' >"$TMP/msg.md"
@@ -317,19 +336,20 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
 	echo "::endgroup::"
 
 	echo "::group::Round $round: review"
-	git -C "$WORK" diff origin/main...HEAD >"$TMP/diff.patch"
+	mkdir -p "$TMP/review"
+	git -C "$WORK" diff "$MAIN...HEAD" >"$TMP/review/diff.patch"
 	{
 		cat "$TRUSTED/.github/prompts/build-review.md"
 		echo
 		echo "BRANCH: $WORK"
-		echo "DIFF: $TMP/diff.patch"
+		echo "DIFF: $TMP/review/diff.patch"
 		echo "SPEC: $WORK/$SPEC"
 		echo
 		echo "DECISIONS:"
 		cat "$TMP/decisions.md"
 	} >"$TMP/review-prompt.md"
 	if ! (cd "$TRUSTED" && claude_ 40 -p --model "$MODEL" --max-turns 150 --output-format text \
-		--add-dir "$WORK" --add-dir "$TMP" --allowedTools "Read,Grep,Glob" \
+		--add-dir "$WORK" --add-dir "$TMP/review" --allowedTools "Read,Grep,Glob" \
 		<"$TMP/review-prompt.md") >"$TMP/review-out.md"; then
 		echo "::endgroup::"
 		printf 'The reviewer stopped unexpectedly in round %s (the run log has the details: %s). The round'"'"'s code is pushed. Comment `/continue` to carry on.\n' "$round" "$RUN_URL" >"$TMP/msg.md"

@@ -13,7 +13,7 @@
 # runs no code from the branch: the scanner is built from main.
 #
 # Environment:
-#   REPO, GH_TOKEN, OWNERS, PR_NUMBER, BRANCH, MODE
+#   REPO, GH_TOKEN, OWNERS, PR_NUMBER, BRANCH
 #   OUT            the build job's results (may be missing or empty)
 #   BUILD_RESULT   the build job's result: success, failure or cancelled
 #   SCANNER        the privacy scanner, built from main
@@ -22,7 +22,7 @@
 # shellcheck disable=SC2016
 set -euo pipefail
 
-: "${REPO:?}" "${GH_TOKEN:?}" "${OWNERS:?}" "${PR_NUMBER:?}" "${BRANCH:?}" "${MODE:?}"
+: "${REPO:?}" "${GH_TOKEN:?}" "${OWNERS:?}" "${PR_NUMBER:?}" "${BRANCH:?}"
 : "${OUT:?}" "${BUILD_RESULT:=unknown}" "${SCANNER:?}"
 SERVER=${GITHUB_SERVER_URL:-https://github.com}
 RUN_URL="$SERVER/$REPO/actions/runs/${GITHUB_RUN_ID:-}"
@@ -121,7 +121,7 @@ fi
 # Push. The lease means the branch must still be where the build found it.
 if [ "$head" != "$base" ]; then
 	git_ push -q --force-with-lease="refs/heads/$BRANCH:$base" origin "refs/build/head:refs/heads/$BRANCH" ||
-		stop_publish "The branch moved while the build ran, so its commits weren't pushed (nor its comments posted)."
+		stop_publish "GitHub refused the push of the build's commits (the run log says why; the branch may have moved while the build ran), so nothing was pushed or posted from it."
 fi
 
 for f in "$OUT"/comments/*.md; do

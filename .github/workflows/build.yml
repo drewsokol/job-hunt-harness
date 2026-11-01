@@ -198,7 +198,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           OWNERS: ${{ vars.OWNERS }}
-          MODE: ${{ needs.prepare.outputs.mode }}
           PR_NUMBER: ${{ needs.prepare.outputs.pr }}
           BRANCH: ${{ needs.prepare.outputs.branch }}
           BUILD_RESULT: ${{ needs.build.result }}
