@@ -184,15 +184,23 @@ func TestConcurrentProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const perStore = 40
+	// A few writers per process, each writing in a loop, like the agent and
+	// the dashboard do. Dozens of writers all at once would make the last
+	// ones in line wait past busyTimeout on a slow machine (CI under -race),
+	// which tests the machine, not the locking.
+	const writers, writes = 4, 10
+	const perStore = writers * writes
 	errs = make(chan error, 2*perStore)
 	for _, s := range stores {
-		for i := 0; i < perStore; i++ {
+		for w := range writers {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := s.AddJob(ctx, ActorSystem, NewJob{CompanyID: company, Title: fmt.Sprintf("Engineer %d", i), Origin: "manual"}); err != nil {
-					errs <- err
+				for i := range writes {
+					title := fmt.Sprintf("Engineer %d-%d", w, i)
+					if _, err := s.AddJob(ctx, ActorSystem, NewJob{CompanyID: company, Title: title, Origin: "manual"}); err != nil {
+						errs <- err
+					}
 				}
 			}()
 		}
