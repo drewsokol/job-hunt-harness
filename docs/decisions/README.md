@@ -16,3 +16,4 @@ Add a new numbered file for each decision. Don't rewrite old records: when a dec
 | [0008](0008-free-sources-only.md) | Ship only sources that are free to use; drop Adzuna and the planned key storage | Accepted; key storage superseded by 0009 |
 | [0009](0009-optional-keys.md) | A free source may take an optional key, entered only in the dashboard (Himalayas) | Accepted |
 | [0010](0010-fewer-tools.md) | One tool per kind of record, not one per verb; stay under 35 tools | Accepted |
+| [0011](0011-feature-pipeline.md) | Features are built from specs by a workflow; the owner steps in only when asked | Accepted |

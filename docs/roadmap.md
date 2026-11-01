@@ -2,7 +2,7 @@
 
 The MVP comes first (milestones M0–M5 in [design.md](design.md#12-implementation-plan)). Everything below waits until the MVP has been used on a real search, and that experience decides the order.
 
-Once the repo is public, GitHub Issues become the source of truth and this file shrinks to a link to the project board.
+New features start as specs in [docs/specs](specs/) and are built by a workflow ([decision 0011](decisions/0011-feature-pipeline.md)). This file keeps the milestones and the list of ideas not yet written up as specs.
 
 ## MVP (M0–M5)
 
@@ -26,6 +26,7 @@ Once the repo is public, GitHub Issues become the source of truth and this file 
 - [x] Handled email: links from threads, jobs and interviews to email threads, and a record of which messages the agent has already handled (`handled_messages`)
 - [x] Contacts: organization type, warmth, tags and a date to get back in touch; `list_contacts` and `save_contact`
 - [x] Applications made elsewhere: `add_jobs` records a job the user applied to outside jhh, in its status, so a later reply has somewhere to go
+- [ ] Feature pipeline ([decision 0011](decisions/0011-feature-pipeline.md)): CI with a privacy scan, release binaries, spec review, a build-and-review workflow
 - [ ] Later, once there are offers to compare: offer details (base, bonus, equity, sign-on, deadline) and a comparison across jobs
 
 ## Next (M6–M8)
