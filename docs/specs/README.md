@@ -16,7 +16,7 @@ Update the spec so it says what you decided (the implementer reads the spec, not
 
 ## Building
 
-Merging a spec starts the build (`.github/workflows/build.yml`, which runs `.github/scripts/build.sh`). It opens a PR from `spec/NNNN-short-name` right away, labeled `building`, then implements, checks and has a fresh reviewer review, fixing what the review finds, for up to 10 rounds. The implementer and the reviewer decide what they can and list the calls they made in the PR description.
+Merging a spec starts the build (`.github/workflows/build.yml`, which runs `.github/scripts/build.sh`). It opens a PR from `spec/NNNN-short-name` right away, labeled `building`, then implements, checks and has a fresh reviewer review, fixing what the review finds, for up to 10 rounds. The commits and the reviews reach the PR when the run ends, after a check that the build changed nothing it may not and passes the privacy scan. The implementer and the reviewer decide what they can and list the calls they made in the PR description.
 
 - **When it needs you**, it comments tagging the owners with numbered questions, labels the PR `needs-owner-input`, and ends the run. Answer in a comment whose first line is `/continue`.
 - **When it's done** (checks and review pass), it labels the PR `final-review`, tags the owners and starts CI on the branch. Review it and merge.

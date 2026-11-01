@@ -12,7 +12,7 @@ Make every call you can, the way a trusted senior developer on this project woul
 
 ## Rules for this run
 
-- Change only what the spec needs, plus the docs, playbooks and tests that go with it. Never change .github/, docs/specs/ or an old decision record; the run reverts changes there.
+- Change only what the spec needs, plus the docs, playbooks and tests that go with it. Never change .github/, docs/specs/, internal/tools/privacyscan/ or an old decision record; the run reverts changes there.
 - Don't commit, push, or change git history; the run does the git work. You can read with git status, git diff and git log.
 - Before you finish, run and pass: `gofmt -l .` (no output), `go vet ./...`, `go tool staticcheck ./...`, `go test ./...`. If something fails that you can't fix, say so under Summary.
 - Tests never touch the network, and fixtures are made up.
