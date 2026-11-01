@@ -1,0 +1,92 @@
+# Checks every pull request to main and every push to main.
+#
+# check: formatting, vet, staticcheck, and the tests with the race detector.
+# test: the tests on macOS and Windows.
+# privacy: the privacy scan (internal/tools/privacyscan). The owner's private
+#   terms come from the PRIVACY_TERMS secret, one per line, and are checked
+#   on the lines a change adds, its commit messages and the PR's title and
+#   body. Secrets aren't given to pull requests from forks, so those get the
+#   general rules only, and the owner reads them before merging.
+#
+# Nothing here needs more than read access, and no step runs with a token
+# that can write.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Not formatted with gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: go tool staticcheck ./...
+      - run: go test -race ./...
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Scan
+        env:
+          PRIVACY_TERMS: ${{ secrets.PRIVACY_TERMS }}
+          # Passed through the environment, never into the script, since a
+          # PR's title and body are anyone's text.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository && github.event_name == 'pull_request' }}
+        run: |
+          require=true
+          if [ "$FROM_FORK" = "true" ]; then require=false; fi
+          go run ./internal/tools/privacyscan \
+            -terms-env PRIVACY_TERMS -require-terms="$require" \
+            -base "$BASE" -commits "$BASE..$HEAD" \
+            -text-env PR_TITLE,PR_BODY
