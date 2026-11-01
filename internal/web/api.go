@@ -50,6 +50,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	api("POST /api/jobs/status", s.setStatuses)
 	api("POST /api/jobs/{id}/screening", s.sendToScreening)
 	api("POST /api/flags/{id}", s.reviewFlag)
+	api("POST /api/shortlist/{id}", s.changeShortlist)
 	api("GET /api/outreach", s.listOutreach)
 	api("POST /api/outreach", s.logOutreach)
 	api("PATCH /api/outreach/{id}", s.updateOutreach)
@@ -106,7 +107,7 @@ func pathID(r *http.Request) (int64, error) {
 
 // The page's lists of jobs.
 var lists = map[string]store.BoardQuery{
-	"review":       {Statuses: []store.JobStatus{store.StatusReview}},
+	"review":       {Statuses: []store.JobStatus{store.StatusReview}, Shortlist: true},
 	"unscreened":   {Statuses: []store.JobStatus{store.StatusUnscreened}},
 	"applied":      {Statuses: []store.JobStatus{store.StatusApplied, store.StatusInterviewing, store.StatusOffer}, Recent: true},
 	"archive":      {Statuses: []store.JobStatus{store.StatusSkipped, store.StatusRejected, store.StatusWithdrawn}, Recent: true},
@@ -391,6 +392,15 @@ type jobJSON struct {
 	Prefilter          []prefilter.Reason `json:"prefilter,omitempty"`
 	Notes              string             `json:"notes,omitempty"`
 	NextInterview      *interviewJSON     `json:"next_interview,omitempty"`
+	Shortlist          *shortlistJSON     `json:"shortlist,omitempty"`
+}
+
+// shortlistJSON is a job's place on the shortlist. The reason is the
+// agent's or the user's words, not the listing's.
+type shortlistJSON struct {
+	Rank   int    `json:"rank"`
+	Reason string `json:"reason"`
+	SetBy  string `json:"set_by"` // agent or user
 }
 
 // asker computes suggested asks for a page of jobs.
@@ -434,6 +444,9 @@ func (a asker) job(r store.JobRow) jobJSON {
 		_ = json.Unmarshal(sc.Flags, &j.Flags)
 	}
 	_ = json.Unmarshal(r.Reasons, &j.Prefilter)
+	if p := r.Shortlist; p != nil {
+		j.Shortlist = &shortlistJSON{Rank: p.Rank, Reason: p.Reason, SetBy: core.ShortlistSetBy(p.SetBy)}
+	}
 	return j
 }
 
@@ -683,6 +696,31 @@ func (s *server) reviewFlag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	j, err := s.row(r.Context(), job)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, j)
+}
+
+// changeShortlist moves a job up or down the shortlist, adds it at the
+// bottom or takes it off, and returns the job.
+func (s *server) changeShortlist(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	var in struct {
+		Action string `json:"action"`
+	}
+	if err == nil {
+		err = decode(r, &in)
+	}
+	if err == nil {
+		err = core.ChangeShortlist(r.Context(), s.Store, by, id, in.Action)
+	}
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	j, err := s.row(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, err)
 		return

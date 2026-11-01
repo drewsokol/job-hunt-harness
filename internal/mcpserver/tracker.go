@@ -286,7 +286,9 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			Suspect             []companyRef  `json:"suspect_feeds"`
 			Paused              []string      `json:"search_sources_off,omitempty"`
 			LastRefresh         string        `json:"last_refresh,omitempty"`
+			Shortlist           shortlistNews `json:"shortlist"`
 		}{timeOrEmpty(r.Since), timeOrEmpty(r.Now), jobs(r.NewJobs), r.NewJobsTotal, outreach(r.FollowUpsDue), r.FollowUpsTotal, r.ReEngageDue, r.UnansweredInbound,
-			jobs(r.ChangedApplications), r.OpenFlags, suspect, r.PausedSearches, timeOrEmpty(r.LastRefreshAt)}, nil
+			jobs(r.ChangedApplications), r.OpenFlags, suspect, r.PausedSearches, timeOrEmpty(r.LastRefreshAt),
+			shortlistNews{r.Shortlist.Size, r.Shortlist.Unranked}}, nil
 	})
 }

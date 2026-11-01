@@ -45,6 +45,8 @@ type JobRow struct {
 	Description      string // only when asked for
 	Screening        *Screening
 	OpenFlags        []string // kinds of content flags waiting for review
+	// Shortlist is the job's place on the shortlist, when it's shown there.
+	Shortlist *ShortlistPlace
 }
 
 // Screening is an agent's fit rating of a job.
@@ -75,8 +77,8 @@ var listOpenOnly = map[JobStatus]bool{StatusNew: true, StatusFilteredOut: true, 
 const latestScreening = `(SELECT s.id FROM screenings s WHERE s.job_id = j.id ORDER BY s.screened_at DESC, s.id DESC LIMIT 1)`
 
 // ListJobs returns a page of jobs with a status and the total that match.
-// Screened jobs come best fit first; the rest by prefilter score, newest
-// first.
+// In review, the shortlist comes first, by rank. Screened jobs come best
+// fit first; the rest by prefilter score, newest first.
 func (s *Store) ListJobs(ctx context.Context, q JobQuery) ([]JobRow, int, error) {
 	if !q.Status.Valid() {
 		return nil, 0, fmt.Errorf("unknown job status %q", q.Status)
@@ -90,8 +92,12 @@ func (s *Store) ListJobs(ctx context.Context, q JobQuery) ([]JobRow, int, error)
 		where = append(where, "sc.fit = ?")
 		args = append(args, q.Fit)
 	}
+	order := ""
+	if q.Status == StatusReview {
+		order = shortlistFirst
+	}
 	return s.queryJobs(ctx, strings.Join(where, " AND "), args,
-		`CASE sc.fit WHEN 'strong' THEN 0 WHEN 'good' THEN 1 WHEN 'stretch' THEN 2 WHEN 'no' THEN 3 ELSE 4 END,
+		order+`CASE sc.fit WHEN 'strong' THEN 0 WHEN 'good' THEN 1 WHEN 'stretch' THEN 2 WHEN 'no' THEN 3 ELSE 4 END,
 		 j.prefilter_score DESC, j.first_seen_at DESC, j.id DESC`, q.Offset, q.Limit, q.WithDescription)
 }
 
@@ -100,7 +106,9 @@ type BoardQuery struct {
 	Statuses []JobStatus
 	// Recent orders by the latest change instead of best fit first.
 	Recent bool
-	Limit  int
+	// Shortlist puts the shortlisted jobs first, by rank (To review).
+	Shortlist bool
+	Limit     int
 }
 
 // BoardJobs returns the jobs with any of the statuses, and how many match.
@@ -126,6 +134,8 @@ func (s *Store) BoardJobs(ctx context.Context, q BoardQuery) ([]JobRow, int, err
 		j.prefilter_score DESC, j.first_seen_at DESC, j.id DESC`
 	if q.Recent {
 		order = "coalesce(j.applied_at, j.updated_at) DESC, j.id DESC"
+	} else if q.Shortlist {
+		order = shortlistFirst + order
 	}
 	return s.queryJobs(ctx, where, args, order, 0, q.Limit, false)
 }
@@ -134,6 +144,7 @@ func (s *Store) BoardJobs(ctx context.Context, q BoardQuery) ([]JobRow, int, err
 // the latest screening sc), in order, and how many match in all.
 func (s *Store) queryJobs(ctx context.Context, where string, args []any, order string, offset, limit int, withDescription bool) ([]JobRow, int, error) {
 	from := `FROM jobs j JOIN companies c ON c.id = j.company_id LEFT JOIN screenings sc ON sc.id = ` + latestScreening + `
+		LEFT JOIN shortlist sl ON sl.job_id = j.id
 		WHERE ` + where
 	var total int
 	if err := s.db.QueryRowContext(ctx, "SELECT count(*) "+from, args...).Scan(&total); err != nil {
@@ -150,6 +161,9 @@ func (s *Store) queryJobs(ctx context.Context, where string, args []any, order s
 	}
 	out, err := scanJobRows(rows)
 	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.addShortlist(ctx, out); err != nil {
 		return nil, 0, err
 	}
 	return out, total, s.addOpenFlags(ctx, out)
@@ -207,6 +221,9 @@ func (s *Store) GetJobDetail(ctx context.Context, id int64) (JobDetail, error) {
 	}
 	if len(rs) == 0 {
 		return d, fmt.Errorf("job %d: %w", id, ErrNotFound)
+	}
+	if err := s.addShortlist(ctx, rs); err != nil {
+		return d, err
 	}
 	d.JobRow = rs[0]
 	if d.Postings, err = s.jobPostings(ctx, id); err != nil {

@@ -41,6 +41,12 @@ func TestPlaybooks(t *testing.T) {
 	if msg := h.fail("get_playbook", map[string]any{"name": "tune"}); !strings.Contains(msg, "isn't a playbook") {
 		t.Errorf("unknown playbook: %s", msg)
 	}
+
+	// Screening ends by re-ranking the shortlist.
+	steps := regexp.MustCompile(`(?m)^\d+\. .*$`).FindAllString(pb.Text, -1)
+	if len(steps) == 0 || !strings.Contains(steps[len(steps)-1], "`set_shortlist`") {
+		t.Errorf("screen_new_jobs' last step doesn't name set_shortlist: %q", steps)
+	}
 }
 
 // TestPlaybooksNameRealTools keeps the playbooks and the server
