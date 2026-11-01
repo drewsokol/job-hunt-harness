@@ -1,4 +1,6 @@
-# Checks every pull request to main and every push to main.
+# Checks every pull request to main and every push to main. The build
+# workflow also starts it by hand on its branch when a build is ready, since
+# its pushes don't start it.
 #
 # check: formatting, vet, staticcheck, the tests with the race detector, and
 #   the GoReleaser config.
@@ -18,6 +20,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # The build workflow starts CI on its branch this way, since its pushes
+  # (made with the workflow's token) don't start it.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -36,6 +41,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # see release.yml
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
@@ -67,6 +73,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # see release.yml
       - run: go test ./...
 
   privacy:
@@ -79,6 +86,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # see release.yml
       - name: Scan
         env:
           # Passed through the environment, never into the script, since a
@@ -88,5 +96,8 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          # Started by hand on a branch, there's no event base: scan what
+          # the branch adds to main.
+          [ -n "$BASE" ] || BASE=$(git merge-base origin/main "$HEAD")
           go run ./internal/tools/privacyscan \
             -commits "$BASE..$HEAD" -text-env PR_TITLE,PR_BODY

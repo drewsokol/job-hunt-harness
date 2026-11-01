@@ -26,7 +26,7 @@ New features start as specs in [docs/specs](specs/) and are built by a workflow 
 - [x] Handled email: links from threads, jobs and interviews to email threads, and a record of which messages the agent has already handled (`handled_messages`)
 - [x] Contacts: organization type, warmth, tags and a date to get back in touch; `list_contacts` and `save_contact`
 - [x] Applications made elsewhere: `add_jobs` records a job the user applied to outside jhh, in its status, so a later reply has somewhere to go
-- [ ] Feature pipeline ([decision 0011](decisions/0011-feature-pipeline.md)): CI with a privacy scan, release binaries and spec review are done; the build-and-review workflow is next
+- [x] Feature pipeline ([decision 0011](decisions/0011-feature-pipeline.md)): CI with a privacy scan, release binaries, spec review, and the build-and-review workflow (the watcher that brings owners the build's questions is next)
 - [ ] Later, once there are offers to compare: offer details (base, bonus, equity, sign-on, deadline) and a comparison across jobs
 
 ## Next (M6–M8)
