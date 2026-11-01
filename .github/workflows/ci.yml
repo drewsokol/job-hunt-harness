@@ -1,4 +1,6 @@
-# Checks every pull request to main and every push to main.
+# Checks every pull request to main and every push to main. The build
+# workflow also starts it by hand on its branch when a build is ready, since
+# its pushes don't start it.
 #
 # check: formatting, vet, staticcheck, the tests with the race detector, and
 #   the GoReleaser config.
@@ -39,6 +41,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # see release.yml
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
@@ -70,6 +73,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # see release.yml
       - run: go test ./...
 
   privacy:
@@ -82,6 +86,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # see release.yml
       - name: Scan
         env:
           # Passed through the environment, never into the script, since a

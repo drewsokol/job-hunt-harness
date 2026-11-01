@@ -57,6 +57,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # No Actions cache: the build workflow runs Claude's code on
+          # main's ref, which could plant entries there (decision 0011).
+          cache: false
 
       - name: Test
         run: go test ./...

@@ -208,6 +208,17 @@ EOF
 round=0
 while [ "$round" -lt "$MAX_ROUNDS" ]; do
 	if [ $(($(date +%s) - started)) -gt $((BUDGET_MINUTES * 60)) ]; then
+		# If the last round's checks failed, post their output as the
+		# review, so /continue picks it up as the work to fix.
+		if [ -s "$TMP/fix.md" ] && ! grep -q '^<!-- build-review -->' "$TMP/fix.md"; then
+			{
+				echo "<!-- build-review -->"
+				echo "**Round $round checks failed** (the run ran out of time before fixing them)"
+				echo
+				cat "$TMP/fix.md"
+			} >"$TMP/review-comment.md"
+			add_comment "$TMP/review-comment.md"
+		fi
 		printf 'The build used its time for one run after %s rounds. The latest review is above. Comment `/continue` to carry on in a new run.\n' "$round" >"$TMP/msg.md"
 		finish ask "$round" "$TMP/msg.md"
 	fi
