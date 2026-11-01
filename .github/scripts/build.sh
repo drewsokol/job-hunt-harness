@@ -72,10 +72,11 @@ finish() {
 	# commit messages. If one does, leave nothing; publish then tells the
 	# owners the run ended without results.
 	if { cat "$OUT"/comments/*.md "$OUT/message.md" "$OUT/decisions.md" 2>/dev/null
-		git -C "$WORK" log --format=%B "$base..refs/heads/$BRANCH"; } |
+		git -C "$WORK" log -p --text "$base..refs/heads/$BRANCH"; } |
 		grep -qF -e "$CLAUDE_CODE_OAUTH_TOKEN" -e "$READ_TOKEN"; then
 		echo "::error::The build's output contains a token; leaving no results."
 		rm -rf "${OUT:?}"/*
+		leave_nothing=1
 		exit 1
 	fi
 	git -C "$WORK" bundle create -q "$OUT/branch.bundle" "refs/heads/$BRANCH"
@@ -94,7 +95,7 @@ finish() {
 # shellcheck disable=SC2329 # run by the trap
 on_exit() {
 	local st=$?
-	[ "$st" != 0 ] && [ ! -f "$OUT/result.env" ] && [ -n "${base:-}" ] || return 0
+	[ "$st" != 0 ] && [ ! -f "$OUT/result.env" ] && [ -n "${base:-}" ] && [ -z "${leave_nothing:-}" ] || return 0
 	git -C "$WORK" reset -q --hard || true
 	# Failed before switching to the branch: leave it as it was.
 	git -C "$WORK" rev-parse -q --verify "refs/heads/$BRANCH" >/dev/null ||
@@ -118,6 +119,7 @@ base=$(git -C "$WORK" rev-parse "origin/$BRANCH")
 echo "None yet." >"$TMP/decisions.md"
 : >"$TMP/fix.md"
 : >"$TMP/owners.md"
+: >"$TMP/last.md"
 
 # What the owners have said on the PR. Nobody else's comments are passed on.
 gh_ api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate >"$TMP/comments.json"
@@ -144,6 +146,10 @@ continue)
 	jq -s -r --arg bot "$BOT" 'add // [] |
 		map(select(.user.login == $bot and (.body | startswith("<!-- build-review -->")))) |
 		last | .body // ""' "$TMP/comments.json" >"$TMP/fix.md"
+	# Its last message to the owners (with any questions they answered).
+	jq -s -r --arg bot "$BOT" 'add // [] |
+		map(select(.user.login == $bot and (.body | startswith("<!-- build-message -->")))) |
+		last | .body // ""' "$TMP/comments.json" >"$TMP/last.md"
 	gh_ pr view "$PR_NUMBER" --repo "$REPO" --json body --jq .body |
 		awk '/<!-- decisions -->/{on=1; next} /<!-- \/decisions -->/{on=0} on' >"$TMP/prev.md"
 	[ ! -s "$TMP/prev.md" ] || cp "$TMP/prev.md" "$TMP/decisions.md"
@@ -178,11 +184,15 @@ checks() {
 }
 
 # put_back: undo the implementer's changes to what it may not change: the
-# workflows, the specs, the privacy scanner, and old decision records (new
-# records and the decisions index are allowed).
+# workflows, the specs, the privacy scanner, Claude Code's settings, and old
+# decision records (new records and the decisions index are allowed).
 put_back() {
 	git -C "$WORK" checkout -q origin/main -- .github docs/specs internal/tools/privacyscan
-	git -C "$WORK" clean -qfd -- .github docs/specs internal/tools/privacyscan
+	# .claude may not exist on main; its settings would load for the next
+	# round's Claude, and for the review workflows once merged.
+	git -C "$WORK" rm -rq --cached --ignore-unmatch -- .claude
+	git -C "$WORK" checkout -q origin/main -- .claude 2>/dev/null || true
+	git -C "$WORK" clean -qfdx -- .github docs/specs internal/tools/privacyscan .claude
 	git -C "$WORK" diff --name-only --diff-filter=MD origin/main -- docs/decisions ':!docs/decisions/README.md' |
 		while read -r f; do git -C "$WORK" checkout -q origin/main -- "$f"; done
 }
@@ -205,20 +215,24 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 }
 
+# post_failed_checks: when a run ends right after failed checks, post
+# their output as the round's review, so /continue picks it up as the work
+# to fix.
+post_failed_checks() {
+	[ -s "$TMP/fix.md" ] && ! grep -q '^<!-- build-review -->' "$TMP/fix.md" || return 0
+	{
+		echo "<!-- build-review -->"
+		echo "**Round $round checks failed** (the run ended before fixing them)"
+		echo
+		cat "$TMP/fix.md"
+	} >"$TMP/review-comment.md"
+	add_comment "$TMP/review-comment.md"
+}
+
 round=0
 while [ "$round" -lt "$MAX_ROUNDS" ]; do
 	if [ $(($(date +%s) - started)) -gt $((BUDGET_MINUTES * 60)) ]; then
-		# If the last round's checks failed, post their output as the
-		# review, so /continue picks it up as the work to fix.
-		if [ -s "$TMP/fix.md" ] && ! grep -q '^<!-- build-review -->' "$TMP/fix.md"; then
-			{
-				echo "<!-- build-review -->"
-				echo "**Round $round checks failed** (the run ran out of time before fixing them)"
-				echo
-				cat "$TMP/fix.md"
-			} >"$TMP/review-comment.md"
-			add_comment "$TMP/review-comment.md"
-		fi
+		post_failed_checks
 		printf 'The build used its time for one run after %s rounds. The latest review is above. Comment `/continue` to carry on in a new run.\n' "$round" >"$TMP/msg.md"
 		finish ask "$round" "$TMP/msg.md"
 	fi
@@ -236,6 +250,12 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
 		echo "## Decisions so far"
 		echo
 		cat "$TMP/decisions.md"
+		if [ -s "$TMP/last.md" ]; then
+			echo
+			echo "## The build's last message to the owners"
+			echo
+			cat "$TMP/last.md"
+		fi
 		if [ -s "$TMP/owners.md" ]; then
 			echo
 			echo "## The owners' comments"
@@ -340,5 +360,6 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
 	TASK="Carry on with the build: fix what the review under To fix found."
 done
 
+post_failed_checks
 printf 'The build ran %s rounds without a passing review. The latest review is above. Comment `/continue` to keep going (with any guidance below the command), `/restart` to start over, or `/stop`.\n' "$MAX_ROUNDS" >"$TMP/msg.md"
 finish ask "$round" "$TMP/msg.md"

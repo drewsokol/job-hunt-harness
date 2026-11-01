@@ -7,7 +7,8 @@
 # Everything in $OUT came from the build job, which ran Claude and the code
 # Claude wrote, so it's checked here before any of it reaches GitHub: the
 # result's fields must have the right shape, the branch mustn't change the
-# workflows, specs, privacy scanner or old decision records, and the
+# workflows, specs, privacy scanner, Claude Code's settings or old
+# decision records, and the
 # commits and every text pass the privacy scan's general rules. This script
 # runs no code from the branch: the scanner is built from main.
 #
@@ -83,7 +84,7 @@ git fetch -q "$OUT/branch.bundle" "refs/heads/$BRANCH:refs/build/head" ||
 
 # What the implementer may not change (build.sh reverts these too).
 protected=$(
-	git diff --name-only origin/main...refs/build/head -- .github docs/specs internal/tools/privacyscan
+	git diff --name-only origin/main...refs/build/head -- .github docs/specs internal/tools/privacyscan .claude
 	git diff --name-only --diff-filter=MD origin/main...refs/build/head -- docs/decisions ':!docs/decisions/README.md'
 )
 [ -z "$protected" ] || stop_publish "The build changed files it may not change ($(tr '\n' ' ' <<<"$protected")), so nothing was pushed or posted from it."
@@ -127,8 +128,9 @@ for f in "$OUT"/comments/*.md; do
 	[ -f "$f" ] || continue
 	clip "$f" | comment
 done
+# Marked, so the next run's implementer gets it (with any questions).
 {
-	printf '%s ' "$mentions"
+	printf '<!-- build-message -->\n%s ' "$mentions"
 	clip "$OUT/message.md"
 } | comment
 

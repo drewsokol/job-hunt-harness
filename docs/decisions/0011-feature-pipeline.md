@@ -16,8 +16,8 @@ The steps that need the owner are few: agreeing what to build, answering a quest
 
 **Merging a spec starts the build.** One workflow run builds one feature, and one feature is built at a time, so migrations and the tool budget never race. In that run:
 
-1. The implementer works on a branch `spec/NNNN-short-name`, runs the checks (gofmt, vet, staticcheck, tests, the privacy scan) and opens a PR that links the spec.
-2. A reviewer with a fresh context reviews the PR with the same prompt as the review workflow, and comments.
+1. A PR from `spec/NNNN-short-name` that links the spec opens first. The implementer works on that branch, and the run runs the checks (gofmt, vet, staticcheck, tests, the privacy scan).
+2. A reviewer with a fresh context reviews the change with the same prompt as the review workflow. The run posts its commits and reviews on the PR when it ends.
 3. The implementer fixes what the review found, and the reviewer reviews again: up to **10 rounds**.
 4. When the checks and the review both pass, the PR gets the `final-review` label and a comment tagging the owner.
 
