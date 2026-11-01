@@ -26,7 +26,12 @@ Example (made up): the agent tells the user to apply to Northwind Labs first, th
   - Each shortlisted job carries `shortlist: {rank, reason, set_by}`, where `set_by` is `agent` or `user`.
   - The ranks returned are 1..N over the jobs still on the list, whatever gaps the stored ranks have.
   - Other statuses are unchanged.
-- **`whats_new`** says how many jobs are on the shortlist. When strong or good jobs have been screened since the list was last set, it says that too, so the agent knows to re-rank.
+- **`whats_new`** says how many jobs are on the shortlist (those shown, per the Rules). It also counts the jobs in review that aren't on the list and whose latest screening is strong or good and newer than the last `set_shortlist` call (the latest `shortlist_set` event), so the agent knows to re-rank. The user's dashboard changes don't reset that time. With no list yet, the size is 0 and the count covers every strong or good job in review, which nudges the agent to make one.
+
+### Playbook and docs
+
+- `internal/playbooks/screen_new_jobs.md` gets a last step: after `record_screening`, read the current shortlist with `list_candidates(status: review)`, then call `set_shortlist` with the re-ranked list, keeping the user's changes unless they said otherwise.
+- `docs/design.md` describes the shortlist: the tools table, the To review tab and the data model.
 
 ### Tool budget
 
@@ -47,15 +52,15 @@ On the To review tab:
 ### Data
 
 - **Migration 0010** adds a `shortlist` table: `job_id` (primary key, references jobs, cascade delete), `rank` (integer), `reason` (text), `set_at` (UTC), `set_by` (actor).
-- `set_shortlist` replaces all rows in one transaction.
-- The dashboard's up and down buttons swap two ranks. Add puts a job after the current last.
+- `set_shortlist` replaces all rows in one transaction, including rows for jobs that are out of review.
+- The dashboard's up and down buttons swap two ranks among the jobs shown. Add puts a job after the current last. Remove deletes its row.
 - Each change writes an event: `shortlist_set` with the count, or `shortlist_changed` with the job id and what changed. As with other events, it carries ids and counts, never the reason text.
 
 ### Rules
 
-- **A job leaves the shortlist when it leaves review**: applied, skipped, hidden, closed, or moved to any other status, by anyone. Its row is deleted in the same transaction as the status change. If it comes back to review, it isn't on the list until someone adds it.
-- **Re-screening a job keeps its place.** So does a profile or filter change. The agent decides when to re-rank.
-- **A job closing** while on the list is removed with the next refresh that closes it.
+- **The shortlist shows only jobs that are in review, open and not hidden.** A row stays when its job leaves review (applied, skipped, hidden, closed, screened out, or any other status, by anyone), but the job isn't shown, numbered or counted. If the job comes back (the dashboard's Undo, a posting seen again after a bad fetch, unhiding), it's back in its place. No code that changes a job's status needs to touch the shortlist.
+- Only `set_shortlist` (which replaces every row) and the dashboard's remove delete rows. Deleting a job deletes its row (cascade).
+- **Re-screening a job keeps its place** unless the new rating moves it out of review: a `no` moves it to screened out, and it's no longer shown, as with any other status change. A profile or filter change keeps every place. The agent decides when to re-rank.
 
 ## Out of scope
 
@@ -70,11 +75,14 @@ On the To review tab:
 - After `set_shortlist` with jobs C, A, B (all in review, with A's prefilter score highest), `list_candidates(status: review)` returns C, A, B first, in that order, with ranks 1, 2, 3 and their reasons. The rest follow in today's order.
 - The order is the same from a new store opened on the same database (a new session).
 - The dashboard's To review list shows C, A, B first, with their numbers and reasons.
-- Marking A applied removes it from the shortlist. `list_candidates(status: review)` then returns C and B with ranks 1 and 2.
+- Marking A applied takes it off the shown list: `list_candidates(status: review)` returns C and B with ranks 1 and 2. Undoing that (A back in review) returns C, A, B with ranks 1, 2, 3.
+- A shortlisted job whose posting closes isn't shown; when the posting is seen again and reopens, it's back in its place.
+- Re-screening B as `no` takes it off the shown list. Re-screening C as `good` keeps its place.
 - `set_shortlist` with a job that isn't in review saves nothing and names that job id. With 31 jobs, it's refused.
 - `set_shortlist` with an empty list clears it.
 - The dashboard's up, down, remove and add buttons change the order that `list_candidates` returns, with `set_by: user`.
-- `whats_new` reports the shortlist's size, and notes newly screened good or strong jobs when there are any since the list was set.
+- `whats_new` reports the shortlist's size, and counts the strong or good jobs in review, not on the list, screened after the last `set_shortlist`. A dashboard up or down doesn't change that count. With no list, it reports size 0 and counts every strong or good job in review.
+- `screen_new_jobs.md` names `set_shortlist` in its last step.
 - `TestOutputSizes` passes with the cap at 42,000 bytes.
 
 ## Open questions
