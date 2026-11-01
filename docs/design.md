@@ -882,6 +882,7 @@ This is planned but deliberately put off: CI, branch protection, the license and
 - **Security settings**: secret scanning with push protection, Dependabot (Go modules and actions), CodeQL, `govulncheck` in CI.
 - **Community**: turn on Discussions (for questions and "show your setup"); add repo topics (`mcp`, `job-search`, `local-first`, `claude`); label a few issues `good first issue` at launch.
 - **Releases**: tag `v0.x` releases. goreleaser builds the binaries and checksums from Actions, with artifact attestations, so users can verify that a download came from this repo. Unsigned binaries trigger Windows SmartScreen and macOS Gatekeeper warnings, so start with `go install` and a Homebrew tap, and add code signing and notarization when there are enough users to justify the cost.
+- **Feature pipeline**: features are written as specs in `docs/specs/` and built by a workflow; see [decision 0011](decisions/0011-feature-pipeline.md), which replaces the issue board below for planning features.
 - **Roadmap tracking**: once the repo is public, GitHub Issues become the single source of truth for features and bugs. Use labels (`area/sources`, `area/mcp`, `area/ui`, `type/feature`, `type/bug`, `good first issue`), one GitHub milestone per stage (M6, M7, M8), and a Project board with Now, Next and Later columns. `docs/roadmap.md` then shrinks to a link to that board.
 
 ## 12. Implementation plan
