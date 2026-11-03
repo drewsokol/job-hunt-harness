@@ -4,7 +4,9 @@ An MCP server that turns your AI agent into a job search assistant, with a local
 
 jhh pulls open roles from the public job boards of the companies you care about, and searches The Muse's and Himalayas's public jobs APIs and Hacker News's monthly "Who is hiring?" threads for roles at companies you didn't know to list. It filters out the obvious misses with simple rules, and tracks your applications and outreach. Your own agent (Claude Code, Cursor or any MCP client) does the judgment: it interviews you, writes your profile and filters, and screens each role for fit. Everything stays on your machine, in one SQLite file.
 
-**Status: early development.** The MVP is built: jhh works from your agent and has a local dashboard. Next it gets used on a real search before more features are added. The design is in [docs/design.md](docs/design.md), and progress is tracked in [docs/roadmap.md](docs/roadmap.md).
+**Status: early, and in daily use.** The author has used jhh every day since October 2026, and the features added since the MVP came out of that use: tracking messages from recruiters, interviews and contacts, and an "apply next" shortlist. See the [latest release](https://github.com/drewsokol/job-hunt-harness/releases/latest). The design is in [docs/design.md](docs/design.md), and what's next is in [docs/roadmap.md](docs/roadmap.md).
+
+![The dashboard's To review tab: jobs the agent rated, each with its fit, the reason, gaps and pay, and an "apply next" list at the top. The jobs and companies are made up.](docs/images/dashboard-review.png)
 
 ## Install
 
