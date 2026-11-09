@@ -17,9 +17,9 @@ Example (made up): a user sets up jhh for platform engineering roles. Three week
 
 ## Design
 
-### A new playbook: `interview`
+### A new playbook: `interview_me`
 
-Add `internal/playbooks/interview.md` and an entry in `playbooks.All`, after `initialize`. It takes no arguments: if the user wants to focus on one area, they say so in the chat. Its title is "Interview me", and its description says it builds or updates the profile, and can be run at any time, such as when the search changes.
+Add `internal/playbooks/interview_me.md` and an entry in `playbooks.All`, after `initialize`. It takes no arguments: if the user wants to focus on one area, they say so in the chat. Its title is "Interview me", and its description says it builds or updates the profile, and can be run at any time, such as when the search changes.
 
 It's an MCP prompt and available through `get_playbook`, like the others. The playbook tells the agent to do the following, in order:
 
@@ -94,20 +94,20 @@ The profile's sections don't change. Why now goes in Summary, second-choice lane
 
 ### Changes to `initialize`
 
-- **It becomes a short coordinator.** Its resume, interview and profile steps are replaced by one step: follow the interview playbook (`get_playbook` with name interview, if the agent doesn't have it). The topic list lives only in `interview.md`.
-- If a profile already exists, ask whether the user wants to be interviewed again or go straight to what's missing.
+- **It becomes a short coordinator.** Its resume, interview and profile steps are replaced by one step: follow the interview playbook (`get_playbook` with name interview_me, if the agent doesn't have it). The topic list lives only in `interview_me.md`.
+- If a profile already exists, offer two choices: run the interview in its rerun mode, or leave the profile as it is and continue with the next step `get_setup_state` lists.
 - **After the profile, offer a stopping point.** The user can stop and run setup again later; it continues from what's stored. Drop "keep the whole setup to about 15 minutes" and tell the user what to expect instead.
-- **Calibration also checks the filters.** After the five screened jobs, show up to three jobs from `list_candidates` with status filtered_out, picked to be the closest calls, and ask whether any should have got through. If one should have, loosen the filters, using the dry run and the user's OK as in the filters step. Skip this if there are none.
+- **Calibration also checks the filters.** After the five screened jobs, show up to three jobs from `list_candidates` with status filtered_out, picked to be close calls, and ask whether any should have got through. If one should have, loosen the filters, using the dry run and the user's OK as in the filters step. A close call is a job dropped by a single rule, such as only the pay floor or only an unknown location, taken from the first page or two. If there are fewer than three, show those; skip this if there are none.
 
 ### Tools, dashboard, data
 
-- **Tools:** no new tools or parameters. `get_playbook`'s name hint and description, and the server `instructions`, mention `interview`: follow it when the user asks to be interviewed or says their search has changed. Keep within the tool list budget (`TestOutputSizes`).
+- **Tools:** no new tools or parameters. One output change: when `status` is filtered_out, `list_candidates` returns every prefilter reason for each job, so the agent can see why each was dropped. Other statuses keep today's output. `get_playbook`'s name hint and description, and the server `instructions`, mention `interview_me`: follow it when the user asks to be interviewed about their search or says their search has changed. The instructions say it isn't for job interviews, which go through `save_interview`. Keep within the tool list budget (`TestOutputSizes`).
 - `get_setup_state`'s missing-profile step points to the interview playbook.
 - **Dashboard:** no change.
 - **Data:** no change, no migration.
 - **Docs:** update the setup flow and Prompts sections of `docs/design.md`, and mention "interview me again" in the README's getting-started paragraph.
 
-`TestPlaybooksNameRealTools` treats any backticked snake_case word as a tool name, so job statuses and basis values in the playbooks stay out of backticks.
+`TestPlaybooksNameRealTools` treats any backticked snake_case word as a tool name, so job statuses, basis values and playbook names (such as interview_me) in the playbooks and server instructions stay out of backticks.
 
 ## Out of scope
 
@@ -122,19 +122,22 @@ The profile's sections don't change. Why now goes in Summary, second-choice lane
 
 ## Acceptance checks
 
-- `interview` is listed as an MCP prompt, and `get_playbook` returns it. An unknown name still fails.
-- `interview.md` names `get_context`, `set_resume_text`, `remember` and `update_profile`, and `TestPlaybooksNameRealTools` passes on it.
-- In `interview.md`, `get_context` comes before the opening questions, and the opening questions come before `set_resume_text`.
-- `interview.md` covers each topic in the table, including skill depth, second-choice lanes and confidentiality.
-- `interview.md` tells the agent to say plainly when the user is reaching, with specifics and guidance, not to invent market data, to keep the user's choice after they've heard it, and to save its own read with basis inferred.
-- `interview.md` tells the agent to offer other documents with examples, warn about names and confidential details first, save facts rather than documents, and treat a fact from a document as inferred until the user confirms it.
-- `interview.md` tells the agent to show contradictions between sources and ask the user which is right, and to leave out of the profile what can't be settled.
-- `interview.md` offers a LinkedIn review from a download or paste, covering inconsistencies and advice, says never to fetch LinkedIn, and keeps rewrites within what the user has said.
+- `interview_me` is listed as an MCP prompt, and `get_playbook` returns it. An unknown name still fails.
+- `interview_me.md` names `get_context`, `set_resume_text`, `remember` and `update_profile`, and `TestPlaybooksNameRealTools` passes on it.
+- In `interview_me.md`, `get_context` comes before the opening questions, and the opening questions come before `set_resume_text`.
+- `interview_me.md` covers each topic in the table, including skill depth, second-choice lanes and confidentiality.
+- `interview_me.md` tells the agent to say plainly when the user is reaching, with specifics and guidance, not to invent market data, to keep the user's choice after they've heard it, and to save its own read with basis inferred.
+- `interview_me.md` tells the agent to offer other documents with examples, warn about names and confidential details first, save facts rather than documents, and treat a fact from a document as inferred until the user confirms it.
+- `interview_me.md` tells the agent to show contradictions between sources and ask the user which is right, and to leave out of the profile what can't be settled.
+- `interview_me.md` offers a LinkedIn review from a download or paste, covering inconsistencies and advice, says never to fetch LinkedIn, and keeps rewrites within what the user has said.
 - `initialize.md` sends the agent to the interview playbook and no longer holds the topic list.
-- `initialize.md` has the filtered-out check in calibration.
+- `initialize.md` has the filtered-out check in calibration, and defines a close call as a job dropped by a single rule.
+- `list_candidates` with status filtered_out returns every prefilter reason for each job; other statuses return what they do today.
+- With a saved profile, `initialize.md` offers the interview's rerun mode or continuing with the next step `get_setup_state` lists.
 - `get_setup_state` on an empty database names the interview playbook in its profile step.
-- The server instructions and `get_playbook`'s description mention `interview`, and `TestOutputSizes` passes.
+- The server instructions and `get_playbook`'s description mention `interview_me`, and say it isn't for job interviews, and `TestOutputSizes` passes.
 - `docs/design.md`'s setup flow and Prompts sections describe the new flow.
 - By hand, on a scratch data dir: a fresh agent told "initialize job hunt harness" asks the opening questions before reading the resume, tells a made-up user aiming two levels above their experience that they're reaching, keeps the target when the user insists, asks about a planted date conflict between a made-up resume and LinkedIn PDF, tests borderline roles and shows the profile before saving it. Stopped partway and run again, it doesn't repeat what was answered.
+- The by-hand check above is run by the implementer only if it can drive a separate agent session. Otherwise the PR lists it as left for the owner, with a short script of what to say. The made-up resume and LinkedIn text stay outside the repo and are never committed.
 
 ## Open questions
