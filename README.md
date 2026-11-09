@@ -30,7 +30,7 @@ Other MCP clients take the same command in their config:
 { "mcpServers": { "jhh": { "command": "/path/to/jhh" } } }
 ```
 
-Then ask your agent to "initialize job hunt harness". It reads your resume if you point it at one, interviews you, writes your profile and filters with your OK, suggests companies, fetches jobs and screens a first batch with you. After that, "what's new?" is the daily check-in, and "screen new jobs" rates whatever the last refresh found.
+Then ask your agent to "initialize job hunt harness". It interviews you about what you want next, reads your resume if you point it at one, writes your profile and filters with your OK, suggests companies, fetches jobs and screens a first batch with you. After that, "what's new?" is the daily check-in, "screen new jobs" rates whatever the last refresh found, and "interview me again" updates your profile when your search changes.
 
 ## The dashboard
 

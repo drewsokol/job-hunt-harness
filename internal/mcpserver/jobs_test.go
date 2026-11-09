@@ -218,6 +218,28 @@ func TestFindScreenAndTrackJobs(t *testing.T) {
 		t.Errorf("too many descriptions: %s", msg)
 	}
 
+	// Filtered-out jobs come with every reason they were dropped, outside
+	// the envelope, since reasons never quote the listing.
+	var dropped struct {
+		Jobs []struct {
+			Notes []struct {
+				Rule   string `json:"rule"`
+				Effect string `json:"effect"`
+			} `json:"prefilter_notes"`
+		} `json:"jobs"`
+	}
+	text, _ = h.raw("list_candidates", map[string]any{"status": "filtered_out"})
+	if err := json.Unmarshal([]byte(text), &dropped); err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped.Jobs) != 1 || len(dropped.Jobs[0].Notes) != 2 ||
+		dropped.Jobs[0].Notes[0].Rule != "titles.require_any" || dropped.Jobs[0].Notes[1].Rule != "titles.exclude_any" || dropped.Jobs[0].Notes[1].Effect != "drop" {
+		t.Errorf("list_candidates filtered_out: %s", text)
+	}
+	if bad := listingTextOutsideEnvelope(t, text); len(bad) > 0 {
+		t.Errorf("list_candidates filtered_out: listing text outside the envelope at %v", bad)
+	}
+
 	var recorded struct {
 		Recorded []struct {
 			Job    int64  `json:"job"`
