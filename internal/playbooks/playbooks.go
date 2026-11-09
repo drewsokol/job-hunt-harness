@@ -1,5 +1,5 @@
 // Package playbooks holds the instructions jhh gives agents for its main
-// workflows: the setup interview and screening. Each is a markdown file
+// workflows: setup, the interview that builds the profile, and screening. Each is a markdown file
 // embedded in the binary, served as an MCP prompt and through the
 // get_playbook tool, for clients that don't support prompts.
 package playbooks
@@ -32,7 +32,12 @@ var All = []Playbook{
 	{
 		Name:        "initialize",
 		Title:       "Set up Job Hunt Harness",
-		Description: "The setup interview: resume, profile, memories, filters, companies, the first refresh and a calibration round. Safe to run again; it builds on what is stored.",
+		Description: "Setup: the profile (through the interview playbook), filters, sources, companies, the first refresh and a calibration round. Safe to run again; it builds on what is stored.",
+	},
+	{
+		Name:        "interview_me",
+		Title:       "Interview me",
+		Description: "Interview the user about their job search, and build or update their profile from it. Run it at any time, such as when the search changes; it builds on what is stored.",
 	},
 	{
 		Name:        "screen_new_jobs",

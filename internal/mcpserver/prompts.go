@@ -49,7 +49,7 @@ func (t *tools) addPlaybooks(s *mcp.Server) {
 	}
 
 	type playbookIn struct {
-		Name  string `json:"name" jsonschema:"initialize or screen_new_jobs"`
+		Name  string `json:"name" jsonschema:"initialize, interview_me or screen_new_jobs"`
 		Limit int    `json:"limit,omitempty" jsonschema:"screen_new_jobs only: how many jobs to screen; default 30"`
 	}
 	add(t, s, "get_playbook", reads, func(_ context.Context, _ call, in playbookIn) (any, error) {

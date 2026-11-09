@@ -92,8 +92,8 @@ func GetSetupState(ctx context.Context, s *store.Store) (SetupState, error) {
 			st.Missing = append(st.Missing, step)
 		}
 	}
-	missing(st.ResumeVersion == 0, "resume: no resume text yet; ask whether there's one you can read, then call set_resume_text")
-	missing(st.ProfileVersion == 0, "profile: no profile yet; interview the user, draft it, and save it with update_profile once they agree")
+	missing(st.ResumeVersion == 0, "resume: no resume text yet; the interview_me playbook asks for one after its opening questions and saves it with set_resume_text")
+	missing(st.ProfileVersion == 0, "profile: no profile yet; follow the interview_me playbook (get_playbook with name interview_me), which drafts it and saves it with update_profile once the user agrees")
 	missing(st.FiltersVersion == 0, "filters: none set; draft them, run set_filters with dry_run, show the user the effect, then save them with set_filters")
 	missing(st.FiltersVersion != 0 && st.SearchesOn == 0 && st.Counts.BoardCompanies == 0,
 		"sources: no search source is on and no company boards are read, so refresh finds nothing; turn one on with set_source (list_sources shows them), or add companies with set_company")

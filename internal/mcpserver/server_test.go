@@ -114,7 +114,8 @@ func TestProfileAndMemories(t *testing.T) {
 		NextSteps []string `json:"next_steps"`
 	}
 	h.call("get_setup_state", nil, &setup)
-	if !strings.HasSuffix(setup.Now, "Z") || len(setup.NextSteps) < 4 || !strings.HasPrefix(setup.NextSteps[0], "resume:") {
+	if !strings.HasSuffix(setup.Now, "Z") || len(setup.NextSteps) < 4 || !strings.HasPrefix(setup.NextSteps[0], "resume:") ||
+		!strings.HasPrefix(setup.NextSteps[1], "profile:") || !strings.Contains(setup.NextSteps[1], "interview_me") {
 		t.Errorf("setup state %+v", setup)
 	}
 

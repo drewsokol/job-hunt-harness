@@ -129,9 +129,12 @@ func (t *tools) addJobTools(s *mcp.Server) {
 		if err != nil {
 			return nil, err
 		}
+		// Filtered-out jobs carry every reason, so the agent can see why
+		// each was dropped; a screener needs only flags and notes.
+		dropped := store.JobStatus(in.Status) == store.StatusFilteredOut
 		jobs := make([]jobOut, 0, len(p.Jobs))
 		for _, r := range p.Jobs {
-			jobs = append(jobs, job(r, false))
+			jobs = append(jobs, job(r, dropped))
 		}
 		return struct {
 			Total int      `json:"total"`
