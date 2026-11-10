@@ -148,6 +148,20 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
+// Other statuses keep the StatusError in the chain, so refresh can say
+// the source refused jhh, but the text leaves the URL out.
+func TestStatusErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) }))
+	t.Cleanup(srv.Close)
+	s := New(sources.NewClient())
+	s.BaseURL = srv.URL
+	_, err := s.Threads(context.Background(), 1)
+	var se *sources.StatusError
+	if !errors.As(err, &se) || se.Code != http.StatusForbidden || err.Error() != "hacker news: HTTP 403" {
+		t.Errorf("error %v", err)
+	}
+}
+
 func TestParseAd(t *testing.T) {
 	tests := []struct {
 		header string

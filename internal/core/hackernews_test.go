@@ -20,6 +20,7 @@ type fakeThreads struct {
 	fail    error                        // returned by ReadThread
 	gone    map[string]bool
 	reads   int
+	lookups int
 }
 
 func (s *fakeThreads) Name() string   { return "hackernews" }
@@ -40,6 +41,9 @@ func (s *fakeThreads) ReadThread(_ context.Context, id string) (sources.ThreadRe
 }
 
 func (s *fakeThreads) Lookup(_ context.Context, id string) (sources.Posting, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lookups++
 	if s.gone[id] {
 		return sources.Posting{}, sources.ErrPostingNotFound
 	}
@@ -219,7 +223,7 @@ func TestHackerNewsAdRepostedAcrossThreads(t *testing.T) {
 }
 
 func TestLookupLimitIsSharedBySources(t *testing.T) {
-	f, muse := newSearchFixture(t, musePosting(1, "Made-Up Labs", "Platform Engineer"))
+	f, hm := newHimalayasFixture(t, recentPosting("1", "Platform Engineer", time.Hour))
 	hn := &fakeThreads{
 		threads: []sources.Thread{{ID: "901"}},
 		ads:     map[string][]sources.Posting{"901": {hnAd("911", "Fictional Freight", "Data Engineer")}},
@@ -227,8 +231,7 @@ func TestLookupLimitIsSharedBySources(t *testing.T) {
 	}
 	f.r.Searchers["hackernews"] = hn
 	f.r.MaxLookups = 1
-	f.setFilters(`{"schema_version": 1, "titles": {"require_any": ["engineer"]}, "keywords": {"body_any": ["software"]},
-		"search": {"themuse": [{"categories": ["Software Engineering"]}], "hackernews": {"months": 1}}}`)
+	f.setFilters(searchFilters)
 	f.refresh()
 	jobs := f.jobsByTitle()
 	ctx := context.Background()
@@ -239,7 +242,7 @@ func TestLookupLimitIsSharedBySources(t *testing.T) {
 	}
 
 	// Both pursued jobs drop out of their source; one lookup in all.
-	muse.postings, hn.ads["901"] = nil, nil
+	hm.postings, hn.ads["901"] = nil, nil
 	res := f.refresh()
 	n := 0
 	for _, s := range res.Searches {

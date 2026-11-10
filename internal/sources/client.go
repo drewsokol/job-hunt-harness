@@ -49,6 +49,19 @@ type StatusError struct {
 
 func (e *StatusError) Error() string { return fmt.Sprintf("%s: HTTP %d", e.URL, e.Code) }
 
+// StatusOnly is a StatusError reported as "<name>: HTTP <code>", without
+// its URL, which can carry a search's details. It stays in the error chain,
+// so callers can still check the status with errors.As.
+func StatusOnly(name string, se *StatusError) error { return &statusOnly{name: name, se: se} }
+
+type statusOnly struct {
+	name string
+	se   *StatusError
+}
+
+func (e *statusOnly) Error() string { return fmt.Sprintf("%s: HTTP %d", e.name, e.se.Code) }
+func (e *statusOnly) Unwrap() error { return e.se }
+
 // GetJSON fetches url and decodes the JSON body into v. If etag is not
 // empty it is sent as If-None-Match, and a 304 reply returns
 // notModified=true without touching v. A 404 returns ErrBoardNotFound. A 429

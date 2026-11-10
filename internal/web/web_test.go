@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -413,6 +414,10 @@ func TestTriage(t *testing.T) {
 	if st.Summary.ToReview != 2 || st.Counts["filtered_out"] != 1 || !st.Setup.Filters || st.Setup.Profile {
 		t.Errorf("state: %+v", st)
 	}
+	// Jobs found through a retired source say so.
+	if !slices.Equal(st.Retired, []string{"The Muse"}) {
+		t.Errorf("retired sources %v", st.Retired)
+	}
 }
 
 func TestShortlist(t *testing.T) {
@@ -685,9 +690,9 @@ func TestSourcesPage(t *testing.T) {
 		Sources []sourceJSON `json:"sources"`
 	}
 	f.ok("GET", "/api/sources", nil, &list)
-	if len(list.Sources) != 3 || list.Sources[0].Name != "hackernews" || list.Sources[0].Status != core.SourceOn ||
+	if len(list.Sources) != 2 || list.Sources[0].Name != "hackernews" || list.Sources[0].Status != core.SourceOn ||
 		list.Sources[1].Name != "himalayas" || !list.Sources[1].TakesKey || list.Sources[1].KeySaved ||
-		list.Sources[2].Status != core.SourceNeedsSetup {
+		list.Sources[1].Status != core.SourceNeedsSetup {
 		t.Fatalf("sources %+v", list.Sources)
 	}
 
@@ -729,7 +734,7 @@ func TestSourceKeys(t *testing.T) {
 			t.Errorf("%v: status %d", bad, code)
 		}
 	}
-	if code := f.do("PUT", "/api/sources/themuse/key", map[string]any{"key": goodKey}, nil); code != http.StatusBadRequest {
+	if code := f.do("PUT", "/api/sources/hackernews/key", map[string]any{"key": goodKey}, nil); code != http.StatusBadRequest {
 		t.Errorf("a source that takes no key: status %d", code)
 	}
 

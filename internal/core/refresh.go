@@ -54,7 +54,6 @@ type Refresher struct {
 	Concurrency       int
 	DetailConcurrency int
 	MaxDetails        int
-	MaxSearchRequests int // per refresh, across every query
 	MaxRecentRequests int // Himalayas's per refresh; 0 means its default
 	MaxLookups        int // pursued search postings checked per refresh
 }

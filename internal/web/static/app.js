@@ -479,6 +479,9 @@ function badges(j) {
   if (j.via && !j.closed && state.info && (state.info.paused_sources || []).includes(j.via)) {
     out.push(pill("st-idle", "Source paused", `${j.via} is turned off, so this job isn't being refreshed. Turn it back on under Sources.`));
   }
+  if (j.via && !j.closed && state.info && (state.info.retired_sources || []).includes(j.via)) {
+    out.push(pill("st-idle", "Source retired", `jhh no longer reads ${j.via}, so it can't tell when this job closes. Check the posting.`));
+  }
   if (j.applied && j.status === "applied") out.push(h("span", { class: "mono hint" }, `${daysSince(j.applied)}d ago`));
   return out;
 }
@@ -1068,7 +1071,7 @@ function viewProfile() {
 
 /* ---------- sources ---------- */
 
-const SOURCE_STATUS = { on: ["st-ok", "On"], off: ["st-idle", "Off"], "needs setup": ["st-warn", "Needs setup"] };
+const SOURCE_STATUS = { on: ["st-ok", "On"], off: ["st-idle", "Off"], "needs setup": ["st-warn", "Needs setup"], retired: ["st-idle", "Retired"] };
 
 // setSource changes a search source; back undoes it.
 async function setSource(src, patch, msg, back) {
@@ -1077,19 +1080,6 @@ async function setSource(src, patch, msg, back) {
     toast(msg, back && (() => api("PATCH", `/api/sources/${encodeURIComponent(src.name)}`, back)));
   } catch (e) { toast(e.message); }
   reload();
-}
-
-// museQueries shows The Muse's queries as text.
-function museQueries(settings) {
-  const qs = (settings && settings.queries) || [];
-  if (!qs.length) return h("p", { class: "hint" }, "No queries yet. Ask your agent, for example: \"search The Muse for software engineering jobs in Columbus, OH\".");
-  return h("ul", { class: "memories" }, qs.map((q) => h("li", null,
-    h("span", null, [
-      q.categories && q.categories.length ? `Categories: ${q.categories.join(", ")}` : "",
-      q.levels && q.levels.length ? `Levels: ${q.levels.join(", ")}` : "",
-      q.locations && q.locations.length ? `Locations: ${q.locations.join(", ")}` : "",
-      q.pages ? `At most ${plural(q.pages, "page", "pages")}` : "",
-    ].filter(Boolean).join(" · ")))));
 }
 
 // himalayasQueries shows Himalayas's queries as text.
@@ -1155,7 +1145,7 @@ function searchSource(src) {
   const [cls, label] = SOURCE_STATUS[src.status] || ["st-idle", src.status];
   const on = src.status !== "off";
   // A source that needs setup turns on once it's set up; until then there's nothing to switch.
-  const toggle = src.status === "needs setup" ? null : h("button", { class: "btn", type: "button",
+  const toggle = src.status === "needs setup" || src.status === "retired" ? null : h("button", { class: "btn", type: "button",
     onclick: () => setSource(src, { enabled: !on }, on ? `Paused ${src.title}. Its jobs stay; nothing from it is refreshed until it's back on.` : `Turned ${src.title} on. It runs on the next refresh.`,
       { enabled: on }) }, on ? "Turn off" : "Turn on");
   let settings = null;
@@ -1165,8 +1155,6 @@ function searchSource(src) {
       h("select", { class: "compact", "aria-label": "How many monthly threads to read",
         onchange: (e) => setSource(src, { settings: { months: Number(e.target.value) } }, "Saved. The next refresh reads that many threads.", { settings: { months } }) },
         [1, 2, 3].map((n) => h("option", { value: String(n), selected: n === months }, n === 1 ? "The latest month" : `The latest ${n} months`))));
-  } else if (src.name === "themuse") {
-    settings = museQueries(src.settings);
   } else if (src.name === "himalayas") {
     settings = himalayasQueries(src.settings);
   }
@@ -1176,6 +1164,7 @@ function searchSource(src) {
   return h("section", { class: "panel" },
     h("div", { class: "row-head" }, h("h2", null, src.title), pill(cls, label), h("span", { class: "grow" }), toggle),
     src.setup ? h("p", { class: "reason" }, `Needs ${src.setup.replace(/^needs /, "")}.`) : null,
+    src.retired ? h("p", { class: "reason" }, src.retired) : null,
     settings, src.takes_key ? keyPanel(src) : null, last,
     src.last_error ? h("p", { class: "reason" }, `Last error: ${src.last_error}`) : null,
     src.by ? h("p", { class: "hint" }, `Last changed by ${who(src.by)} on ${fmtDate(src.at)}${src.reason ? `: ${src.reason}` : ""}`) : null);

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/sources"
-	"github.com/drewsokol/job-hunt-harness/internal/sources/themuse"
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 )
 
@@ -25,6 +24,9 @@ const (
 	SourceOn         = "on"
 	SourceOff        = "off"
 	SourceNeedsSetup = "needs setup"
+	// SourceRetired is a search source jhh no longer reads, because the
+	// service behind it is gone. It can't be turned on.
+	SourceRetired = "retired"
 )
 
 // Source kinds.
@@ -36,13 +38,15 @@ const (
 // SourceInfo is one source as the user and the agent see it.
 type SourceInfo struct {
 	Name   string
-	Title  string // its name for people: "The Muse"
+	Title  string // its name for people: "Hacker News"
 	Kind   string
-	Status string // for a search source: on, off or needs setup
+	Status string // for a search source: on, off, needs setup or retired
 	// Settings are a search source's settings, with defaults filled in.
 	Settings json.RawMessage
 	// Setup says what the source still needs, when it needs setup.
 	Setup string
+	// Retired says why a retired source is no longer read.
+	Retired string
 	// Chosen is true once someone turned the source on or off.
 	Chosen bool
 	// Board sources: how many companies use it, and how many are read.
@@ -71,12 +75,38 @@ type searchSpec struct {
 }
 
 // searchOrder is the order search sources are listed in.
-var searchOrder = []string{"hackernews", "himalayas", "themuse"}
+var searchOrder = []string{"hackernews", "himalayas"}
 
 var searchSpecs = map[string]searchSpec{
 	"hackernews": {title: sources.SearchTitle("hackernews"), check: checkHackerNews},
-	"themuse":    {title: sources.SearchTitle("themuse"), check: checkMuse},
 	"himalayas":  {title: sources.SearchTitle("himalayas"), check: checkHimalayas, takesKey: true},
+}
+
+// retiredSources are search sources jhh used to read, with why it stopped.
+// They are listed only where someone set them up, so their jobs, which
+// stay, can be explained. They are never read and can't be turned on.
+var retiredSources = []struct{ name, why string }{
+	{"themuse", "The Muse removed its public jobs API in November 2026, so jhh no longer searches it. " +
+		"Jobs already found through it stay, but jhh can't tell when they close."},
+}
+
+// RetiredTitles are the names people know the retired search sources by
+// (a job's via), so their jobs can say the source is gone.
+func RetiredTitles() []string {
+	out := make([]string, 0, len(retiredSources))
+	for _, r := range retiredSources {
+		out = append(out, sources.SearchTitle(r.name))
+	}
+	return out
+}
+
+func retired(name string) (string, bool) {
+	for _, r := range retiredSources {
+		if r.name == name {
+			return r.why, true
+		}
+	}
+	return "", false
 }
 
 // boardTitles are the board sources' names for people.
@@ -97,29 +127,8 @@ const (
 	MaxHackerNewsMonths     = 3
 )
 
-// MuseSettings are The Muse's queries. The Muse searches by its own
-// category list, so the filters can't stand in for them.
-type MuseSettings struct {
-	Queries []MuseQuery `json:"queries"`
-}
-
-// MuseQuery is one search of The Muse. A job matches when it is in any of
-// the categories, at any of the levels and in any of the locations; a field
-// left out doesn't narrow. Category and level names must come from The
-// Muse's lists. A location also matches every remote job ("Flexible /
-// Remote"). Pages optionally caps how many pages of 20 a refresh reads; by
-// default it reads them all, within the refresh's request limit.
-type MuseQuery struct {
-	Categories []string `json:"categories,omitempty"`
-	Levels     []string `json:"levels,omitempty"`
-	Locations  []string `json:"locations,omitempty"`
-	Pages      int      `json:"pages,omitempty"`
-}
-
-// Muse query limits. MaxSearchPages matches the default request limit of a
-// refresh (DefaultMaxSearchRequests).
+// Query limits, shared by the search sources that take queries.
 const (
-	MaxSearchPages   = DefaultMaxSearchRequests
 	maxQueries       = 10
 	maxQueryValues   = 20
 	maxQueryValueLen = 100
@@ -154,58 +163,6 @@ func checkHackerNews(raw json.RawMessage) (any, []string, string) {
 		s.Months = DefaultHackerNewsMonths
 	}
 	return s, nil, ""
-}
-
-func checkMuse(raw json.RawMessage) (any, []string, string) {
-	s := MuseSettings{Queries: []MuseQuery{}}
-	if p := decodeSettings(raw, &s); p != nil {
-		return nil, p, ""
-	}
-	if s.Queries == nil {
-		s.Queries = []MuseQuery{}
-	}
-	var p []string
-	add := func(format string, args ...any) { p = append(p, fmt.Sprintf(format, args...)) }
-	if n := len(s.Queries); n > maxQueries {
-		add("settings.queries: %d queries is too many; the limit is %d", n, maxQueries)
-	}
-	for i, q := range s.Queries {
-		field := fmt.Sprintf("settings.queries[%d]", i)
-		if len(q.Categories) == 0 && len(q.Locations) == 0 {
-			add("%s: set categories, locations or both, so the query doesn't ask for every job", field)
-		}
-		for _, list := range []struct {
-			name   string
-			values []string
-		}{{"categories", q.Categories}, {"levels", q.Levels}, {"locations", q.Locations}} {
-			if len(list.values) > maxQueryValues {
-				add("%s.%s: more than %d values", field, list.name, maxQueryValues)
-			}
-			for j, v := range list.values {
-				if strings.TrimSpace(v) == "" || len(v) > maxQueryValueLen {
-					add("%s.%s[%d]: must be 1 to %d characters", field, list.name, j, maxQueryValueLen)
-				}
-			}
-		}
-		if q.Pages < 0 || q.Pages > MaxSearchPages {
-			add("%s.pages: must be between 1 and %d", field, MaxSearchPages)
-		}
-		for _, problem := range themuse.Check(museQuery(q)) {
-			add("%s.%s", field, problem)
-		}
-	}
-	if len(p) > 0 {
-		return nil, p, ""
-	}
-	setup := ""
-	if len(s.Queries) == 0 {
-		setup = "needs at least one query: The Muse searches by its own categories, levels and locations"
-	}
-	return s, nil, setup
-}
-
-func museQuery(q MuseQuery) sources.Query {
-	return sources.Query{Categories: q.Categories, Levels: q.Levels, Locations: q.Locations}
 }
 
 // searchStatus works out a search source's status from its stored row: a
@@ -250,6 +207,15 @@ func ListSources(ctx context.Context, s *store.Store, boards []string) ([]Source
 		}
 		out = append(out, info)
 	}
+	for _, r := range retiredSources {
+		row, ok := rows[r.name]
+		if !ok {
+			continue // never set up here, so there's nothing to explain
+		}
+		out = append(out, SourceInfo{Name: r.name, Title: sources.SearchTitle(r.name), Kind: KindSearch, Status: SourceRetired, Retired: r.why,
+			Chosen: row.Enabled != nil, LastRunAt: row.LastRunAt, LastPostings: row.LastPostings, LastError: row.LastError,
+			Reason: row.Reason, UpdatedAt: row.UpdatedAt, UpdatedBy: row.UpdatedBy})
+	}
 	counts, err := s.BoardCounts(ctx)
 	if err != nil {
 		return nil, err
@@ -284,7 +250,10 @@ const maxSourceReason = 500
 func SetSource(ctx context.Context, s *store.Store, by store.Actor, name string, u SourceUpdate) (SourceInfo, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	spec, ok := searchSpecs[name]
+	why, gone := retired(name)
 	switch {
+	case gone:
+		return SourceInfo{}, &InputError{Problems: []string{fmt.Sprintf("name: %s is retired. %s Use one of %s.", sources.SearchTitle(name), why, strings.Join(searchOrder, ", "))}}
 	case !ok && boardTitles[name] != "":
 		return SourceInfo{}, &InputError{Problems: []string{fmt.Sprintf("name: %s is a board source, read for each company added; turn a company's board on or off with set_company", boardTitles[name])}}
 	case !ok:
@@ -342,7 +311,6 @@ func mentionsKey(raw json.RawMessage) bool {
 // searchPlan is what a refresh searches: the settings of each search
 // source that is on.
 type searchPlan struct {
-	muse           *MuseSettings
 	hackerNews     *HackerNewsSettings
 	himalayas      *HimalayasSettings
 	himalayasState json.RawMessage
@@ -360,8 +328,6 @@ func plannedSearches(ctx context.Context, s *store.Store) (searchPlan, error) {
 			continue
 		}
 		switch v := settings.(type) {
-		case MuseSettings:
-			p.muse = &v
 		case HackerNewsSettings:
 			p.hackerNews = &v
 		case HimalayasSettings:

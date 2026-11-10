@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -129,8 +128,8 @@ func (f *refreshFixture) refresh() RefreshResult {
 }
 
 // setFilters saves doc as the filters. A search section in doc goes to the
-// source settings, the way migration 0003 moves it: The Muse gets its
-// queries, and Hacker News is on only when the section names it.
+// source settings, the way migration 0003 moves it: Hacker News is on only
+// when the section names it.
 func (f *refreshFixture) setFilters(doc string) FilterPreview {
 	f.t.Helper()
 	var m map[string]json.RawMessage
@@ -139,14 +138,10 @@ func (f *refreshFixture) setFilters(doc string) FilterPreview {
 	}
 	if raw, ok := m["search"]; ok {
 		var search struct {
-			TheMuse    json.RawMessage `json:"themuse"`
 			HackerNews json.RawMessage `json:"hackernews"`
 		}
 		if err := json.Unmarshal(raw, &search); err != nil {
 			f.t.Fatal(err)
-		}
-		if search.TheMuse != nil {
-			f.setSource("themuse", SourceUpdate{Settings: fmt.Appendf(nil, `{"queries": %s}`, search.TheMuse)})
 		}
 		on, months := search.HackerNews != nil, search.HackerNews
 		if !on {

@@ -22,7 +22,7 @@ const sourcesUsage = `usage:
   jhh sources on|off <name>    turn a search source on or pause it
   jhh sources set <name> <file>
                                replace a search source's settings with a JSON file
-                               (examples/themuse.json and examples/himalayas.json show the queries)
+                               (examples/himalayas.json shows the queries)
 Usually your agent does this. Company boards are turned on and off per company.`
 
 // maxSettingsFile caps a settings file.
@@ -117,6 +117,9 @@ func printSources(w io.Writer, ss []core.SourceInfo) {
 		fmt.Fprintln(w)
 		if s.Setup != "" {
 			fmt.Fprintf(w, "             %s\n", s.Setup)
+		}
+		if s.Retired != "" {
+			fmt.Fprintf(w, "             %s\n", s.Retired)
 		}
 		if !s.LastRunAt.IsZero() {
 			fmt.Fprintf(w, "             last ran %s: %d postings\n", s.LastRunAt.Format("2006-01-02 15:04 UTC"), s.LastPostings)

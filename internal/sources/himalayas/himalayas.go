@@ -240,7 +240,7 @@ func (s *Source) request(ctx context.Context, path, key string, out any) error {
 	case errors.As(err, &se) && se.Code == http.StatusGone:
 		return err // a closed job, for Lookup
 	case errors.As(err, &se):
-		return fmt.Errorf("himalayas: HTTP %d", se.Code)
+		return sources.StatusOnly("himalayas", se)
 	}
 	return fmt.Errorf("himalayas: %w", err)
 }

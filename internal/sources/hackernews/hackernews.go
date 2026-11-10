@@ -179,7 +179,7 @@ func explain(err error) error {
 		if se.Code == http.StatusTooManyRequests {
 			return fmt.Errorf("hacker news: %w (HTTP %d); the rest waits for a later refresh", sources.ErrRateLimited, se.Code)
 		}
-		return fmt.Errorf("hacker news: HTTP %d", se.Code)
+		return sources.StatusOnly("hacker news", se)
 	}
 	return fmt.Errorf("hacker news: %w", err)
 }
