@@ -325,12 +325,15 @@ func TestSearchFailureSaysTheSourceIsUnavailable(t *testing.T) {
 		want string
 	}{
 		{fmt.Errorf("hacker news: %w", sources.ErrBoardNotFound), "Hacker News is unavailable: its API answered HTTP 404"},
-		{&sources.StatusError{URL: "https://hn.example/items/901", Code: 403}, "Hacker News refused jhh's requests: HTTP 403"},
+		// As the source returns it: the status stays in the chain, the URL out of the text.
+		{sources.StatusOnly("hacker news", &sources.StatusError{URL: "https://hn.example/items/901", Code: 403}),
+			"Hacker News refused jhh's requests, so it may be blocking them (hacker news: HTTP 403)"},
 		{errors.New("hacker news: HTTP 500"), "hacker news: HTTP 500"},
 	} {
 		s.fail = tt.err
 		res := f.refresh()
-		if len(res.Errors) != 1 || !strings.HasPrefix(res.Errors[0].Error, tt.want) || strings.Contains(res.Errors[0].Error, "board not found") {
+		if len(res.Errors) != 1 || !strings.HasPrefix(res.Errors[0].Error, tt.want) || strings.Contains(res.Errors[0].Error, "board not found") ||
+			strings.Contains(res.Errors[0].Error, "hn.example") {
 			t.Errorf("%v: errors %+v, want %q", tt.err, res.Errors, tt.want)
 		}
 	}

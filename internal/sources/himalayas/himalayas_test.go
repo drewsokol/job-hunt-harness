@@ -131,6 +131,13 @@ func TestErrors(t *testing.T) {
 	if _, err := s.SearchRecent(context.Background(), sources.TextQuery{Q: "engineer"}, 1); !errors.Is(err, sources.ErrRateLimited) {
 		t.Errorf("429: %v", err)
 	}
+	// Other statuses keep the StatusError in the chain; the text leaves the URL out.
+	s = newTestSource(t, "", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) })
+	_, err := s.SearchRecent(context.Background(), sources.TextQuery{Q: "engineer"}, 1)
+	var se *sources.StatusError
+	if !errors.As(err, &se) || se.Code != http.StatusForbidden || err.Error() != "himalayas: HTTP 403" {
+		t.Errorf("403: %v", err)
+	}
 }
 
 func TestLookup(t *testing.T) {

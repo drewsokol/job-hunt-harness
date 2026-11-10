@@ -132,14 +132,15 @@ func (r *Refresher) failed(sr *searchResult, s sources.Searcher, err error) {
 
 // searchFailure says what went wrong with a search source. The HTTP client
 // reports a 404 as a missing board, which for a search source means the
-// service no longer answers where jhh asks, not that a setting is wrong.
+// service no longer answers where jhh asks, not that a setting is wrong. A
+// refusal keeps the error itself after it, so it still says which query.
 func searchFailure(title string, err error) string {
 	var se *sources.StatusError
 	switch {
 	case errors.Is(err, sources.ErrBoardNotFound):
 		return fmt.Sprintf("%s is unavailable: its API answered HTTP 404 (not found), so the service may have moved or closed it", title)
 	case errors.As(err, &se) && (se.Code == http.StatusUnauthorized || se.Code == http.StatusForbidden):
-		return fmt.Sprintf("%s refused jhh's requests: HTTP %d, so it may be blocking them", title, se.Code)
+		return fmt.Sprintf("%s refused jhh's requests, so it may be blocking them (%v)", title, err)
 	}
 	return err.Error()
 }
