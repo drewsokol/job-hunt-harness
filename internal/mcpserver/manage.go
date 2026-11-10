@@ -84,6 +84,7 @@ type sourceOut struct {
 	Kind             string          `json:"kind"`
 	Status           string          `json:"status,omitempty"`
 	Setup            string          `json:"needs,omitempty"`
+	Retired          string          `json:"retired,omitempty"` // why a retired source is no longer read
 	Settings         json.RawMessage `json:"settings,omitempty"`
 	Companies        *int            `json:"companies,omitempty"`
 	EnabledCompanies *int            `json:"companies_read,omitempty"`
@@ -103,7 +104,7 @@ type sourceOut struct {
 }
 
 func newSourceOut(info core.SourceInfo) sourceOut {
-	o := sourceOut{Name: info.Name, Title: info.Title, Kind: info.Kind, Status: info.Status, Setup: info.Setup, Settings: info.Settings}
+	o := sourceOut{Name: info.Name, Title: info.Title, Kind: info.Kind, Status: info.Status, Setup: info.Setup, Retired: info.Retired, Settings: info.Settings}
 	if info.Kind == core.KindBoard {
 		o.Companies, o.EnabledCompanies = &info.Companies, &info.EnabledCompanies
 		return o
@@ -264,7 +265,7 @@ func (t *tools) addManageTools(s *mcp.Server) {
 	})
 
 	type setSourceIn struct {
-		Name     string         `json:"name" jsonschema:"the search source: hackernews, himalayas or themuse"`
+		Name     string         `json:"name" jsonschema:"the search source: hackernews or himalayas"`
 		Enabled  *bool          `json:"enabled,omitempty" jsonschema:"true to turn it on, false to pause it; leave out to keep it as it is"`
 		Settings map[string]any `json:"settings,omitempty" jsonschema:"leave out to keep them"`
 		Reason   string         `json:"reason,omitempty" jsonschema:"one sentence: why, shown to the user"`

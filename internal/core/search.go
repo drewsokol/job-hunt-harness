@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/drewsokol/job-hunt-harness/internal/prefilter"
@@ -12,23 +13,19 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/utc"
 )
 
-// Default search limits: half The Muse's hourly limit of 500 requests, so
-// a second refresh in the same hour still works, and a few lookups.
-const (
-	DefaultMaxSearchRequests = 250
-	DefaultMaxLookups        = 25
-)
+// DefaultMaxLookups is how many pursued search postings a refresh looks up.
+const DefaultMaxLookups = 25
 
-// MaxSearchAge is how old a search result can be and still be stored. The
-// Muse keeps some listings for years; a job published longer ago than this
-// is most likely filled.
+// MaxSearchAge is how old a search result can be and still be stored. Some
+// listings stay up for years; a job published longer ago than this is most
+// likely filled.
 const MaxSearchAge = 90 * 24 * time.Hour
 
 // SearchSummary is what one search source did in a refresh.
 type SearchSummary struct {
-	Source   string // the searcher's name: "themuse" or "hackernews"
-	Title    string // its name for people: "The Muse"
-	Queries  int    // The Muse's queries
+	Source   string // the searcher's name: "hackernews" or "himalayas"
+	Title    string // its name for people: "Hacker News"
+	Queries  int    // Himalayas's queries
 	Threads  int    // Hacker News threads read
 	Requests int
 	Postings int // distinct postings found, old ones left out
@@ -36,8 +33,7 @@ type SearchSummary struct {
 	Covered  int // skipped because jhh reads the employer's board
 	// Unreadable counts Hacker News ads whose employer couldn't be read.
 	Unreadable int
-	// Incomplete names the queries that have more pages than they read, or
-	// whose reading failed ("themuse.queries[0]", "hackernews"). Until
+	// Incomplete names what wasn't read in full ("hackernews"). Until
 	// everything is read in full, postings missing from the results aren't
 	// closed.
 	Incomplete []string
@@ -117,11 +113,6 @@ func (r *Refresher) search(ctx context.Context, filters *prefilter.Compiled, ver
 		}
 		return r.Store.RecordSourceRun(ctx, s.Name(), last)
 	}
-	if s, ok := r.Searchers["themuse"].(sources.QuerySearcher); ok && plan.muse != nil {
-		if err := run(s, false, func() (SearchSummary, *found, error) { return r.searchMuse(ctx, &sr, s, plan.muse.Queries) }); err != nil {
-			return sr, err
-		}
-	}
 	if s, ok := r.Searchers["hackernews"].(sources.ThreadSearcher); ok && plan.hackerNews != nil {
 		months := plan.hackerNews.Months
 		if err := run(s, false, func() (SearchSummary, *found, error) { return r.searchThreads(ctx, &sr, s, months) }); err != nil {
@@ -135,43 +126,22 @@ func (r *Refresher) search(ctx context.Context, filters *prefilter.Compiled, ver
 }
 
 func (r *Refresher) failed(sr *searchResult, s sources.Searcher, err error) {
-	sr.errors = append(sr.errors, store.FetchError{Company: sources.SearchTitle(s.Name()), Error: err.Error()})
+	title := sources.SearchTitle(s.Name())
+	sr.errors = append(sr.errors, store.FetchError{Company: title, Error: searchFailure(title, err)})
 }
 
-// searchMuse reads every page of every query, within the request budget.
-func (r *Refresher) searchMuse(ctx context.Context, sr *searchResult, s sources.QuerySearcher, qs []MuseQuery) (SearchSummary, *found, error) {
-	sum := SearchSummary{Source: s.Name(), Title: sources.SearchTitle(s.Name()), Queries: len(qs)}
-	budget := cmpOr(r.MaxSearchRequests, DefaultMaxSearchRequests)
-	fd := newFound()
-queries:
-	for i, q := range qs {
-		label := fmt.Sprintf("themuse.queries[%d]", i)
-		for n := 0; q.Pages == 0 || n < q.Pages; n++ {
-			if sum.Requests >= budget {
-				sum.Stopped = fmt.Sprintf("reached the limit of %d search requests a refresh", budget)
-				break queries
-			}
-			sum.Requests++
-			page, err := s.Search(ctx, museQuery(q), n)
-			if err != nil {
-				if ctx.Err() != nil {
-					return sum, fd, ctx.Err()
-				}
-				r.failed(sr, s, fmt.Errorf("%s: %w", label, err))
-				if errors.Is(err, sources.ErrRateLimited) {
-					sum.Stopped = "The Muse's hourly request limit was reached"
-					break queries
-				}
-				break // the rest of this query waits for the next refresh
-			}
-			fd.add(s, page.Postings)
-			if n+1 >= page.Pages {
-				continue queries
-			}
-		}
-		sum.Incomplete = append(sum.Incomplete, label)
+// searchFailure says what went wrong with a search source. The HTTP client
+// reports a 404 as a missing board, which for a search source means the
+// service no longer answers where jhh asks, not that a setting is wrong.
+func searchFailure(title string, err error) string {
+	var se *sources.StatusError
+	switch {
+	case errors.Is(err, sources.ErrBoardNotFound):
+		return fmt.Sprintf("%s is unavailable: its API answered HTTP 404 (not found), so the service may have moved or closed it", title)
+	case errors.As(err, &se) && (se.Code == http.StatusUnauthorized || se.Code == http.StatusForbidden):
+		return fmt.Sprintf("%s refused jhh's requests: HTTP %d, so it may be blocking them", title, se.Code)
 	}
-	return sum, fd, nil
+	return err.Error()
 }
 
 // searchThreads reads the newest monthly hiring threads in full.

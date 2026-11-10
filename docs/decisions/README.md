@@ -17,3 +17,4 @@ Add a new numbered file for each decision. Don't rewrite old records: when a dec
 | [0009](0009-optional-keys.md) | A free source may take an optional key, entered only in the dashboard (Himalayas) | Accepted |
 | [0010](0010-fewer-tools.md) | One tool per kind of record, not one per verb; stay under 35 tools | Accepted |
 | [0011](0011-feature-pipeline.md) | Features are built from specs by a workflow; the owner steps in only when asked | Accepted |
+| [0012](0012-the-muse-retired.md) | Retire The Muse after its API closed; keep its jobs, don't scrape | Accepted |

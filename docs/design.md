@@ -23,7 +23,7 @@ The reference scripts already proved the loop works: about 12k roles fetched, ab
 4. **What the system knows about you lives in the harness, not in the agent.** That means the profile you write, the memories the agent saves, the filters it builds and every screening. All of it is in the SQLite file and reached over MCP, so you can switch from Claude Code to Cursor or anything else and keep everything that has built up. The agent is replaceable; the data isn't.
 5. **The agent configures the system, and you can see everything it did.** The agent writes the filters and saves memories through MCP. Each change is versioned and shown in the UI, and you can revert it there.
 6. **The prefilter only drops a role on clear evidence.** If a location, level or pay is unclear, the role goes through to the agent. Every drop records a reason the user can see.
-7. **Public feeds only.** Greenhouse, Lever and Ashby job board APIs, The Muse's public jobs API, Hacker News's monthly "Who is hiring?" threads through the public HN Search API, plus jobs the agent adds. No scraping of LinkedIn or of logged-in pages.
+7. **Public feeds only.** Greenhouse, Lever and Ashby job board APIs, Himalayas's public jobs API, Hacker News's monthly "Who is hiring?" threads through the public HN Search API, plus jobs the agent adds. No scraping of LinkedIn or of logged-in pages.
 
 ## 2. Architecture
 
@@ -45,7 +45,7 @@ The reference scripts already proved the loop works: about 12k roles fetched, ab
         │ HTTPS (public feeds only)                    │
         ▼                                     Web UI at localhost:7878
   Greenhouse / Lever / Ashby boards           (a window onto the same data)
-  The Muse, Hacker News (search)
+  Hacker News, Himalayas (search)
 ```
 
 - **The normal setup: the agent launches jhh.** You install the single `jhh` binary, then register it once as an MCP server, for example `claude mcp add jhh -- jhh`. The client starts `jhh` over stdio. On startup, jhh also serves the web UI on `127.0.0.1:7878` if no other jhh process is already serving it. The `open_dashboard` tool returns the URL and can open it in the browser, so "show me my dashboard" works from the chat.
@@ -108,15 +108,9 @@ Board sources only find jobs at companies jhh already knows. A **search source**
 ```go
 // Searcher finds postings across employers.
 type Searcher interface {
-    Name() string    // "themuse"
-    Prefix() string  // "tm", used in posting ids: "tm:22008828"
+    Name() string    // "hackernews"
+    Prefix() string  // "hn", used in posting ids: "hn:22008828"
     Lookup(ctx context.Context, externalID string) (Posting, error) // ErrPostingNotFound once it's gone
-}
-
-// QuerySearcher runs queries a page at a time (The Muse).
-type QuerySearcher interface {
-    Searcher
-    Search(ctx context.Context, q Query, page int) (SearchResult, error) // one page, one request
 }
 
 // TextQuery is one Himalayas search: free text, optionally narrowed.
@@ -142,31 +136,26 @@ type ThreadSearcher interface {
 }
 ```
 
-All three kinds share what happens after: results older than 90 days are skipped, employers jhh reads a board for are skipped, and the rest are stored under companies found by search. The Muse and Hacker News are read in full, so they close what they no longer return (looking up pursued jobs first); Himalayas is read only for what changed, so it closes by expiry date and lookups instead (see "Himalayas").
+Both kinds share what happens after: results older than 90 days are skipped, employers jhh reads a board for are skipped, and the rest are stored under companies found by search. Hacker News is read in full, so it closes what it no longer returns (looking up pursued jobs first); Himalayas is read only for what changed, so it closes by expiry date and lookups instead (see "Himalayas").
 
-**The Muse is the built-in search source.** Its public jobs API (themuse.com/developers/api/v2) needs no account or key, so it works the moment jhh is installed. jhh is a personal tool: each user's copy calls the API for that user, the way they could call it themselves, and nothing is hosted or resold. Every search source jhh ships works this way, with no account, key or payment ([decision 0008](decisions/0008-free-sources-only.md)); a free key may be optional, for higher limits (Himalayas, [decision 0009](decisions/0009-optional-keys.md)).
+**Every search source jhh ships is free to use.** Each needs no account, key or payment, so it works the moment jhh is installed ([decision 0008](decisions/0008-free-sources-only.md)); a free key may be optional, for higher limits (Himalayas, [decision 0009](decisions/0009-optional-keys.md)). jhh is a personal tool: each user's copy calls the API for that user, the way they could call it themselves, and nothing is hosted or resold.
 
-What The Muse's API offers, checked on 2026-10-19:
-- **Filters, not keywords.** A search is any combination of `category`, `level` and `location`, each with several values allowed. There is no text search, so the queries stay coarse and the prefilter does the rest. One category alone can be 90,000 jobs; "Software Engineering", "Senior Level", "Flexible / Remote" was 515.
-- **Values must come from its lists.** An unknown category returns no results rather than an error, so jhh checks every category and level against The Muse's published lists before saving the filters.
-- **Full descriptions** (HTML, about 8 KB each), the company name, its locations and its publication date. Nothing says whether a job is remote except a location named "Flexible / Remote".
-- **The link is the job's page on The Muse**, not the employer's. You open it and use The Muse's "Apply on company site" button. jhh never follows that button and never reads The Muse's web pages, only its API. The terms ask that content link back to The Muse, which the link does.
-- **20 results a page, pages numbered from 0**, with the page count in each reply. 500 requests an hour without a key. The categories are loose ("Software Engineering" includes retail jobs at a large employer), which the title rules catch.
-- **A location also returns every remote job.** "Software Engineering", "Senior Level", "Columbus, OH" was 779 jobs, most of them "Flexible / Remote". So one query with a city covers that city and remote work, and there's no way to ask for the city alone.
-- **The order is stable but not by date**, and new jobs land on any page, so reading only the first pages would miss most new jobs.
-- **Listings stay up long after they're filled.** In that query, 232 of 779 jobs were published more than 90 days earlier, some in 2024.
-
-How jhh uses it:
-- **Queries live in The Muse's source settings** (see "Turning sources on and off"), which the agent sets with `set_source` and every change to which is recorded with its author.
-- **Every page of every query is read on each refresh**, within 250 requests per refresh in all, half the hourly limit. A query can cap its own `pages`, but by default it reads them all: the results aren't in date order, so there's no way to ask only for new jobs, and reading every page is what lets jhh see new jobs and notice jobs that are gone. The Columbus query above takes 39 requests. A 403 means the hourly limit was reached: searching stops and the rest waits for the next refresh.
+How jhh handles what every search source finds:
 - **Old listings are skipped.** A result published more than 90 days ago isn't stored, so stale listings never reach the agent. Board postings have no such rule: a board lists only what's open.
-- **Closing.** When every query was read in full, a Muse posting that none of them returned is closed, like a posting missing from a board. If a query has more pages than its cap, or searching stopped early, nothing is closed, and refresh says which query to narrow. Postings of jobs you are pursuing (`review` onward) are not closed just for missing from the queries: jhh looks each one up (`Lookup`, at most 25 a refresh) and closes it only when The Muse says it's gone. So changing your queries never marks a job you applied to as closed.
+- **Closing.** A source read in full (Hacker News) closes a posting it no longer returns, like a posting missing from a board, but only after a complete read: if reading stopped early, nothing is closed. Postings of jobs you are pursuing (`review` onward) are not closed just for missing: jhh looks each one up (`Lookup`, at most 25 a refresh across every search source) and closes it only when the source says it's gone. So changing what a source searches never marks a job you applied to as closed. A source read only for what changed (Himalayas) closes by other rules (see "Himalayas").
 - **Board postings win.** Each result names its employer. When the employer is a company whose board jhh already reads, the result is skipped, because the board has the same job with a direct apply link. Otherwise the employer is recorded as a company with no board (`origin=search`), matched by a normalized name ("Example Corp, Inc." and "example corp" are the same company), and its jobs go through the normal flow. If that company's board is added later, the board's postings attach to the jobs found by search (same company, same title key), so nothing you were tracking is lost.
 - **Descriptions** arrive with the results, so they are handled like Lever and Ashby: held in memory while stage 1 runs, and stored only for jobs that pass.
 - **Finding boards** (M4): your agent can suggest adding a company that search keeps finding, and `set_company` probes its board on Greenhouse, Lever and Ashby, which every company uses the same way, so there's no custom work per employer. jhh doesn't probe on its own: you decide which companies to add.
-- The CLI (and in M5 the UI) labels these jobs "via The Muse".
+- **Failures say what happened.** A search source's error names it and gives the HTTP status. A 404 from its API means the source is unavailable (the service may have moved or closed it), and a 401 or 403 that it refused jhh's requests. Neither is reported as a missing board, which only fits a company board and sounds like a settings mistake.
+- The CLI and the dashboard label these jobs with their source ("via Hacker News").
 
-**Hacker News** was added after the MVP, to find the startups and tech companies that The Muse, which leans toward large employers, mostly misses. Each month the `whoishiring` account posts "Ask HN: Who is hiring?", and every top-level comment is one employer's ad. The ads lean toward startups and tech companies, the kind people can't list up front. What its API offers, checked on 2026-10-23:
+**The Muse** was jhh's first search source, from M3.5 until November 2026. It searched The Muse's public jobs API by The Muse's own categories, levels and locations. Around 2026-11-09 The Muse removed that API without notice: every endpoint answered 404 and its API documentation was gone. jhh retired it ([decision 0012](decisions/0012-the-muse-retired.md)):
+- **It is never read**, and `set_source` refuses to set it up or turn it on, with the reason.
+- **`list_sources`, `jhh sources` and the Sources tab show it as `retired`**, with why, but only where it was set up, so a new install never sees it.
+- **Its jobs stay**, labeled "via The Muse". jhh can no longer tell when they close, so the dashboard marks open ones "Source retired"; the user checks the posting.
+- **jhh doesn't read The Muse's web pages instead.** Its search pages still list jobs, but scraping them would lose the fields jhh used and go against the site's blocking of automated requests.
+
+**Hacker News** was added after the MVP, to find the startups and tech companies that The Muse, which leaned toward large employers, mostly missed. Each month the `whoishiring` account posts "Ask HN: Who is hiring?", and every top-level comment is one employer's ad. The ads lean toward startups and tech companies, the kind people can't list up front. What its API offers, checked on 2026-10-23:
 - **The public HN Search API by Algolia** (hn.algolia.com/api), with no account or key. `search_by_date?tags=story,author_whoishiring` lists the account's threads; the same account also posts "Who wants to be hired?" and freelancer threads, which jhh skips by title. `items/<id>` returns a whole thread with every comment in one request: October 2026 was about 480 KB for 266 ads. The limit is 10,000 requests an hour; a refresh makes one plus one per month.
 - **Ads are free text.** By convention the first line is a header such as `Exampleco | Senior Engineer | Remote (US) | $150k-$180k | Full-time`; about 9 in 10 ads follow it, in any order after the employer, and some use dashes instead of bars. A deleted ad disappears from the thread, and its own item returns 404 or no text.
 
@@ -178,7 +167,7 @@ How jhh uses it:
 - **Closing** follows the shared rules: when every thread was read, an ad missing from them is closed, so last month's ads close once their thread falls out of `months`. Pursued ads are looked up and closed only when deleted or marked filled.
 - **Dedupe:** Hacker News allows one ad per company in each thread, so an employer's new ad continues its earlier one when they share a role, or when either names no role; the job takes the newest ad's roles. An ad for entirely different roles is a job of its own. (Text alone can't decide this: descriptions are only kept for jobs that pass stage 1.) When the employer's board is added later, a board posting joins the ad's job if its title matches one of the ad's roles, and the job takes the board's title: the board has confirmed which opening it is, so the ad's other roles no longer count for or against it.
 
-**Himalayas** adds remote jobs across employers of every size, between The Muse's large employers and Hacker News's startups. Himalayas lists only remote jobs, about 126,000 of them on 2026-10-24. What its API offers, checked that day with live calls and against its API page and terms (himalayas.app/api, himalayas.app/terms):
+**Himalayas** adds remote jobs across employers of every size, beyond Hacker News's startups. Himalayas lists only remote jobs, about 126,000 of them on 2026-10-24. What its API offers, checked that day with live calls and against its API page and terms (himalayas.app/api, himalayas.app/terms):
 - **No account or key needed; a free key is optional.** Every request works without a key. Requests without one share one public allowance with every other caller, its size unpublished; going over returns 429. A key, free with a Himalayas account (checked by signing up, as [decision 0008](decisions/0008-free-sources-only.md) asks: no card, plan or trial), gives the account its own limit of 60 requests a minute and 10,000 a UTC day. It is sent as `Authorization: Bearer <key>`, never in the URL; a 429 with a key carries `Retry-After` and `X-RateLimit-*` headers, and an invalid, revoked or suspended key returns 401. Replies are cached for an hour at Himalayas's edge, and cached replies don't count. The keyless test calls carried no rate-limit headers.
 - **Use:** personal and commercial use is allowed without asking. The terms ask that Himalayas be clearly named as the source, with a link; that the apply link be used as given (`applicationLink`, the job's page on Himalayas, never swapped for the employer's); that jobs not be passed on to other job boards or aggregators; and that jobs be removed once they expire. jhh shows jobs only to its own user, and closes them at their expiry (below).
 - **Search:** `/jobs/api/search` with `q` (free text), `country` (one country: an ISO code or a name; two are refused with HTTP 400), `exclude_worldwide`, `seniority` (several values, comma-separated: Entry-level, Mid-level, Senior, Manager, Director, Executive), `employment_type` and `sort=recent`, 20 to a page, numbered from 1. `q` matches descriptions as well as titles: "kubernetes" in the US returned 20 jobs with it in the description and none in the title. Searches stop at 5,000 results; "platform engineer" alone was 4,725.
@@ -189,7 +178,7 @@ How jhh uses it:
 - **A single job can be checked**: `/jobs/api/companies/<company>/jobs/<slug>` (the `guid`'s path) returns `{"job": {...}}`, 410 once the job has closed, or 404 for no such job.
 
 How jhh uses it:
-- **Queries live in Himalayas's source settings**, like The Muse's, set by the agent with `set_source`: `{"queries": [{"q": "platform engineer", "country": "US", "seniority": ["Senior"], "employment_types": ["Full Time"], "exclude_worldwide": false}]}`, up to 10, each needing `q`. Seniority and employment types must be Himalayas's names, which jhh checks. The filters can't stand in for a query: `q` is matched against descriptions too, so a title word like "engineer" alone would hit the 5,000 cap. With no query, Himalayas needs setup.
+- **Queries live in Himalayas's source settings**, set by the agent with `set_source`: `{"queries": [{"q": "platform engineer", "country": "US", "seniority": ["Senior"], "employment_types": ["Full Time"], "exclude_worldwide": false}]}`, up to 10, each needing `q`. Seniority and employment types must be Himalayas's names, which jhh checks. The filters can't stand in for a query: `q` is matched against descriptions too, so a title word like "engineer" alone would hit the 5,000 cap. With no query, Himalayas needs setup.
 - **Each refresh reads only what changed since the last.** Each query keeps a stopping point in jhh's own state for the source, apart from its settings, keyed by the query's content (its fields, normalized), not its place in the list, so reordering or removing queries never hands one query's stopping point to another. A refresh reads the query's pages newest first until a page's oldest job is older than the stopping point, then sets the new stopping point to the newest `pubDate` it saw, minus one hour. The stopping point comes from what Himalayas returned, not from jhh's clock, and the hour reaches back past the edge cache, so a job updated just before a cached page was built is still read next time; dedupe absorbs the overlap. A query with no stopping point (its first read, or after its query changes) reads back one day.
 - **The cache can still hide a few jobs.** It works per page, so one read can get a fresh page 1 and a page 2 up to an hour old. Jobs that slid from page 1 to page 2 within that hour are on neither, and can be older than the next stopping point. Telling a stale page from a fresh one would mean defeating the cache, which the terms ask callers to use, so jhh accepts this: at most the jobs that arrived within that hour, at each page boundary, and a job comes back the next time it's updated. Board postings and the other sources cover the same employers in part.
 - **Requests are shared out.** Himalayas gets 50 requests a refresh in all without a key and 250 with one, one a second either way, divided evenly among its queries, with what one query doesn't use passed on to the next. When a query's share runs out before its stopping point, its new stopping point is set as after a complete read, from the newest `pubDate` it saw, minus one hour, so the next refresh reads only what arrived since. The jobs between the oldest one it read and the old stopping point are skipped for good, and refresh reports that gap (the query and those hours) so the agent can narrow it. A query is reported as too broad only when one refresh's new jobs don't fit its share (it ran out although its previous read was complete); falling behind once, for example after a few days without a refresh, costs that one gap and nothing after.
@@ -200,7 +189,7 @@ How jhh uses it:
 - **Places:** every job is remote. Its `locationRestrictions` are the places, so "United States, Canada" is remote in the US or Canada, and an empty list is remote anywhere, which the filters' `remote_in` and `location.unknown` judge as usual.
 - **Pay** is read from the structured fields only when the currency is given: annual as yearly, monthly and hourly as they are. Weekly and fortnightly pay is left out, since turning it into a year would guess how many weeks are worked; missing figures are left out too.
 - **The link** is `applicationLink`, unchanged. The dashboard shows "via Himalayas", and the job's link is its page on Himalayas.
-- **Board postings win**, as for every search source, and its results go through the same storing, dedupe and prefilter as The Muse's.
+- **Board postings win**, as for every search source, and its results go through the same storing, dedupe and prefilter as Hacker News's.
 - **A 429 stops Himalayas for the rest of the refresh**, with or without a key (the client's one short retry aside). The query that hit it, and any query not reached, keep their old stopping points, so the next refresh reads their windows again in full: a rate limit isn't the query's fault, so it never causes a gap.
 - **The key is optional** and follows the rules in "Keys" below. With one saved, every request sends it. A 401 means Himalayas no longer accepts the key: that refresh carries on without it, within the keyless budget, and the Sources tab and `list_sources` say the key was refused, so a revoked key never stops the search.
 
@@ -208,17 +197,16 @@ How jhh uses it:
 
 Added after the MVP; see [decision 0007](decisions/0007-source-settings.md). **The filters say what you're looking for; the source settings say where to look.** Before, a search source ran only when the filters named it (`search.themuse`, `search.hackernews`), so whether Hacker News was read was part of what the agent wrote into the filters. Now each source has a settings row, which you change on the dashboard's Sources tab (or with `jhh sources`) and the agent changes with `list_sources` and `set_source`.
 
-- **Every source jhh ships is listed**, with its status: `on`, `off`, or `needs setup` (it can't run yet: The Muse with no query). Each also shows when it last ran, what that run found, and its last error.
+- **Every source jhh ships is listed**, with its status: `on`, `off`, or `needs setup` (it can't run yet: Himalayas with no query). A retired source (The Muse) is listed as `retired` only where it was set up. Each also shows when it last ran, what that run found, and its last error.
 - **Off pauses a source; it doesn't forget it.** Its settings and its jobs stay. Jobs from a paused source are neither refreshed nor closed, since nothing was read (except Himalayas's jobs closing at their expiry date, which needs no request), and the dashboard marks them "source paused". Turning it back on resumes where it left off.
-- **Search sources** (The Muse, Hacker News, Himalayas) have a switch each. **Board sources** (Greenhouse, Lever, Ashby) are listed with their company counts but have no switch of their own: boards are already turned on and off per company (`set_company`), and switching off every Greenhouse company at once is more surprise than help.
+- **Search sources** (Hacker News, Himalayas) have a switch each. **Board sources** (Greenhouse, Lever, Ashby) are listed with their company counts but have no switch of their own: boards are already turned on and off per company (`set_company`), and switching off every Greenhouse company at once is more surprise than help.
 - **Settings are per source**, kept as JSON and checked by the source, like a company's `source_config`. Each source asks only for what the filters can't tell it:
   - **Hacker News:** `months` (1–3, default 2).
   - **Himalayas**: `queries`, up to 10, each with a required `q` and optional `country`, `seniority`, `employment_types` and `exclude_worldwide` (see "Himalayas" above).
-  - **The Muse:** `queries`, up to 10. Each matches jobs in any of its categories, at any of its levels, in any of its locations; a field left out doesn't narrow, and a query needs at least one category or location, so it can't ask for everything. Categories and levels must be names from The Muse's lists, and jhh says which ones it doesn't know. A location also matches remote jobs. `pages` (1–250) optionally caps how many pages of 20 a query reads per refresh; by default it reads them all, within the refresh's limit of 250 requests. The Muse searches by its own fixed category list, so the filters can't stand in for these.
-- **A source that needs no setup is on by default**, so a new install searches Hacker News from the first refresh. A source that needs setup is off until it's set up, and setting it up turns it on: The Muse when it gets its first query. A new source added to jhh later follows the same rule. Nothing about which sources run is part of the filters any more.
+- **A source that needs no setup is on by default**, so a new install searches Hacker News from the first refresh. A source that needs setup is off until it's set up, and setting it up turns it on: Himalayas when it gets its first query. A new source added to jhh later follows the same rule. Nothing about which sources run is part of the filters any more.
 - **Who changed what is recorded**, like every other change: each change to a source's status or settings writes an event with its actor (`user` or `agent:<name>`) and an optional reason, and the Sources tab and `list_sources` show the latest. A source's last error can quote the service's reply, so `list_sources` returns it inside `untrusted`.
-- **On the dashboard**, each search source has its switch and its last run; Hacker News's months can be changed there, and The Muse's queries are shown as text, with the phrase to ask the agent for a change, since picking categories is judgment.
-- **Moving existing setups over:** migration 0003 copies the active filters' `search` section into the source settings (a Muse query turns The Muse on; `hackernews` turns Hacker News on, and its absence turns it off, so nothing changes for existing users), then saves a new filter version without `search`, written by `system`. Afterwards `set_filters` rejects `search` with an error that names `set_source`, so an agent working from old instructions learns the new place.
+- **On the dashboard**, each search source has its switch and its last run; Hacker News's months can be changed there, and Himalayas's queries are shown as text, with the phrase to ask the agent for a change, since picking queries is judgment.
+- **Moving existing setups over:** migration 0003 copies the active filters' `search` section into the source settings (a Muse query turns The Muse on, which now leaves it listed as retired; `hackernews` turns Hacker News on, and its absence turns it off, so nothing changes for existing users), then saves a new filter version without `search`, written by `system`. Afterwards `set_filters` rejects `search` with an error that names `set_source`, so an agent working from old instructions learns the new place.
 
 **Keys** (for Himalayas; [decision 0009](decisions/0009-optional-keys.md)). A source may take an optional key when the key is free and the source works without it. jhh keeps a key on your machine and out of the agent's hands:
 - **A key is entered only in the dashboard**, on the source's card on the Sources tab, never through MCP or the CLI. It never passes through the agent's context or a chat transcript.
@@ -757,7 +745,7 @@ It is built with static HTML, CSS and vanilla JS, ported from the original perso
 | **Profile** | Markdown editor and resume paste box. Version history with author, summary, diff and Restore. A banner when the latest change came from an agent. |
 | **Memories** | Everything the agent has learned, grouped by kind. Inferred ones are marked, with Confirm and Archive. You can edit them inline, add your own, delete permanently, and see which agent wrote each one and when. |
 | **Filters** | The active filters as a readable form, with the agent's rationale. The version history shows each version's effect, with Restore. Manual edits are allowed and are saved as a new version written by "user". |
-| **Sources** | Every source with its status, last run and last error; on/off switches for search sources; each source's settings (Hacker News's months; The Muse's and Himalayas's queries, shown as text). Jobs from a paused source say "Source paused". Himalayas's optional key, typed in once and afterwards shown only as "key saved", with Replace and Remove. |
+| **Sources** | Every source with its status, last run and last error; on/off switches for search sources; each source's settings (Hacker News's months; Himalayas's queries, shown as text). Jobs from a paused source say "Source paused", and open jobs from a retired one "Source retired". Himalayas's optional key, typed in once and afterwards shown only as "key saved", with Replace and Remove. |
 | **Companies** | List with ATS, slug, open postings, last fetch result; add (with probe results), enable/disable, remove; "Refresh now" with progress. |
 | **Settings / Connect** | Copy-paste MCP setup for Claude Code, Cursor, Claude Desktop and generic clients; data directory location; ask percentile; export/backup. |
 
@@ -816,7 +804,7 @@ cmd/jhh/                 # main.go: subcommand dispatch (default: stdio MCP + UI
 internal/
   core/                  # jobs, screening, profile, memories, filters, tracker, companies: the logic
   prefilter/             # stage 1 and 2 evaluation, filters schema and validation
-  sources/               # source.go (interfaces), builtin/ (the shipped sources), conformance/ (shared suite), greenhouse/, lever/, ashby/, themuse/, himalayas/ and hackernews/ (search)
+  sources/               # source.go (interfaces), builtin/ (the shipped sources), conformance/ (shared suite), greenhouse/, lever/, ashby/, himalayas/ and hackernews/ (search)
   keys/                  # keys.json: optional keys for services, entered on the dashboard
   untrusted/             # cleaning, injection rules, the untrusted envelope used in tool output
   dedupe/                # identity ladder, fingerprints, URL canonicalization
@@ -837,7 +825,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 
 ### MVP
 - **Fetching:** Greenhouse, Lever and Ashby sources passing the conformance suite; per-source company config; ETag caching; two-stage detail fetching; normalization of location, pay and text, with the known quirks covered by tests; boilerplate trimming; closed-posting detection with the suspect-feed guard
-- **Search:** The Muse as the built-in search source, driven by the filters' `search` queries, within a request budget; employers found by search recorded as companies. (Added after the MVP: Hacker News's monthly hiring threads, and settings for each source in place of the filters' `search` section.)
+- **Search:** The Muse as the built-in search source, driven by the filters' `search` queries, within a request budget; employers found by search recorded as companies. (Added after the MVP: Hacker News's monthly hiring threads, Himalayas, and settings for each source in place of the filters' `search` section. The Muse was retired in November 2026, when its API closed.)
 - **Storage rules:** descriptions kept only where needed, closed jobs nobody touched deleted
 - **Dedupe:** the identity ladder (posting ID, opening ID, canonical URL, fingerprint, reposts); `merge_jobs` and `split_job`; short job numbers
 - **The agent as a source:** `add_jobs` (supported-board URLs fetched by jhh, otherwise the agent's fields; no arbitrary page fetching)
@@ -877,7 +865,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 
 ## 9. Open questions for the owner
 
-**Settled:** the name is Job Hunt Harness, the binary is `jhh`, and the module path is `github.com/drewsokol/job-hunt-harness`. The MVP in section 8 gets built first, and features come after it works. The license is MIT (`LICENSE`). jhh isn't registered with The Muse for now. There's no starter company list: every user's companies come from their own search, so jhh doesn't ship anyone's idea of which employers matter. Employers that search finds are probed for a board only on request (the agent suggests, you decide); doing it automatically is on the roadmap. The reference fetch and probe scripts were ported and removed from the history along with the owner's personal details, and `reference/tracker.html` was deleted once the dashboard was ported (M5).
+**Settled:** the name is Job Hunt Harness, the binary is `jhh`, and the module path is `github.com/drewsokol/job-hunt-harness`. The MVP in section 8 gets built first, and features come after it works. The license is MIT (`LICENSE`). There's no starter company list: every user's companies come from their own search, so jhh doesn't ship anyone's idea of which employers matter. Employers that search finds are probed for a board only on request (the agent suggests, you decide); doing it automatically is on the roadmap. The reference fetch and probe scripts were ported and removed from the history along with the owner's personal details, and `reference/tracker.html` was deleted once the dashboard was ported (M5).
 
 1. **Inferred memories.** Should the agent save inferred memories without asking (labelled, shown in the UI, given less weight: the current proposal), or only after you agree in the chat?
 2. **Fit scale.** Keep the reference's three levels plus an explicit `no`, or use a numeric score?
@@ -892,7 +880,7 @@ The plan is to **get the MVP working first**, use it on a real search, and only 
 6. **Your profile**: let your agent interview you, or write it yourself; the standard sections; a fictional example; how the agent edits it and how to undo a change
 7. **Companies**: there's no starter list; search finds employers, and you add the ones whose boards you want read (`jhh companies add`, or your agent's `set_company`)
 8. **Privacy**: what stays on your machine (everything), where the data lives, how to back it up and delete it
-9. **Limitations**: boards only for companies jhh knows (search through The Muse and Hacker News finds others, applied to as their pages say); no Workday yet; feeds can lag or change
+9. **Limitations**: boards only for companies jhh knows (search through Hacker News and Himalayas finds others, applied to as their pages say); no Workday yet; feeds can lag or change
 10. **Contributing**: link to CONTRIBUTING.md; good first issues (new companies, pay-parser cases, sources)
 11. **License**
 

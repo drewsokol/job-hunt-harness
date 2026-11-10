@@ -271,7 +271,7 @@ type Candidate struct {
 	Score       float64
 	Reasons     json.RawMessage
 	FirstSeenAt time.Time
-	// Via names the search source the job came through ("themuse") when it
+	// Via names the search source the job came through ("hackernews") when it
 	// has no posting from a board, so its link goes to that source's page.
 	Via string
 }

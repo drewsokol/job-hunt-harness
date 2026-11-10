@@ -124,6 +124,9 @@ type stateJSON struct {
 	// Paused are the search sources turned off, by their names for people
 	// (a job's via), so their jobs can say so.
 	Paused []string `json:"paused_sources"`
+	// Retired are the search sources jhh no longer reads, by their names
+	// for people, so the jobs they found can say so.
+	Retired []string `json:"retired_sources"`
 }
 
 type summaryJSON struct {
@@ -189,6 +192,7 @@ func (s *server) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.Paused = append([]string{}, core.PausedSearches(ss)...)
+	out.Retired = core.RetiredTitles()
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -200,6 +204,7 @@ type sourceJSON struct {
 	Kind             string          `json:"kind"`
 	Status           string          `json:"status,omitempty"`
 	Setup            string          `json:"setup,omitempty"`
+	Retired          string          `json:"retired,omitempty"`
 	Settings         json.RawMessage `json:"settings,omitempty"`
 	Companies        int             `json:"companies"`
 	EnabledCompanies int             `json:"enabled_companies"`
@@ -217,7 +222,7 @@ type sourceJSON struct {
 }
 
 func newSourceJSON(info core.SourceInfo) sourceJSON {
-	o := sourceJSON{Name: info.Name, Title: info.Title, Kind: info.Kind, Status: info.Status, Setup: info.Setup, Settings: info.Settings,
+	o := sourceJSON{Name: info.Name, Title: info.Title, Kind: info.Kind, Status: info.Status, Setup: info.Setup, Retired: info.Retired, Settings: info.Settings,
 		Companies: info.Companies, EnabledCompanies: info.EnabledCompanies, LastRun: timeText(info.LastRunAt),
 		LastPostings: info.LastPostings, LastError: info.LastError,
 		TakesKey: info.TakesKey, KeySaved: info.KeySaved, KeyRefused: info.KeySaved && info.KeyRefused}

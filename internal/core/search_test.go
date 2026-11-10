@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,64 +15,21 @@ import (
 	"github.com/drewsokol/job-hunt-harness/internal/store"
 )
 
-// fakeSearcher returns its postings 2 to a page. Every query gets the
-// same results.
-type fakeSearcher struct {
-	mu       sync.Mutex
-	postings []sources.Posting
-	fail     error // returned by every search
-	gone     map[string]bool
-	searches int
-	lookups  int
-}
+// The search tests run on fake Hacker News threads: what they check, from
+// storing results under employers to closing and lookups, is the same for
+// every search source read in full.
 
-func (s *fakeSearcher) Name() string                 { return "themuse" }
-func (s *fakeSearcher) Prefix() string               { return "tm" }
-func (s *fakeSearcher) Check(sources.Query) []string { return nil }
+// searchFilters is engineersWritingSoftware with Hacker News reading one
+// month.
+const searchFilters = `{"schema_version": 1, "titles": {"require_any": ["engineer"]}, "keywords": {"body_any": ["software"]},
+	"search": {"hackernews": {"months": 1}}}`
 
-func (s *fakeSearcher) Search(_ context.Context, _ sources.Query, page int) (sources.SearchResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.searches++
-	if s.fail != nil {
-		return sources.SearchResult{}, s.fail
-	}
-	const size = 2
-	pages := (len(s.postings) + size - 1) / size
-	lo := min(page*size, len(s.postings))
-	hi := min(lo+size, len(s.postings))
-	return sources.SearchResult{Postings: slices.Clone(s.postings[lo:hi]), Pages: pages}, nil
-}
-
-func (s *fakeSearcher) Lookup(_ context.Context, id string) (sources.Posting, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lookups++
-	if s.gone[id] {
-		return sources.Posting{}, sources.ErrPostingNotFound
-	}
-	return sources.Posting{ExternalID: id}, nil
-}
-
-func musePosting(id int, company, title string) sources.Posting {
-	p := fakePosting(strconv.Itoa(id), title)
-	p.Company = company
-	p.URL = "https://muse.example/jobs/" + p.ExternalID
-	p.UpdatedAt = p.PostedAt
-	return p
-}
-
-// searchFilters is engineersWritingSoftware with a Muse query of pages.
-func searchFilters(pages int) string {
-	return fmt.Sprintf(`{"schema_version": 1, "titles": {"require_any": ["engineer"]}, "keywords": {"body_any": ["software"]},
-		"search": {"themuse": [{"categories": ["Software Engineering"], "pages": %d}]}}`, pages)
-}
-
-func newSearchFixture(t *testing.T, ps ...sources.Posting) (*refreshFixture, *fakeSearcher) {
+// newSearchFixture serves ps as the ads of one thread.
+func newSearchFixture(t *testing.T, ps ...sources.Posting) (*refreshFixture, *fakeThreads) {
 	f := newRefreshFixture(t, "exampleco")
 	f.src.set("exampleco", fakePosting("1", "Backend Engineer"))
-	s := &fakeSearcher{postings: ps, gone: map[string]bool{}}
-	f.r.Searchers = map[string]sources.Searcher{"themuse": s}
+	s := &fakeThreads{threads: []sources.Thread{{ID: "901"}}, ads: map[string][]sources.Posting{"901": ps}, gone: map[string]bool{}}
+	f.r.Searchers = map[string]sources.Searcher{"hackernews": s}
 	return f, s
 }
 
@@ -94,14 +49,14 @@ func (f *refreshFixture) jobsByTitle() map[string]store.PrefilterJob {
 
 func TestRefreshSearches(t *testing.T) {
 	f, s := newSearchFixture(t,
-		musePosting(1, "Made-Up Labs, Inc.", "Platform Engineer"),
-		musePosting(2, "made-up labs", "Office Manager"),
-		musePosting(3, "Exampleco", "Backend Engineer"), // jhh reads Exampleco's board
+		hnAd("1", "Made-Up Labs, Inc.", "Platform Engineer"),
+		hnAd("2", "made-up labs", "Office Manager"),
+		hnAd("3", "Exampleco", "Backend Engineer"), // jhh reads Exampleco's board
 	)
-	f.setFilters(searchFilters(10))
+	f.setFilters(searchFilters)
 	res := f.refresh()
-	sum := muse(res)
-	if sum.Queries != 1 || sum.Requests != 2 || sum.Postings != 3 || sum.Covered != 1 || !sum.Complete() || len(res.Errors) != 0 {
+	sum := searchSummary(res)
+	if sum.Requests != 2 || sum.Postings != 3 || sum.Covered != 1 || !sum.Complete() || len(res.Errors) != 0 {
 		t.Fatalf("search summary %+v, errors %v", sum, res.Errors)
 	}
 	jobs := f.jobsByTitle()
@@ -128,7 +83,7 @@ func TestRefreshSearches(t *testing.T) {
 	for _, c := range cs {
 		via[c.Title] = c.Via
 	}
-	if via["Platform Engineer"] != "themuse" || via["Backend Engineer"] != "" {
+	if via["Platform Engineer"] != "hackernews" || via["Backend Engineer"] != "" {
 		t.Errorf("via: %v", via)
 	}
 
@@ -137,65 +92,19 @@ func TestRefreshSearches(t *testing.T) {
 	if res = f.refresh(); len(res.NewJobs) != 0 || len(res.ClosedJobs) != 0 {
 		t.Errorf("unchanged search: %+v", res)
 	}
-	s.postings = slices.Delete(s.postings, 1, 2)
+	s.ads["901"] = slices.Delete(s.ads["901"], 1, 2)
 	res = f.refresh()
-	if len(res.ClosedJobs) != 1 || res.ClosedJobs[0] != mgr.ID || muse(res).Closed != 1 {
+	if len(res.ClosedJobs) != 1 || res.ClosedJobs[0] != mgr.ID || searchSummary(res).Closed != 1 {
 		t.Errorf("closing: %+v", res)
-	}
-
-}
-
-func TestRefreshSearchOnlyClosesAfterCompleteReads(t *testing.T) {
-	f, s := newSearchFixture(t,
-		musePosting(1, "Made-Up Labs", "Platform Engineer"),
-		musePosting(2, "Made-Up Labs", "Data Engineer"),
-		musePosting(3, "Other Co", "Site Engineer"),
-	)
-	f.setFilters(searchFilters(1)) // 2 pages of results, 1 read
-	res := f.refresh()
-	if muse(res).Complete() || !slices.Equal(muse(res).Incomplete, []string{"themuse.queries[0]"}) || muse(res).Postings != 2 {
-		t.Fatalf("summary %+v", muse(res))
-	}
-	s.postings = []sources.Posting{
-		musePosting(3, "Other Co", "Site Engineer"),
-		musePosting(4, "Other Co", "Field Engineer"),
-		musePosting(5, "Other Co", "Test Engineer"),
-	}
-	if res = f.refresh(); len(res.ClosedJobs) != 0 || muse(res).Complete() {
-		t.Errorf("closed after an incomplete read: %+v", res)
-	}
-
-	// A rate limit stops searching and closes nothing either.
-	f.setFilters(searchFilters(10))
-	s.fail = fmt.Errorf("the muse: %w", sources.ErrRateLimited)
-	res = f.refresh()
-	if muse(res).Stopped == "" || len(res.ClosedJobs) != 0 || s.searches != 3 {
-		t.Errorf("rate limited: %+v, %d searches", muse(res), s.searches)
-	}
-	if len(res.Errors) != 1 || res.Errors[0].Company != "The Muse" {
-		t.Errorf("errors %+v", res.Errors)
-	}
-}
-
-func TestRefreshSearchLimitsRequests(t *testing.T) {
-	f, s := newSearchFixture(t,
-		musePosting(1, "Made-Up Labs", "Platform Engineer"),
-		musePosting(2, "Made-Up Labs", "Data Engineer"),
-		musePosting(3, "Other Co", "Site Engineer"),
-	)
-	f.r.MaxSearchRequests = 1
-	f.setFilters(searchFilters(10))
-	if res := f.refresh(); muse(res).Requests != 1 || s.searches != 1 || !strings.Contains(muse(res).Stopped, "limit of 1") {
-		t.Errorf("%+v", muse(res))
 	}
 }
 
 func TestRefreshSearchLooksUpPursuedJobs(t *testing.T) {
 	f, s := newSearchFixture(t,
-		musePosting(1, "Made-Up Labs", "Platform Engineer"),
-		musePosting(2, "Made-Up Labs", "Data Engineer"),
+		hnAd("1", "Made-Up Labs", "Platform Engineer"),
+		hnAd("2", "Made-Up Labs", "Data Engineer"),
 	)
-	f.setFilters(searchFilters(10))
+	f.setFilters(searchFilters)
 	f.refresh()
 	jobs := f.jobsByTitle()
 	ctx := context.Background()
@@ -205,12 +114,12 @@ func TestRefreshSearchLooksUpPursuedJobs(t *testing.T) {
 		}
 	}
 
-	// Both drop out of the results; only the one The Muse says is gone
+	// Both drop out of the results; only the one the source says is gone
 	// closes.
-	s.postings = nil
+	s.ads["901"] = nil
 	s.gone["2"] = true
 	res := f.refresh()
-	if s.lookups != 2 || muse(res).Lookups != 2 || len(res.ClosedJobs) != 1 || res.ClosedJobs[0] != jobs["Data Engineer"].ID {
+	if s.lookups != 2 || searchSummary(res).Lookups != 2 || len(res.ClosedJobs) != 1 || res.ClosedJobs[0] != jobs["Data Engineer"].ID {
 		t.Errorf("%+v; %d lookups", res, s.lookups)
 	}
 	if j, _ := f.s.Job(ctx, jobs["Platform Engineer"].ID); !j.ClosedAt.IsZero() {
@@ -221,8 +130,8 @@ func TestRefreshSearchLooksUpPursuedJobs(t *testing.T) {
 // The board often words a job differently from the search result. The
 // title still joins the board's posting to the job search found.
 func TestRefreshSearchAttachesBoardPostingWithOtherText(t *testing.T) {
-	f, _ := newSearchFixture(t, musePosting(1, "Made-Up Labs", "Platform Engineer"))
-	f.setFilters(searchFilters(10))
+	f, _ := newSearchFixture(t, hnAd("1", "Made-Up Labs", "Platform Engineer"))
+	f.setFilters(searchFilters)
 	f.refresh()
 	found := f.jobsByTitle()["Platform Engineer"]
 
@@ -244,8 +153,8 @@ func TestRefreshSearchAttachesBoardPostingWithOtherText(t *testing.T) {
 }
 
 func TestRefreshSearchAttachesBoardPostingsLater(t *testing.T) {
-	f, _ := newSearchFixture(t, musePosting(1, "Made-Up Labs", "Platform Engineer"))
-	f.setFilters(searchFilters(10))
+	f, _ := newSearchFixture(t, hnAd("1", "Made-Up Labs", "Platform Engineer"))
+	f.setFilters(searchFilters)
 	f.refresh()
 	found := f.jobsByTitle()["Platform Engineer"]
 
@@ -258,7 +167,7 @@ func TestRefreshSearchAttachesBoardPostingsLater(t *testing.T) {
 	}
 	f.src.set("madeup", fakePosting("77", "Platform Engineer"))
 	res := f.refresh()
-	if len(res.NewJobs) != 0 || muse(res).Covered != 1 {
+	if len(res.NewJobs) != 0 || searchSummary(res).Covered != 1 {
 		t.Errorf("%+v", res)
 	}
 	if js := f.jobsByTitle(); len(js) != 2 || js["Platform Engineer"].ID != found.ID {
@@ -342,53 +251,112 @@ func TestRefreshClearsDescriptionsOfStageOneDrops(t *testing.T) {
 }
 
 func TestNormalizeFound(t *testing.T) {
-	s := &fakeSearcher{}
-	p := musePosting(42, "Made-Up Labs", "Platform Engineer")
-	p.LocationRaw = "Flexible / Remote | Columbus, OH"
+	s := &fakeThreads{}
+	p := hnAd("42", "Made-Up Labs", "Platform Engineer")
+	p.LocationRaw = "Remote | Springfield, IL"
 	in := NormalizeFound(s, p)
-	if in.ID != "tm:42" || in.Source != "themuse" || !in.Search || in.DescriptionHTML != "" || in.Description == "" {
+	if in.ID != "hn:42" || in.Source != "hackernews" || !in.Search || in.DescriptionHTML != "" || in.Description == "" {
 		t.Errorf("%+v", in)
 	}
-	if !strings.Contains(string(in.Locations), "Columbus") {
+	if !strings.Contains(string(in.Locations), "Springfield") {
 		t.Errorf("locations %s", in.Locations)
 	}
 }
 
-func TestSetSourceChecksMuseNames(t *testing.T) {
+// The Muse is retired: it can't be set up or turned on, it isn't read, and
+// it is listed, with why, only where it was set up.
+func TestRetiredMuse(t *testing.T) {
+	ctx := context.Background()
 	f := newRefreshFixture(t)
-	_, err := SetSource(context.Background(), f.s, store.ActorUser, "themuse",
-		SourceUpdate{Settings: json.RawMessage(`{"queries": [{"categories": ["software engineering", "Robotics"]}]}`)})
-	var in *InputError
-	if !errors.As(err, &in) || len(in.Problems) != 2 || !strings.Contains(in.Problems[0], `settings.queries[0].categories[0]: "software engineering"`) ||
-		!strings.Contains(in.Problems[0], `did you mean "Software Engineering"?`) {
-		t.Errorf("%v", err)
+	on := true
+	for _, u := range []SourceUpdate{{Enabled: &on}, {Settings: json.RawMessage(`{"queries": [{"categories": ["Software Engineering"]}]}`)}} {
+		_, err := SetSource(ctx, f.s, store.ActorUser, "TheMuse", u)
+		var in *InputError
+		if !errors.As(err, &in) || !strings.Contains(in.Error(), "The Muse is retired") || !strings.Contains(in.Error(), "hackernews, himalayas") {
+			t.Errorf("SetSource(themuse, %+v) = %v", u, err)
+		}
 	}
-	if rows, _ := f.s.SourceRows(context.Background()); len(rows) != 0 {
-		t.Errorf("invalid settings were saved: %+v", rows)
+	for _, info := range mustListSources(t, f.s) {
+		if info.Name == "themuse" {
+			t.Errorf("listed where it was never set up: %+v", info)
+		}
+	}
+
+	// An install that had it set up, the way migration 0003 or set_source
+	// left it, sees it as retired, with its last run.
+	if err := f.s.SetSource(ctx, store.ActorUser, "themuse", store.SourceChange{Enabled: &on, Settings: json.RawMessage(`{"queries":[{"categories":["Software Engineering"]}]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.RecordSourceRun(ctx, "themuse", store.SourceRun{At: time.Now().UTC(), Error: "the muse: board not found"}); err != nil {
+		t.Fatal(err)
+	}
+	m := sourceByName(t, f.s, "themuse")
+	if m.Status != SourceRetired || !strings.Contains(m.Retired, "removed its public jobs API") || m.Settings != nil || m.LastRunAt.IsZero() {
+		t.Errorf("%+v", m)
+	}
+	ss := mustListSources(t, f.s)
+	if SearchesOn(ss) != 1 || len(PausedSearches(ss)) != 0 {
+		t.Errorf("a retired source counts as on or paused: %+v", ss)
+	}
+	if p, err := plannedSearches(ctx, f.s); err != nil || p.hackerNews == nil {
+		t.Errorf("plan %+v, %v", p, err)
+	}
+	if !slices.Contains(RetiredTitles(), "The Muse") {
+		t.Errorf("retired titles %v", RetiredTitles())
 	}
 }
 
-func TestRefreshSearchReadsEveryPageAndSkipsOldListings(t *testing.T) {
+func mustListSources(t *testing.T, s *store.Store) []SourceInfo {
+	t.Helper()
+	ss, err := ListSources(context.Background(), s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ss
+}
+
+// A search source whose API is gone or blocks jhh says so, with the HTTP
+// status, rather than naming a missing board.
+func TestSearchFailureSaysTheSourceIsUnavailable(t *testing.T) {
+	f, s := newSearchFixture(t, hnAd("1", "Made-Up Labs", "Platform Engineer"))
+	f.setFilters(searchFilters)
+	for _, tt := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("hacker news: %w", sources.ErrBoardNotFound), "Hacker News is unavailable: its API answered HTTP 404"},
+		{&sources.StatusError{URL: "https://hn.example/items/901", Code: 403}, "Hacker News refused jhh's requests: HTTP 403"},
+		{errors.New("hacker news: HTTP 500"), "hacker news: HTTP 500"},
+	} {
+		s.fail = tt.err
+		res := f.refresh()
+		if len(res.Errors) != 1 || !strings.HasPrefix(res.Errors[0].Error, tt.want) || strings.Contains(res.Errors[0].Error, "board not found") {
+			t.Errorf("%v: errors %+v, want %q", tt.err, res.Errors, tt.want)
+		}
+	}
+}
+
+func TestRefreshSearchSkipsOldListings(t *testing.T) {
 	var ps []sources.Posting
-	for i := range 7 {
-		ps = append(ps, musePosting(i+1, "Made-Up Labs", fmt.Sprintf("Engineer %d", i+1)))
+	for i := range 3 {
+		ps = append(ps, hnAd(fmt.Sprint(i+1), "Made-Up Labs", fmt.Sprintf("Engineer %d", i+1)))
 	}
-	ps[6].PostedAt = time.Now().UTC().Add(-MaxSearchAge - 24*time.Hour)
-	f, s := newSearchFixture(t, ps...)
-	f.setFilters(searchFilters(0)) // no pages cap
+	ps[2].PostedAt = time.Now().UTC().Add(-MaxSearchAge - 24*time.Hour)
+	f, _ := newSearchFixture(t, ps...)
+	f.setFilters(searchFilters)
 	res := f.refresh()
-	if s.searches != 4 || !muse(res).Complete() || muse(res).Postings != 6 || muse(res).Old != 1 {
-		t.Errorf("%+v after %d searches", muse(res), s.searches)
+	if sum := searchSummary(res); !sum.Complete() || sum.Postings != 2 || sum.Old != 1 {
+		t.Errorf("%+v", sum)
 	}
-	if _, ok := f.jobsByTitle()["Engineer 7"]; ok {
+	if _, ok := f.jobsByTitle()["Engineer 3"]; ok {
 		t.Error("old listing stored")
 	}
 }
 
-// muse returns The Muse's summary from a refresh.
-func muse(res RefreshResult) SearchSummary {
+// searchSummary returns Hacker News's summary from a refresh.
+func searchSummary(res RefreshResult) SearchSummary {
 	for _, s := range res.Searches {
-		if s.Source == "themuse" {
+		if s.Source == "hackernews" {
 			return s
 		}
 	}

@@ -222,7 +222,7 @@ func (f Filters) Validate() error {
 		terms("flag.title_any", fl.TitleAny)
 	}
 	if f.Search != nil {
-		add("search: which sources jhh searches is no longer part of the filters; leave search out, and turn sources on or off and set The Muse's queries with set_source (list_sources shows them) or jhh sources")
+		add("search: which sources jhh searches is no longer part of the filters; leave search out, and turn sources on or off and set their queries with set_source (list_sources shows them) or jhh sources")
 	}
 	if len(p) > 0 {
 		return &ValidationError{Problems: p}

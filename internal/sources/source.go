@@ -9,7 +9,7 @@
 //
 // Every source must pass the shared conformance suite in sources/conformance.
 //
-// Search sources (The Muse, Hacker News, Himalayas) implement Searcher instead: they
+// Search sources (Hacker News, Himalayas) implement Searcher instead: they
 // find postings across employers, and each result names its employer.
 package sources
 
@@ -132,15 +132,6 @@ type Detailer interface {
 	Detail(ctx context.Context, b Board, externalID string) (Posting, error)
 }
 
-// Query is one search, from the filters' search section. A posting matches
-// when it is in any of the categories, at any of the levels and in any of
-// the locations; an empty field doesn't narrow.
-type Query struct {
-	Categories []string
-	Levels     []string
-	Locations  []string
-}
-
 // SearchResult is one page of a search.
 type SearchResult struct {
 	Postings []Posting // each with Company set
@@ -150,24 +141,14 @@ type SearchResult struct {
 
 // Searcher finds postings across employers. Each call is one request,
 // which search APIs count against a rate limit. A searcher also implements
-// QuerySearcher (The Muse) or ThreadSearcher (Hacker News), depending on
+// ThreadSearcher (Hacker News) or RecentSearcher (Himalayas), depending on
 // how it finds postings.
 type Searcher interface {
 	Name() string
-	// Prefix is the short form used in posting ids ("tm" in "tm:22008828").
+	// Prefix is the short form used in posting ids ("hn" in "hn:22008828").
 	Prefix() string
 	// Lookup returns one posting, or ErrPostingNotFound once it's gone.
 	Lookup(ctx context.Context, externalID string) (Posting, error)
-}
-
-// QuerySearcher runs queries a page at a time (The Muse).
-type QuerySearcher interface {
-	Searcher
-	// Check returns what is wrong with q in this searcher's terms, such as
-	// a category it doesn't have, one problem per entry.
-	Check(q Query) []string
-	// Search returns one page of q; pages are numbered from 0.
-	Search(ctx context.Context, q Query, page int) (SearchResult, error)
 }
 
 // TextQuery is one free-text search (Himalayas). Q is matched against
@@ -240,7 +221,7 @@ var ErrRateLimited = errors.New("rate limit reached")
 // ErrPostingNotFound means a search source no longer has the posting.
 var ErrPostingNotFound = errors.New("posting not found")
 
-// SearchPostingID builds jhh's id for a posting found by search: "tm:22008828".
+// SearchPostingID builds jhh's id for a posting found by search: "hn:22008828".
 func SearchPostingID(s Searcher, externalID string) string {
 	return s.Prefix() + ":" + externalID
 }
@@ -273,7 +254,8 @@ func UnixMillis(ms int64) time.Time {
 	return time.UnixMilli(ms).UTC()
 }
 
-// searchTitles are the search sources' names for people, by Name.
+// searchTitles are the search sources' names for people, by Name. The Muse
+// is retired, but jobs found through it still name it.
 var searchTitles = map[string]string{"themuse": "The Muse", "hackernews": "Hacker News", "himalayas": "Himalayas"}
 
 // SearchTitle is the name people know a search source by ("The Muse"), or
