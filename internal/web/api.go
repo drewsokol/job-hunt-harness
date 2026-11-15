@@ -950,6 +950,7 @@ type profileJSON struct {
 	Memories []memoryJSON `json:"memories"`
 	Filters  *filtersJSON `json:"filters"`
 	Kinds    []string     `json:"memory_kinds"`
+	Stories  []storyJSON  `json:"stories"`
 }
 
 type versionJSON struct {
@@ -1015,6 +1016,9 @@ func (s *server) profile(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil && ok {
 		out.Filters = &filtersJSON{Version: f.Version, Rationale: f.Rationale, Filters: f.Filters, By: string(f.CreatedBy), At: timeText(f.CreatedAt)}
+	}
+	if err == nil {
+		out.Stories, err = s.stories(ctx)
 	}
 	if err != nil {
 		s.fail(w, r, err)

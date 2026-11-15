@@ -48,6 +48,28 @@ func outreach(os []store.Outreach) []outreachOut {
 	return out
 }
 
+// toPrepOut is an interview coming up with no prep notes. The company and
+// job title can come from a listing.
+type toPrepOut struct {
+	ID          int64  `json:"interview_id"`
+	Stage       string `json:"stage"`
+	ScheduledAt string `json:"scheduled_at"`
+	Untrusted   struct {
+		Company  string `json:"company,omitempty"`
+		JobTitle string `json:"job_title,omitempty"`
+	} `json:"untrusted"`
+}
+
+func toPrep(ivs []store.Interview) []toPrepOut {
+	var out []toPrepOut
+	for _, iv := range ivs {
+		v := toPrepOut{ID: iv.ID, Stage: iv.Stage, ScheduledAt: timeOrEmpty(iv.ScheduledAt)}
+		v.Untrusted.Company, v.Untrusted.JobTitle = iv.Company, iv.JobTitle
+		out = append(out, v)
+	}
+	return out
+}
+
 // listNoteChars is how much of each note list_outreach shows.
 const listNoteChars = 200
 
@@ -195,11 +217,20 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			if err != nil {
 				return nil, err
 			}
+			ivs, err := core.ThreadInterviews(ctx, t.Store, in.OutreachID)
+			if err != nil {
+				return nil, err
+			}
+			out, err := t.withLinks(ctx, interviews(ivs, false))
+			if err != nil {
+				return nil, err
+			}
 			return struct {
 				outreachOut
-				Refs    []refOut   `json:"refs,omitempty"`
-				History []eventOut `json:"history"`
-			}{outreach(p.Outreach)[0], refsOut(refs), history}, nil
+				Refs       []refOut       `json:"refs,omitempty"`
+				Interviews []interviewOut `json:"interviews,omitempty"`
+				History    []eventOut     `json:"history"`
+			}{outreach(p.Outreach)[0], refsOut(refs), out, history}, nil
 		}
 		return struct {
 			Total    int           `json:"total"`
@@ -240,7 +271,7 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 				sm.Outreach.InboundLast7, sm.Outreach.InboundLast30, sm.Outreach.Unanswered, sm.Outreach.DeclinedByReason,
 				v.InterviewsSoon, v.InterviewsPending}, nil
 		}
-		ivs, err := t.withRefs(ctx, interviews(v.Interviews, true))
+		ivs, err := t.withLinks(ctx, interviews(v.Interviews, true))
 		if err != nil {
 			return nil, err
 		}
@@ -287,8 +318,9 @@ func (t *tools) addTrackerTools(s *mcp.Server) {
 			Paused              []string      `json:"search_sources_off,omitempty"`
 			LastRefresh         string        `json:"last_refresh,omitempty"`
 			Shortlist           shortlistNews `json:"shortlist"`
+			ToPrep              []toPrepOut   `json:"interviews_to_prep,omitempty"`
 		}{timeOrEmpty(r.Since), timeOrEmpty(r.Now), jobs(r.NewJobs), r.NewJobsTotal, outreach(r.FollowUpsDue), r.FollowUpsTotal, r.ReEngageDue, r.UnansweredInbound,
 			jobs(r.ChangedApplications), r.OpenFlags, suspect, r.PausedSearches, timeOrEmpty(r.LastRefreshAt),
-			shortlistNews{r.Shortlist.Size, r.Shortlist.Unranked}}, nil
+			shortlistNews{r.Shortlist.Size, r.Shortlist.Unranked}, toPrep(r.ToPrep)}, nil
 	})
 }

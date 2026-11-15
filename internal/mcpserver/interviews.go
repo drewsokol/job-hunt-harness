@@ -31,6 +31,7 @@ type interviewOut struct {
 	Recorded        bool                `json:"recorded,omitempty"`
 	RecordingTool   string              `json:"recording_tool,omitempty"`
 	Refs            []refOut            `json:"refs,omitempty"`
+	Stories         []interviewStoryOut `json:"stories,omitempty"`
 	Updated         string              `json:"updated_at"`
 	Untrusted       *struct {
 		Company  string `json:"company,omitempty"`
@@ -56,8 +57,17 @@ func interviews(ivs []store.Interview, withJob bool) []interviewOut {
 	return out
 }
 
-// withRefs adds each interview's links to email threads.
-func (t *tools) withRefs(ctx context.Context, out []interviewOut) ([]interviewOut, error) {
+// interviewStoryOut is a story linked to an interview. The title is the
+// agent's own words, written from the user's.
+type interviewStoryOut struct {
+	StoryID int64  `json:"story_id"`
+	Title   string `json:"title"`
+	Landed  string `json:"landed"`
+	Note    string `json:"note,omitempty"`
+}
+
+// withLinks adds each interview's links to email threads and its stories.
+func (t *tools) withLinks(ctx context.Context, out []interviewOut) ([]interviewOut, error) {
 	ids := make([]int64, 0, len(out))
 	for _, v := range out {
 		ids = append(ids, v.ID)
@@ -66,12 +76,25 @@ func (t *tools) withRefs(ctx context.Context, out []interviewOut) ([]interviewOu
 	if err != nil {
 		return nil, err
 	}
+	stories, err := t.Store.InterviewStories(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		if rs := refs[out[i].ID]; len(rs) > 0 {
 			out[i].Refs = refsOut(rs)
 		}
+		for _, x := range stories[out[i].ID] {
+			out[i].Stories = append(out[i].Stories, interviewStoryOut{x.StoryID, x.Title, x.Landed, x.Note})
+		}
 	}
 	return out, nil
+}
+
+type storyLinkIn struct {
+	StoryID int64  `json:"story_id"`
+	Landed  string `json:"landed,omitempty" jsonschema:"planned (the default), well, mixed, poorly or not_used"`
+	Note    string `json:"note,omitempty" jsonschema:"why, in a sentence"`
 }
 
 func (t *tools) addInterviewTools(s *mcp.Server) {
@@ -95,6 +118,7 @@ func (t *tools) addInterviewTools(s *mcp.Server) {
 		RecordingTool   string              `json:"recording_tool,omitempty"`
 		AddRefs         []refIn             `json:"add_refs,omitempty" jsonschema:"links to the email threads about this interview"`
 		RemoveRefs      []int64             `json:"remove_refs,omitempty" jsonschema:"ids of links to remove"`
+		Stories         *[]storyLinkIn      `json:"stories,omitempty" jsonschema:"the stories planned or told in it; replaces the list"`
 	}
 	add(t, s, "save_interview", writes, func(ctx context.Context, c call, in saveIn) (any, error) {
 		refs := refInputs(in.AddRefs)
@@ -112,6 +136,13 @@ func (t *tools) addInterviewTools(s *mcp.Server) {
 			Interviewers: in.Interviewers, Medium: in.Medium, Joining: in.Joining, Status: in.Status, Outcome: in.Outcome,
 			NextStepAt: in.NextStepAt, ClearNextStep: in.ClearNextStep, PrepNotes: in.PrepNotes, DebriefNotes: in.DebriefNotes,
 			Recorded: in.Recorded, RecordingTool: in.RecordingTool}
+		if in.Stories != nil {
+			links := make([]core.StoryLinkInput, 0, len(*in.Stories))
+			for _, x := range *in.Stories {
+				links = append(links, core.StoryLinkInput{StoryID: x.StoryID, Landed: x.Landed, Note: x.Note})
+			}
+			change.Stories = &links
+		}
 		// Links alone change nothing else about an interview.
 		saved := store.InterviewSaved{ID: in.InterviewID}
 		if in.InterviewID == 0 || !change.IsZero() || !core.HasRefs(refs, in.RemoveRefs) {

@@ -49,6 +49,9 @@ type Interview struct {
 	UpdatedAt       time.Time
 	Company         string
 	JobTitle        string
+	// Stories are linked when the interview is added; reads leave them
+	// out (see InterviewStories).
+	Stories []InterviewStory
 }
 
 // InterviewChange is a change to an interview; nil fields are left alone.
@@ -61,6 +64,7 @@ type InterviewChange struct {
 	DurationMinutes                         *int
 	Interviewers                            *[]Interviewer
 	Recorded                                *bool
+	Stories                                 *[]InterviewStory // replaces the whole list
 }
 
 // InterviewSaved is what saving an interview did. JobStatus is the job's
@@ -112,9 +116,15 @@ func (s *Store) AddInterview(ctx context.Context, by Actor, iv Interview) (Inter
 		if saved.ID, err = res.LastInsertId(); err != nil {
 			return err
 		}
+		data := map[string]any{"stage": iv.Stage, "scheduled_at": at.String}
+		if len(iv.Stories) > 0 {
+			if _, err := setInterviewStories(ctx, tx, saved.ID, iv.Stories); err != nil {
+				return err
+			}
+			data["stories"] = storyLandings(iv.Stories)
+		}
 		refs := eventRefs{JobID: iv.JobID, OutreachID: iv.OutreachID, InterviewID: saved.ID}
-		if err := insertEvent(ctx, tx, now, by, "interview_logged", refs,
-			map[string]string{"stage": iv.Stage, "scheduled_at": at.String}); err != nil {
+		if err := insertEvent(ctx, tx, now, by, "interview_logged", refs, data); err != nil {
 			return err
 		}
 		return s.interviewMovesJob(ctx, tx, now, by, iv.JobID, saved.ID, &saved)
@@ -213,13 +223,24 @@ func (s *Store) UpdateInterview(ctx context.Context, by Actor, id int64, c Inter
 		if c.Recorded != nil && *c.Recorded != old.Recorded {
 			set("recorded", *c.Recorded)
 		}
+		if c.Stories != nil {
+			storiesChanged, err := setInterviewStories(ctx, tx, id, *c.Stories)
+			if err != nil {
+				return err
+			}
+			if storiesChanged {
+				changed = append(changed, "stories")
+				data["stories"] = storyLandings(*c.Stories)
+			}
+		}
 		jobID := old.JobID
 		if c.JobID != nil {
 			jobID = *c.JobID
 		}
-		if len(sets) > 0 {
+		if len(changed) > 0 {
 			now := s.stamp()
-			if _, err := tx.ExecContext(ctx, "UPDATE interviews SET "+strings.Join(sets, ", ")+", updated_at = ?, updated_by = ? WHERE id = ?",
+			sets = append(sets, "updated_at = ?", "updated_by = ?")
+			if _, err := tx.ExecContext(ctx, "UPDATE interviews SET "+strings.Join(sets, ", ")+" WHERE id = ?",
 				append(args, now, by, id)...); err != nil {
 				return err
 			}
@@ -290,10 +311,12 @@ func checkInterviewRefs(ctx context.Context, tx *sql.Tx, jobID, outreachID int64
 
 // InterviewQuery selects interviews; every field set must match.
 type InterviewQuery struct {
-	ID       int64
-	JobID    int64
-	Status   string
-	From, To time.Time // scheduled_at from From, before To
+	ID         int64
+	JobID      int64
+	OutreachID int64
+	Status     string
+	Unprepped  bool      // no prep notes yet
+	From, To   time.Time // scheduled_at from From, before To
 	// NextStepBy selects completed interviews still pending whose next
 	// step was expected by then.
 	NextStepBy   time.Time
@@ -311,8 +334,14 @@ func (s *Store) ListInterviews(ctx context.Context, q InterviewQuery) ([]Intervi
 	if q.JobID != 0 {
 		add("i.job_id = ?", q.JobID)
 	}
+	if q.OutreachID != 0 {
+		add("i.outreach_id = ?", q.OutreachID)
+	}
 	if q.Status != "" {
 		add("i.status = ?", q.Status)
+	}
+	if q.Unprepped {
+		where = append(where, "i.prep_notes = ''")
 	}
 	if !q.From.IsZero() {
 		add("i.scheduled_at >= ?", utc.Format(q.From))

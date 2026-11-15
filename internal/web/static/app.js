@@ -43,6 +43,7 @@ const STAGES = {
 };
 const INTERVIEW_STATUS = { scheduled: "Scheduled", completed: "Done", cancelled: "Cancelled", no_show: "No-show" };
 const OUTCOMES = { pending: "waiting to hear", advanced: "advanced", rejected: "rejected", offer: "offer" };
+const LANDED = { planned: "planned", well: "went well", mixed: "mixed", poorly: "went poorly", not_used: "not used" };
 
 const state = {
   signedOut: false, error: "", loaded: false,
@@ -52,7 +53,7 @@ const state = {
   selected: 0, picked: new Set(),
   form: null, formError: "", outreachFor: null, keyFor: null, keyError: "", outDir: "all", declining: null,
   visited: null, askApplied: null,
-  pending: false, undo: null, live: false,
+  pending: false, undo: null, live: false, showArchivedStories: false, openStories: new Set(),
 };
 
 /* ---------- helpers ---------- */
@@ -609,7 +610,7 @@ function detailsEl(j) {
       })));
   }
   if (d.interviews && d.interviews.length) {
-    el.append(h("span", { class: "label" }, "Interviews"), h("ul", { class: "interviews" }, d.interviews.map(interviewEl)));
+    el.append(h("span", { class: "label" }, "Interviews"), h("ul", { class: "interviews" }, d.interviews.map((iv) => interviewEl(iv, j))));
   }
   if (d.refs && d.refs.length) {
     el.append(h("span", { class: "label" }, "Email"),
@@ -632,7 +633,7 @@ function detailsEl(j) {
 
 // interviewEl is one interview in a job's detail. Everything in it is the
 // agent's record, shown as text.
-function interviewEl(iv) {
+function interviewEl(iv, j) {
   const status = iv.status === "completed" ? `Done, ${OUTCOMES[iv.outcome] || iv.outcome}` : INTERVIEW_STATUS[iv.status] || iv.status;
   const people = (iv.interviewers || []).map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(", ");
   return h("li", null,
@@ -641,12 +642,37 @@ function interviewEl(iv) {
     people ? h("div", { class: "hint" }, `With ${people}`) : null,
     iv.joining ? h("div", { class: "joining" }, iv.joining) : null,
     iv.next_step_at && iv.outcome === "pending" ? h("div", { class: "hint" }, `Expecting to hear by ${fmtDate(iv.next_step_at)}`) : null,
+    iv.not_prepped ? notPreppedEl(j) : null,
     iv.prep_notes ? h("p", { class: "mynote" }, h("b", null, "Prep: "), iv.prep_notes) : null,
+    iv.stories && iv.stories.length ? h("div", { class: "hint" }, "Stories: ",
+      iv.stories.map((s, i) => [i ? "; " : "", `${s.title} (${LANDED[s.landed] || s.landed})`, s.note ? `: ${s.note}` : ""])) : null,
     iv.debrief_notes ? h("p", { class: "mynote" }, h("b", null, "Debrief: "), iv.debrief_notes) : null);
 }
 
-function nextInterviewEl(iv) {
-  return h("p", { class: "next-interview" }, h("b", null, "Next interview: "), `${STAGES[iv.stage] || iv.stage} · ${fmtWhen(iv.scheduled_at)}`);
+function nextInterviewEl(iv, j) {
+  return h("div", { class: "next-interview" },
+    h("p", null, h("b", null, "Next interview: "), `${STAGES[iv.stage] || iv.stage} · ${fmtWhen(iv.scheduled_at)}`),
+    iv.not_prepped ? notPreppedEl(j) : null);
+}
+
+// notPreppedEl marks an interview in the next few days with no prep notes,
+// with what to tell the agent in a new session and a button to copy it.
+// The company can come from a listing, so it is only ever text.
+function notPreppedEl(j) {
+  const say = `help me prepare for my interview with ${j.company}`;
+  return h("div", { class: "prep" }, pill("st-warn", "Not prepped yet"), " Start a new session with your agent and say: ",
+    h("span", { class: "say" }, say), " ",
+    h("button", { class: "btn", type: "button", onclick: (e) => { e.stopPropagation(); copyText(say); } }, "Copy"));
+}
+
+// copyText puts text on the clipboard and says so.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Copied. Paste it into a new session with your agent.");
+  } catch {
+    toast("Couldn't copy; select the text and copy it yourself.");
+  }
 }
 
 function eventText(e) {
@@ -748,7 +774,7 @@ function viewApplied() {
   const sections = [["interviewing", "Interviewing"], ["offer", "Offers"], ["applied", "Waiting to hear back"]].map(([s, label]) => {
     const js = jobs.filter((j) => j.status === s);
     return js.length ? [h("p", { class: "section-label" }, `${label} · ${js.length}`),
-      js.map((j) => jobRow(j, { extra: j.next_interview ? nextInterviewEl(j.next_interview) : null }))] : [];
+      js.map((j) => jobRow(j, { extra: j.next_interview ? nextInterviewEl(j.next_interview, j) : null }))] : [];
   }).flat(2);
   return sections.length ? h("div", { class: "list" }, sections)
     : empty("No applications yet", "Mark a role applied from To review and it moves here.");
@@ -1066,7 +1092,38 @@ function viewProfile() {
         p.filters.rationale ? h("p", { class: "reason" }, p.filters.rationale) : null,
         h("pre", { class: "code" }, JSON.stringify(p.filters.filters, null, 2))]
       : h("p", { class: "hint" }, "No filters yet. Your agent drafts them with you during setup."));
-  return [intro, profile, memories, filters];
+  return [intro, profile, memories, storiesPanel(p.stories || []), filters];
+}
+
+// storiesPanel is the story bank, read-only: the agent writes stories from
+// the user's words. A use's company and job title can come from a listing,
+// and like everything here they are only ever text.
+function storiesPanel(stories) {
+  const archived = stories.filter((s) => s.archived);
+  const shown = state.showArchivedStories ? stories : stories.filter((s) => !s.archived);
+  const toggle = archived.length ? h("div", null, h("button", { class: "btn", type: "button",
+    onclick: () => { state.showArchivedStories = !state.showArchivedStories; render(); } },
+  state.showArchivedStories ? "Hide archived" : `Show archived (${archived.length})`)) : null;
+  return h("section", { class: "panel stories" }, h("h2", null, `Stories · ${stories.length - archived.length}`),
+    h("p", { class: "hint" }, "Career stories your agent wrote with you, so every session tells them the same way. To add or change one, tell your agent, for example: \"help me prepare for my interview\"."),
+    shown.length ? h("ul", { class: "memories" }, shown.map(storyEl)) : h("p", { class: "hint" }, "None yet."),
+    toggle);
+}
+
+function storyEl(s) {
+  return h("li", { class: s.archived ? "archived" : null },
+    h("details", { open: state.openStories.has(s.id), ontoggle: (e) => { if (e.target.open) state.openStories.add(s.id); else state.openStories.delete(s.id); } },
+      h("summary", null, h("b", null, s.title), s.tags.length ? h("span", { class: "meta" }, s.tags.map((t) => h("span", { class: "tag" }, t))) : null,
+        h("p", { class: "reason" }, s.summary),
+        s.archived ? h("p", { class: "hint" }, `Archived ${fmtDate(s.archived)}: ${s.archive_reason}`) : null),
+      h("div", { class: "doc" }, h("p", null, s.body)),
+      h("span", { class: "label" }, "Claims"),
+      h("ul", null, s.claims.map((c) => h("li", null, c))),
+      s.uses.length ? [h("span", { class: "label" }, "Used in"),
+        h("ul", null, s.uses.map((u) => h("li", null, `${fmtDate(u.at)} · ${STAGES[u.stage] || u.stage}`,
+          u.company ? ` · ${u.company}` : "", u.job_title ? ` (${u.job_title})` : "", ` · ${LANDED[u.landed] || u.landed}`,
+          u.note ? `: ${u.note}` : "")))] : null,
+      h("span", { class: "meta" }, `Last changed by ${who(s.by)} on ${fmtDate(s.at)}`)));
 }
 
 /* ---------- sources ---------- */

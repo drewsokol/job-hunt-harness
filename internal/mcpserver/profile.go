@@ -102,7 +102,13 @@ func (t *tools) addProfileTools(s *mcp.Server) {
 			Profile  *profileOut            `json:"profile"`
 			Resume   *resumeOut             `json:"resume"`
 			Memories map[string][]memoryOut `json:"memories"`
+			Practice int                    `json:"practice_memories,omitempty"`
+			Note     string                 `json:"practice_note,omitempty"`
 			Filters  *filtersOut            `json:"filters"`
+		}
+		if sc.PracticeMemories > 0 {
+			out.Practice = sc.PracticeMemories
+			out.Note = "practice memories are about interview delivery, not fit, so they're left out here; read them with recall (kind practice) when preparing for an interview"
 		}
 		if p := sc.Profile; p != nil {
 			out.Profile = &profileOut{p.Version, p.Markdown, string(p.CreatedBy), timeOrEmpty(p.CreatedAt)}
@@ -198,7 +204,7 @@ func (t *tools) addProfileTools(s *mcp.Server) {
 
 	type rememberIn struct {
 		Content       string `json:"content" jsonschema:"one short statement"`
-		Kind          string `json:"kind" jsonschema:"fact, preference, constraint, strength, gap, claim_limit or feedback"`
+		Kind          string `json:"kind" jsonschema:"fact, preference, constraint, strength, gap, claim_limit, feedback or practice"`
 		Basis         string `json:"basis" jsonschema:"user_said or inferred"`
 		Evidence      string `json:"evidence,omitempty" jsonschema:"where it came from, such as 'answered during initialize'"`
 		EvidenceJobID int64  `json:"evidence_job_id,omitempty" jsonschema:"the job number, when drawn from a listing"`
@@ -226,8 +232,21 @@ func (t *tools) addProfileTools(s *mcp.Server) {
 		Query           string `json:"query,omitempty" jsonschema:"words that must all appear"`
 		Kind            string `json:"kind,omitempty"`
 		IncludeArchived bool   `json:"include_archived,omitempty"`
+		Stories         bool   `json:"stories,omitempty" jsonschema:"return stories instead of memories"`
+		StoryID         int64  `json:"story_id,omitempty" jsonschema:"one story whole, with every use"`
+		Tag             string `json:"tag,omitempty" jsonschema:"stories with this tag"`
+		Cursor          string `json:"cursor,omitempty" jsonschema:"stories: next, from the previous page"`
 	}
 	add(t, s, "recall", reads, func(ctx context.Context, _ call, in recallIn) (any, error) {
+		if in.Stories || in.StoryID != 0 {
+			if in.Kind != "" {
+				return nil, &core.InputError{Problems: []string{"kind: memories only; leave it out with stories or story_id"}}
+			}
+			return t.recallStories(ctx, in.StoryID, core.StoryFilter{Query: in.Query, Tag: in.Tag, IncludeArchived: in.IncludeArchived, Cursor: in.Cursor})
+		}
+		if in.Tag != "" || in.Cursor != "" {
+			return nil, &core.InputError{Problems: []string{"tag: stories only; set stories to search them"}}
+		}
 		ms, err := t.Store.Memories(ctx, store.MemoryQuery{Text: in.Query, Kind: in.Kind, IncludeArchived: in.IncludeArchived})
 		if err != nil {
 			return nil, err

@@ -418,6 +418,9 @@ type WhatsNewReport struct {
 	// Shortlist is its size and the strong or good jobs screened since
 	// the agent last set it, which it may want to rank.
 	Shortlist store.ShortlistCounts
+	// ToPrep are scheduled interviews in the next PrepSoon with no prep
+	// notes, soonest first.
+	ToPrep []store.Interview
 }
 
 // WhatsNew reports what changed since then, or since the last call when
@@ -464,6 +467,9 @@ func WhatsNew(ctx context.Context, s *store.Store, by store.Actor, since string)
 	}
 	r.PausedSearches = PausedSearches(ss)
 	if r.Shortlist, err = s.ShortlistCounts(ctx); err != nil {
+		return r, err
+	}
+	if r.ToPrep, err = InterviewsToPrep(ctx, s, r.Now); err != nil {
 		return r, err
 	}
 	return r, s.SetSetting(ctx, by, whatsNewSetting, utc.Format(r.Now))

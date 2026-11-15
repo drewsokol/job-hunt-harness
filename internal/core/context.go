@@ -10,11 +10,14 @@ import (
 
 // ScreeningContext is everything an agent needs to judge fit: the profile
 // (the rubric), the resume, the active memories and the active filters.
+// Practice memories are about interview delivery, not fit, so they are
+// only counted.
 type ScreeningContext struct {
-	Profile  *store.ProfileVersion
-	Resume   *store.ResumeVersion
-	Memories []store.Memory // active, grouped by kind
-	Filters  *store.FilterVersion
+	Profile          *store.ProfileVersion
+	Resume           *store.ResumeVersion
+	Memories         []store.Memory // active, grouped by kind, without practice
+	PracticeMemories int            // active practice memories, left out of Memories
+	Filters          *store.FilterVersion
 }
 
 // GetContext reads the screening context.
@@ -34,7 +37,13 @@ func GetContext(ctx context.Context, s *store.Store) (ScreeningContext, error) {
 	if err != nil {
 		return c, err
 	}
-	c.Memories = ms
+	for _, m := range ms {
+		if m.Kind == "practice" {
+			c.PracticeMemories++
+		} else {
+			c.Memories = append(c.Memories, m)
+		}
+	}
 	if f, ok, err := s.ActiveFilters(ctx); err != nil {
 		return c, err
 	} else if ok {
