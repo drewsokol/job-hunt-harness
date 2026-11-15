@@ -32,6 +32,8 @@ Other MCP clients take the same command in their config:
 
 Then ask your agent to "initialize job hunt harness". It interviews you about what you want next, reads your resume if you point it at one, writes your profile and filters with your OK, suggests companies, fetches jobs and screens a first batch with you. After that, "what's new?" is the daily check-in, "screen new jobs" rates whatever the last refresh found, and "interview me again" updates your profile when your search changes. Before an interview, start a new session and say "help me prepare for my interview with …": the agent helps you prepare and debrief, and keeps a bank of your career stories so every session tells them the same way.
 
+To see everything you can ask, open the dashboard and press **?** in its header: the "Ask your agent" page lists each workflow with the phrase to say, a button that copies it, the slash command where there is one, and which ones are best started in a new session.
+
 ## The dashboard
 
 Ask your agent to "open my dashboard", or run `jhh dashboard`. It opens in your browser at `http://127.0.0.1:7878` (set `JHH_UI_PORT` to use another port) and shows what your agent finds and does, live:

@@ -52,6 +52,11 @@ h1 { font: 700 clamp(26px, 4vw, 34px)/1.1 var(--font-display); margin: 0; letter
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .live { font-size: 12px; color: var(--ok-fg); background: var(--ok-bg); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
 .live.off { color: var(--idle-fg); background: var(--idle-bg); }
+.top-actions { display: flex; align-items: center; gap: 10px; }
+.help-button { appearance: none; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font: 600 16px var(--font-display); cursor: pointer; flex: none; }
+.help-button:hover { border-color: var(--muted); }
+.help-button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.help-button:focus-visible, .help-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .stat { background: var(--surface); padding: 12px 14px; display: grid; gap: 2px; }
@@ -177,7 +182,24 @@ select.compact { padding: 4px 6px; font-size: 13px; }
 
 .empty { background: var(--surface); border: 1px dashed var(--line); border-radius: 10px; padding: 28px 20px; text-align: center; color: var(--muted); }
 .empty strong { display: block; color: var(--fg); font: 600 16px var(--font-display); margin-bottom: 4px; }
-.say { display: inline-block; margin-top: 8px; font-family: var(--font-mono); color: var(--fg); background: var(--sunk); border-radius: 6px; padding: 2px 8px; }
+.say { display: inline-block; margin-top: 8px; font-family: var(--font-mono); color: var(--fg); background: var(--sunk); border-radius: 6px; padding: 2px 8px; overflow-wrap: anywhere; }
+.say-copy { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; }
+.say-copy .say { margin-top: 0; }
+button.btn.copy { padding: 2px 10px; font-size: 12px; }
+.say-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; }
+.empty .say-line { justify-content: center; }
+.empty .see-help { margin: 12px 0 0; }
+.empty a, .help a { color: var(--accent); }
+.help { display: grid; gap: 12px; }
+.help-title { font: 600 22px var(--font-display); margin: 0; }
+.help .sub { margin-top: 4px; }
+.help-list { display: grid; gap: 10px; }
+.help .panel { margin-bottom: 0; gap: 4px; }
+.help .panel h3 { font: 600 15px var(--font-display); margin: 0; text-transform: none; }
+.help .reason code { font: 13px var(--font-mono); background: var(--sunk); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
+.help .say-line { margin-top: 4px; }
+.help .say-line > .hint { min-width: 4.5em; }
+.new-session { margin: 6px 0 0; font-size: 13px; color: var(--muted); max-width: 72ch; }
 .banner { border-radius: 10px; padding: 10px 14px; background: var(--warn-bg); color: var(--warn-fg); font-size: 13px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
 .banner.info { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--fg); }
 .banner.bad { background: var(--bad-bg); color: var(--bad-fg); }

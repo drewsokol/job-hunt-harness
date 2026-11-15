@@ -43,6 +43,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	}
 	api("GET /api/events", s.events)
 	api("GET /api/state", s.state)
+	api("GET /api/help", s.help)
 	api("GET /api/jobs", s.listJobs)
 	api("POST /api/jobs", s.addJob)
 	api("GET /api/jobs/{id}", s.getJob)
