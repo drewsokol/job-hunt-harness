@@ -27,16 +27,17 @@ Example (made up): a user tracks applications on the dashboard every day. Their 
 
 ### Where the entries come from
 
-- **Playbooks** come from `playbooks.All`, so a new playbook appears on the page without anyone remembering to add it. Each playbook gains a `Phrase` field: what a user would say to start it. Its title and description already exist; the description is rewritten for users if it reads as instructions to the agent, or a separate `Help` field is added. The implementer picks one and keeps both readable.
-- **Workflows that aren't playbooks** (the daily check-in with `whats_new`, refreshing jobs, logging an application, logging an interview and its debrief, tracking outreach, opening the dashboard) are a short fixed list in `internal/web`, with the same fields.
+- **Playbooks** come from `playbooks.All`, so a new playbook appears on the page without anyone remembering to add it. Each playbook gains two fields: `Phrase`, the one thing a user would say to start it, and `Help`, the page's text about it, written for the user. `Description` stays as it is: it's the agent-facing text of the MCP prompt. A playbook has one phrase; anything else the user can say for it (such as asking for a debrief) goes in its help text.
+- **Workflows that aren't playbooks** (the daily check-in with `whats_new`, refreshing jobs, logging an application, tracking outreach, logging an interview, opening the dashboard) are a short fixed list in `internal/web`, with the same fields. "Log an interview" covers the debrief too (`save_interview` with debrief notes, the outcome and the next step), in its help text.
+- **A fixed entry can name the playbook that replaces it.** "Log an interview" names interview_prep: while that playbook is in `playbooks.All`, the fixed entry is hidden, and the playbook's entry, whose help text covers preparing and the debrief, takes its place. So the page reads right whichever of this spec and spec 0003 is built first.
 - A new endpoint, `GET /api/help`, returns the entries in order, with a "best in a new session" flag and the reason. It's behind the same sign-in as the rest of the API.
-- The order: set up; interview me; what's new; screen new jobs; refresh; log an application; outreach; log an interview; prepare for an interview (when spec 0003's playbook exists); debrief; open the dashboard. Playbooks without a place in this order go at the end, so a new one still shows.
+- The order: set up (initialize); interview me (interview_me); what's new; screen new jobs (screen_new_jobs); refresh; log an application; outreach; log an interview, or interview_prep in its place; open the dashboard. Playbooks without a place in this order go at the end, so a new one still shows.
 
 ### Pointing to it
 
 - **The first-run screen** ("Set up jhh with your agent") gains a link: "See everything you can ask".
 - **Empty states that show a phrase** get the same copy button, built by the same helper as the page.
-- **`open_dashboard`'s result** includes the help page's address (`…#help`), and its description tells the agent to mention it the first time the user opens the dashboard, or when they ask what jhh can do.
+- **`open_dashboard`'s result** gains a `help_url` field: the plain address `http://127.0.0.1:<port>/#help`, built from the port in use. `url` stays the one-time sign-in link it is today. The result's note says `help_url` works once the browser has signed in through `url`. Its description gains one sentence telling the agent to mention the page the first time the user opens the dashboard, or when they ask what jhh can do. The tool list stays within `TestOutputSizes`' cap.
 - **README**: the "Connect your agent" section mentions the page.
 
 ### Rules
@@ -56,16 +57,22 @@ Example (made up): a user tracks applications on the dashboard every day. Their 
 
 ## Acceptance checks
 
-- The "?" button opens the page, `#help` opens it directly, and Escape or the back button returns to the last tab.
-- Every playbook in `playbooks.All` appears on the page with its phrase and slash command; a test fails if a playbook has no phrase.
-- A playbook added to `playbooks.All` (in a test) appears on the page without other changes.
-- The non-playbook workflows appear in the stated order, and those best in a new session say so with the reason.
+Go tests (no JavaScript test framework is added):
+
+- `/api/help` needs the dashboard sign-in, like every other API.
+- Every playbook in `playbooks.All` is in `/api/help` with its phrase, help text and slash command; a test fails if a playbook has no phrase or help text.
+- A playbook added to `playbooks.All` in a test appears without other changes.
+- The entries come in the stated order, and those best in a new session say so with the reason.
+- Without interview_prep, "Log an interview" is listed; with a playbook of that name added in a test, it's hidden and the playbook is listed in its place.
+- `open_dashboard` returns `help_url` with the port in use, and `url` is unchanged.
+- No `innerHTML` or the like (the existing test still passes), and `TestOutputSizes` passes.
+
+Checked by driving headless Edge or Chrome over the DevTools protocol on a scratch database with made-up data, as CLAUDE.md describes, and reported in the PR:
+
+- The "?" button opens the page, `#help` opens it directly, and Escape or the back button returns to the last tab; reopening the dashboard doesn't land on the help page.
 - Each copy button puts its exact text on the clipboard, and on failure selects the text and says so.
 - The first-run screen links to the page, and empty states with a phrase have a copy button.
-- `open_dashboard` returns the help page's address.
-- `/api/help` needs the dashboard sign-in, like every other API.
-- No `innerHTML` or the like (the existing test still passes).
-- By eye, with headless Edge on a scratch database: the page at desktop and phone widths, light and dark.
+- The page at desktop and phone widths, light and dark.
 
 ## Open questions
 
