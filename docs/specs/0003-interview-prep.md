@@ -99,7 +99,7 @@ Prep runs best in a session of its own, which the user has to start, so jhh poin
 
 ### Tools
 
-Decision 0010 holds the list under 35. There are 33 today, so this adds one tool, for 34, and reads stories through `recall`: stories are what jhh knows about the candidate, which is what `recall` is for. `TestOutputSizes` keeps its budget.
+Decision 0010 holds the list under 35. There are 33 today, so this adds one tool, for 34, and reads stories through `recall`: stories are what jhh knows about the candidate, which is what `recall` is for. The tool list's cap in `TestOutputSizes` goes from 42,000 to 45,000 bytes for this spec's tools and parameters. Keep the new descriptions and schemas short; trim existing descriptions only if 45,000 still isn't enough, starting with explanations the server instructions already give. The PR reports the measured size.
 
 - **`save_story`** (new): add or change a story. Without story_id it adds one: title, summary, body and at least one claim are needed. With story_id it changes only the fields given; claims and tags replace the whole list. With archive set to a reason, it archives the story. Returns story_id, and the related claim_limit and gap memories (id, kind, content).
 - **`recall`** (changed): with stories set, it returns stories instead of memories: the active ones, each with story_id, title, summary, claims, tags and its uses' results. query and tag filter them; include_archived adds the archived ones. With story_id: that story whole, with its body and every use: the interview's id, stage and date, the job's company and title (or, for an interview with no job, the outreach thread's company) inside `untrusted`, since they can come from a listing, and how it landed. Up to 50 stories a page, with a cursor.
@@ -159,7 +159,7 @@ Limits: title up to 120 characters, summary 600, body 4,000, up to 10 claims of 
 - `remember` with kind practice works; `get_context` leaves the memory out and returns practice_memories 1; `recall` with kind practice finds it.
 - The Profile tab lists stories with their uses, read-only, and shows practice memories.
 - Migration 0011 runs on a database with interviews and memories, and changes none of them.
-- Tool count is 34 and `TestOutputSizes` passes.
+- Tool count is 34, and `TestOutputSizes` passes with the cap at 45,000 bytes.
 - By hand, on a scratch data dir with made-up data: in a new session, `interview_prep` for a logged interview reads the context and stories, flags a drafted claim that goes past a claim limit, saves prep notes in the outline, and after a reported debrief records the outcome, story results and a practice memory. The implementer runs this only if it can drive a separate agent session; otherwise the PR leaves it for the owner with a short script. Made-up stories and prep text stay outside the repo.
 
 ## Open questions
