@@ -53,4 +53,4 @@ Ask whether the user has already applied anywhere. Record each one with `add_job
 
 ## 6. Wrap up
 
-Summarize what is set up: profile, filters, companies, how many jobs are waiting for review. Tell the user they can say "what's new" any day for a check-in, "screen new jobs" after a refresh, "interview me again" when their search changes, and "open my dashboard" to see everything (call `open_dashboard`). Offer to open it now.
+Summarize what is set up: profile, filters, companies, how many jobs are waiting for review. Tell the user they can say "what's new" any day for a check-in, "screen new jobs" after a refresh, "interview me again" when their search changes, and "open my dashboard" to see everything (call `open_dashboard`). Before an interview, they can start a new session and say "help me prepare for my interview with" and the company. Offer to open the dashboard now.

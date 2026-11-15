@@ -63,6 +63,12 @@ func (s *Store) InterviewEvents(ctx context.Context, interviewID int64) ([]Event
 	return s.events(ctx, "interview_id = ?", interviewID)
 }
 
+// StoryEvents returns a story's history, oldest first: when it was added,
+// changed and archived, and by whom.
+func (s *Store) StoryEvents(ctx context.Context, storyID int64) ([]Event, error) {
+	return s.events(ctx, "kind IN ('story_added', 'story_changed', 'story_archived') AND json_extract(data, '$.story') = ?", storyID)
+}
+
 func (s *Store) events(ctx context.Context, where string, args ...any) ([]Event, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, at, actor, kind, job_id, outreach_id, contact_id, company_id, interview_id, data

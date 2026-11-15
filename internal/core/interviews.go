@@ -42,13 +42,15 @@ type InterviewInput struct {
 	DebriefNotes      string
 	Recorded          *bool
 	RecordingTool     string
+	Stories           *[]StoryLinkInput // nil leaves them alone; replaces the whole list
 }
 
 // IsZero reports whether in changes nothing.
 func (in InterviewInput) IsZero() bool {
 	return in.JobID == 0 && in.OutreachID == 0 && in.Stage == "" && in.ScheduledAt == "" && in.DurationMinutes == 0 &&
 		in.Interviewers == nil && in.Medium == "" && in.Joining == "" && in.Status == "" && in.Outcome == "" &&
-		in.NextStepAt == "" && !in.ClearNextStep && in.PrepNotes == "" && in.DebriefNotes == "" && in.Recorded == nil && in.RecordingTool == ""
+		in.NextStepAt == "" && !in.ClearNextStep && in.PrepNotes == "" && in.DebriefNotes == "" && in.Recorded == nil && in.RecordingTool == "" &&
+		in.Stories == nil
 }
 
 // SaveInterview logs an interview (id 0) or changes one.
@@ -80,6 +82,11 @@ func SaveInterview(ctx context.Context, s *store.Store, by store.Actor, id int64
 	}
 	if in.DurationMinutes < 0 || in.DurationMinutes > maxInterviewMinutes {
 		bad("duration_minutes: 1 to %d", maxInterviewMinutes)
+	}
+	var stories *[]store.InterviewStory
+	if in.Stories != nil {
+		links, ps := checkStoryLinks(*in.Stories)
+		stories, problems = &links, append(problems, ps...)
 	}
 	var people []store.Interviewer
 	if in.Interviewers != nil {
@@ -140,11 +147,14 @@ func SaveInterview(ctx context.Context, s *store.Store, by store.Actor, id int64
 		if in.Recorded != nil {
 			iv.Recorded = *in.Recorded
 		}
+		if stories != nil {
+			iv.Stories = *stories
+		}
 		saved, err := s.AddInterview(ctx, by, iv)
 		return saved, refNotFound(err, in.JobID, in.OutreachID)
 	}
 
-	c := store.InterviewChange{Recorded: in.Recorded}
+	c := store.InterviewChange{Recorded: in.Recorded, Stories: stories}
 	if in.Interviewers != nil {
 		c.Interviewers = &people
 	}
@@ -184,10 +194,14 @@ func SaveInterview(ctx context.Context, s *store.Store, by store.Actor, id int64
 	return saved, refNotFound(err, in.JobID, in.OutreachID)
 }
 
-// refNotFound turns a missing job or thread into an input error.
+// refNotFound turns a missing job, thread or story into an input error.
 func refNotFound(err error, jobID, outreachID int64) error {
 	if err == nil {
 		return nil
+	}
+	if msg := err.Error(); strings.HasPrefix(msg, "story ") {
+		id, _, _ := strings.Cut(strings.TrimPrefix(msg, "story "), ":")
+		return inputIfNotFound(err, fmt.Sprintf("stories: no story %s (recall with stories set lists them)", id))
 	}
 	if strings.HasPrefix(err.Error(), "outreach ") {
 		return inputIfNotFound(err, fmt.Sprintf("outreach_id: no outreach %d", outreachID))
@@ -198,4 +212,26 @@ func refNotFound(err error, jobID, outreachID int64) error {
 // JobInterviews returns a job's interviews, newest first.
 func JobInterviews(ctx context.Context, s *store.Store, jobID int64) ([]store.Interview, error) {
 	return s.ListInterviews(ctx, store.InterviewQuery{JobID: jobID})
+}
+
+// ThreadInterviews returns an outreach thread's interviews, newest first.
+func ThreadInterviews(ctx context.Context, s *store.Store, outreachID int64) ([]store.Interview, error) {
+	return s.ListInterviews(ctx, store.InterviewQuery{OutreachID: outreachID})
+}
+
+// PrepSoon is how far ahead an interview with no prep notes is pointed
+// out: whats_new's interviews_to_prep and the dashboard's "Not prepped
+// yet".
+const PrepSoon = 3 * 24 * time.Hour
+
+// InterviewsToPrep returns the scheduled interviews in the next PrepSoon
+// with no prep notes, soonest first.
+func InterviewsToPrep(ctx context.Context, s *store.Store, now time.Time) ([]store.Interview, error) {
+	return s.ListInterviews(ctx, store.InterviewQuery{Status: "scheduled", Unprepped: true, From: now, To: now.Add(PrepSoon), SoonestFirst: true})
+}
+
+// NeedsPrep reports whether an interview is scheduled within PrepSoon of
+// now with no prep notes.
+func NeedsPrep(iv store.Interview, now time.Time) bool {
+	return iv.Status == "scheduled" && iv.PrepNotes == "" && !iv.ScheduledAt.Before(now) && iv.ScheduledAt.Before(now.Add(PrepSoon))
 }

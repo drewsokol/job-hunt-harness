@@ -1,5 +1,6 @@
 // Package playbooks holds the instructions jhh gives agents for its main
-// workflows: setup, the interview that builds the profile, and screening. Each is a markdown file
+// workflows: setup, the interview that builds the profile, screening, and
+// preparing for a job interview. Each is a markdown file
 // embedded in the binary, served as an MCP prompt and through the
 // get_playbook tool, for clients that don't support prompts.
 package playbooks
@@ -25,6 +26,14 @@ type Playbook struct {
 // Arg is a playbook argument.
 type Arg struct {
 	Name, Description, Default string
+	// Fill, when set, turns the value (or the default) into the text that
+	// replaces {{name}}, so a playbook can say something different when
+	// an argument is left out.
+	Fill func(v string) string
+	// Number says the value is a whole number from 1 to Max (no limit when
+	// Max is 0).
+	Number bool
+	Max    int
 }
 
 // All are the playbooks, in the order a user meets them.
@@ -43,7 +52,19 @@ var All = []Playbook{
 		Name:        "screen_new_jobs",
 		Title:       "Screen new jobs",
 		Description: "Rate the jobs that passed the filters against the profile, and save the ratings.",
-		Args:        []Arg{{Name: "limit", Description: "how many jobs to screen", Default: "30"}},
+		Args:        []Arg{{Name: "limit", Description: "how many jobs to screen", Default: "30", Number: true, Max: 200}},
+	},
+	{
+		Name:        "interview_prep",
+		Title:       "Prepare for an interview",
+		Description: "Prepare the user for one interview (research, pitch, stories, questions, practice), and record the debrief afterwards. Best run in a session of its own.",
+		Args: []Arg{{Name: "interview_id", Description: "the interview to prepare for, from get_tracker or get_job; leave out to ask the user",
+			Number: true, Fill: func(v string) string {
+				if v == "" {
+					return "No interview was named. Ask the user which one, offering the upcoming ones from `get_tracker` (view upcoming_interviews), soonest first."
+				}
+				return "The interview is interview_id " + v + "."
+			}}},
 	},
 }
 
@@ -69,6 +90,9 @@ func (p Playbook) Text(args map[string]string) string {
 		v := strings.TrimSpace(args[a.Name])
 		if v == "" {
 			v = a.Default
+		}
+		if a.Fill != nil {
+			v = a.Fill(v)
 		}
 		text = strings.ReplaceAll(text, "{{"+a.Name+"}}", v)
 	}

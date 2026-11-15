@@ -12,7 +12,7 @@ import (
 // Memory is one short fact the agent learned about the candidate.
 type Memory struct {
 	ID            int64
-	Kind          string // fact | preference | constraint | strength | gap | claim_limit | feedback
+	Kind          string // fact | preference | constraint | strength | gap | claim_limit | feedback | practice
 	Content       string
 	Basis         string // user_said | inferred
 	Evidence      string
@@ -27,7 +27,7 @@ type Memory struct {
 
 // Memory kinds and bases, as the schema allows them.
 var (
-	MemoryKinds = []string{"fact", "preference", "constraint", "strength", "gap", "claim_limit", "feedback"}
+	MemoryKinds = []string{"fact", "preference", "constraint", "strength", "gap", "claim_limit", "feedback", "practice"}
 	MemoryBases = []string{"user_said", "inferred"}
 )
 
