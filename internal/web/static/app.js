@@ -54,6 +54,7 @@ const state = {
   form: null, formError: "", outreachFor: null, keyFor: null, keyError: "", outDir: "all", declining: null,
   visited: null, askApplied: null,
   pending: false, undo: null, live: false, showArchivedStories: false, openStories: new Set(),
+  help: false, helpEntries: null,
 };
 
 /* ---------- helpers ---------- */
@@ -169,6 +170,7 @@ async function load() {
     if (state.tab === "outreach") work.push(api("GET", "/api/outreach").then((d) => { state.outreach = d; }));
     if (state.tab === "profile") work.push(api("GET", "/api/profile").then((d) => { state.profile = d; }));
     if (state.tab === "sources") work.push(api("GET", "/api/sources").then((d) => { state.sources = d.sources; }));
+    if (state.help && !state.helpEntries) work.push(api("GET", "/api/help").then((d) => { state.helpEntries = d.entries; }));
     for (const id of state.open) work.push(loadDetail(id));
     await Promise.all(work);
     state.loaded = true;
@@ -347,6 +349,7 @@ function render() {
   renderLive();
   const view = $("#view");
   if (state.signedOut) { view.replaceChildren(signedOutView()); return; }
+  if (state.help) { view.replaceChildren(viewHelp()); return; }
   if (!state.loaded) {
     view.replaceChildren(state.error ? empty("jhh isn't answering", state.error) : empty("Loading", "Your jobs, applications and outreach will appear here."));
     return;
@@ -425,11 +428,13 @@ function renderTabs() {
     archive: c.archive + c.screened_out + c.filtered_out, sources: "", profile: "",
   };
   $("#tabs").replaceChildren(...TABS.map(([k, label]) =>
-    h("button", { class: "tab", role: "tab", type: "button", "aria-selected": String(state.tab === k), onclick: () => switchTab(k) },
+    h("button", { class: "tab", role: "tab", type: "button", "aria-selected": String(!state.help && state.tab === k), onclick: () => switchTab(k) },
       label, h("span", { class: "n" }, counts ? String(counts[k]) : ""))));
+  $("#help-button").setAttribute("aria-pressed", String(state.help));
 }
 
 function switchTab(tab) {
+  state.help = false;
   state.tab = tab;
   // Open Archive on a part that has something in it.
   const c = state.info && state.info.counts;
@@ -445,15 +450,15 @@ function switchTab(tab) {
   load();
 }
 
-function empty(title, body, say) {
-  return h("div", { class: "empty" }, h("strong", null, title), body, say ? h("div", null, h("span", { class: "say" }, say)) : null);
+function empty(title, body, say, more) {
+  return h("div", { class: "empty" }, h("strong", null, title), body, say ? h("div", { class: "say-line" }, sayEl(say)) : null, more);
 }
 
 function signedOutView() {
   return h("div", { class: "empty" },
     h("strong", null, "Open the dashboard from your agent"),
     "For your privacy, the dashboard needs a fresh sign-in link. Ask your agent, or run ", h("code", null, "jhh dashboard"), " in a terminal.",
-    h("div", null, h("span", { class: "say" }, "open my dashboard")));
+    h("div", { class: "say-line" }, sayEl("open my dashboard")));
 }
 
 /* ---------- job rows ---------- */
@@ -660,18 +665,27 @@ function nextInterviewEl(iv, j) {
 // The company can come from a listing, so it is only ever text.
 function notPreppedEl(j) {
   const say = `help me prepare for my interview with ${j.company}`;
-  return h("div", { class: "prep" }, pill("st-warn", "Not prepped yet"), " Start a new session with your agent and say: ",
-    h("span", { class: "say" }, say), " ",
-    h("button", { class: "btn", type: "button", onclick: (e) => { e.stopPropagation(); copyText(say); } }, "Copy"));
+  return h("div", { class: "prep" }, pill("st-warn", "Not prepped yet"), " Start a new session with your agent and say: ", sayEl(say));
 }
 
-// copyText puts text on the clipboard and says so.
-async function copyText(text) {
+// sayEl shows something to say to the agent, or a command to type, with a
+// button that copies it. The text can hold a company's name from a
+// listing, so it is only ever text.
+function sayEl(text) {
+  const el = h("span", { class: "say" }, text);
+  return h("span", { class: "say-copy" }, el,
+    h("button", { class: "btn copy", type: "button", "aria-label": `Copy: ${text}`, onclick: (e) => { e.stopPropagation(); copyText(text, el); } }, "Copy"));
+}
+
+// copyText puts text on the clipboard and says so. If the browser won't,
+// it selects the text in el so the user can copy it by hand.
+async function copyText(text, el) {
   try {
     await navigator.clipboard.writeText(text);
-    toast("Copied. Paste it into a new session with your agent.");
+    toast("Copied. Paste it into a chat with your agent.");
   } catch {
-    toast("Couldn't copy; select the text and copy it yourself.");
+    if (el) window.getSelection().selectAllChildren(el);
+    toast("Couldn't copy, so the text is selected: press Ctrl+C (or Cmd+C) to copy it.");
   }
 }
 
@@ -760,7 +774,8 @@ function viewReview() {
 function reviewEmpty() {
   const info = state.info;
   if (!info.setup.profile || !info.setup.filters) {
-    return empty("Set up jhh with your agent", "Your agent interviews you, writes your profile and filters, and picks companies to follow. Tell it:", "initialize job hunt harness");
+    return empty("Set up jhh with your agent", "Your agent interviews you, writes your profile and filters, and picks companies to follow. Tell it:", "initialize job hunt harness",
+      h("p", { class: "see-help" }, h("a", { href: "#help", onclick: (e) => { e.preventDefault(); openHelp(); } }, "See everything you can ask")));
   }
   if (state.fit !== "all") return empty("No jobs with this rating", "Try another rating above.");
   if (info.summary.unscreened > 0) {
@@ -1241,6 +1256,82 @@ function viewSources() {
   return [intro, ...search, boardPanel];
 }
 
+/* ---------- ask your agent ---------- */
+
+// The "Ask your agent" page lists what the user can say to their agent. It
+// has its own address, #help, so the back button leaves it; it is never
+// remembered as the tab to reopen on.
+
+function openHelp() {
+  if (state.help) return;
+  state.help = true;
+  history.pushState({ jhh: "help" }, "", "#help");
+  showHelp();
+}
+
+async function showHelp() {
+  render();
+  if (!state.helpEntries) await load();
+  const title = $("#help-title");
+  if (title && state.help) title.focus();
+}
+
+// closeHelp returns to the last tab: back through history when the page
+// opened the help, or in place when the browser came straight to #help.
+function closeHelp() {
+  if (!state.help) return;
+  if (history.state && history.state.jhh === "help") { history.back(); return; }
+  history.replaceState(null, "", `#${state.tab}`);
+  hideHelp();
+}
+
+function hideHelp() {
+  state.help = false;
+  render();
+  load();
+  $("#help-button").focus();
+}
+
+window.addEventListener("popstate", () => {
+  const hash = location.hash.slice(1);
+  if (hash === "help") {
+    if (!state.help) { state.help = true; showHelp(); }
+    return;
+  }
+  if (TABS.some(([k]) => k === hash)) state.tab = hash;
+  if (state.help) hideHelp();
+  else { render(); load(); }
+});
+
+function viewHelp() {
+  const entries = state.helpEntries;
+  const list = entries ? h("div", { class: "help-list" }, entries.map(helpEntryEl))
+    : state.error ? empty("jhh isn't answering", state.error) : empty("Loading", "");
+  return h("div", { class: "help" },
+    h("div", null,
+      h("h2", { id: "help-title", class: "help-title", tabindex: "-1" }, "Ask your agent"),
+      h("p", { class: "sub" }, "jhh does its work through your agent. Say any of these in a chat with it, in your own words.")),
+    list,
+    h("section", { class: "panel" }, h("h2", null, "Sessions"),
+      h("p", { class: "reason" }, "Your main search, with the check-ins, screening and tracking, can live in one long-running session. ",
+        "Prep and the profile interview work best in a new session each time, because they fill the chat. ",
+        "jhh keeps everything, so any session picks up where another left off.")),
+    h("section", { class: "panel" }, h("h2", null, "Slash commands"),
+      h("p", { class: "reason" }, "In Claude Code, the playbooks above are slash commands named after the server, such as ",
+        h("code", null, "/mcp__jhh__interview_me"), " when jhh was added as \"jhh\". If you gave it another name, use yours in place of jhh. ",
+        "Other clients list them in their prompts menu.")),
+    h("div", null, h("button", { class: "btn", type: "button", onclick: closeHelp }, "Back to your jobs")));
+}
+
+function helpEntryEl(e) {
+  return h("article", { class: "panel help-entry" },
+    h("h3", null, e.title),
+    h("p", { class: "reason" }, e.help),
+    h("div", { class: "say-line" }, h("span", { class: "hint" }, "Say"), sayEl(e.phrase)),
+    e.slash ? h("div", { class: "say-line" }, h("span", { class: "hint" }, "Or type"), sayEl(e.slash)) : null,
+    e.new_session ? h("p", { class: "new-session" }, pill("st-applied", "Best in a new session"), " ", e.new_session_why) : null);
+}
+
 /* ---------- keyboard ---------- */
 
 document.addEventListener("keydown", (e) => {
@@ -1250,11 +1341,12 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") t.blur();
     return;
   }
+  if (e.key === "Escape" && state.help) { e.preventDefault(); closeHelp(); return; }
   if ((e.ctrlKey && e.key === "z") || (!e.ctrlKey && e.key === "u")) {
     if (state.undo) { e.preventDefault(); runUndo(); }
     return;
   }
-  if (e.ctrlKey || state.tab !== "review" || !state.loaded) return;
+  if (e.ctrlKey || state.help || state.tab !== "review" || !state.loaded) return;
   const gs = reviewGroups();
   if (!gs.length) return;
   const j = gs[Math.min(state.selected, gs.length - 1)].lead;
@@ -1278,8 +1370,10 @@ document.addEventListener("keydown", (e) => {
 
 (function start() {
   let tab = location.hash.slice(1);
-  if (!tab) { try { tab = localStorage.getItem("jhh-tab") || ""; } catch { /* storage off */ } }
+  state.help = tab === "help";
+  if (!tab || state.help) { try { tab = localStorage.getItem("jhh-tab") || ""; } catch { /* storage off */ } }
   if (TABS.some(([k]) => k === tab)) state.tab = tab;
+  $("#help-button").addEventListener("click", () => (state.help ? closeHelp() : openHelp()));
   render();
   load();
 })();
